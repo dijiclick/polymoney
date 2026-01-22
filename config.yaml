@@ -1,0 +1,90 @@
+# ============================================================================
+# POLYMARKET PROFILE FINDER - FILTER CONFIGURATION
+# ============================================================================
+
+# Global filters (applied to all profiles)
+global:
+  min_trades_30d: 10
+  min_portfolio_value: 200
+  min_position_size: 10
+  exclude_platform_wallets: true
+
+# Platform wallets to exclude
+platform_wallets:
+  - "0xc5d563a36ae78145c45a50134d48a1215220f80a"
+  - "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e"
+  - "0x0000000000000000000000000000000000000000"
+
+# Pipeline step filters
+pipeline:
+  step1_goldsky:
+    min_trades: 10
+
+  step2_balance:
+    min_portfolio_value: 200
+
+  step3_positions:
+    min_position_size: 10
+    require_positions: false
+
+  step4_performance:
+    min_win_rate: 40
+    min_total_pnl: 0
+    require_one: true
+
+# Profile-specific filters
+profiles:
+  copytrade:
+    enabled: true
+    min_score: 60
+    filters:
+      min_win_rate_30d: 60
+      min_account_age_days: 60
+      max_drawdown: 30
+      min_unique_markets: 5
+      min_portfolio_value: 500
+      trade_frequency_range: [0.5, 5]
+
+  bot:
+    enabled: true
+    min_score: 60
+    filters:
+      min_trades_30d: 100
+      min_win_rate_30d: 55
+      max_drawdown: 20
+      min_portfolio_value: 1000
+      min_trade_frequency: 10
+
+  insider:
+    enabled: true
+    min_score: 60
+    filters:
+      min_max_position_size: 5000
+      min_position_concentration: 50
+      max_account_age_days: 30
+      max_unique_markets: 3
+
+# Advanced filters
+advanced:
+  categories:
+    include: []
+    exclude: []
+
+  time_filters:
+    only_recent_activity: true
+    max_days_since_trade: 7
+
+  performance_filters:
+    min_roi_30d: null
+    max_losing_streak: null
+
+# API Configuration
+api:
+  goldsky:
+    endpoint: "https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn"
+    batch_size: 1000
+    rate_limit: 10
+
+  polymarket:
+    base_url: "https://data-api.polymarket.com"
+    rate_limit: 60
