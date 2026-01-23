@@ -84,6 +84,7 @@ class TradeProcessor:
                 self.supabase.table("traders")
                 .select(
                     "address, username, copytrade_score, bot_score, "
+                    "insider_score, insider_level, insider_red_flags, "
                     "primary_classification, portfolio_value"
                 )
                 .execute()
@@ -158,7 +159,8 @@ class TradeProcessor:
             return
 
         # Trigger immediate alerts for critical events
-        if trade_record["is_whale"] or is_watchlist:
+        is_insider = trade_record.get("is_insider_suspect", False)
+        if trade_record["is_whale"] or is_watchlist or is_insider:
             asyncio.create_task(self._check_alerts(trade_record))
 
     def _enrich_trade(self, trade: RTDSMessage) -> dict:
@@ -167,6 +169,10 @@ class TradeProcessor:
 
         now = datetime.now(timezone.utc)
         latency_ms = int((now - trade.executed_at).total_seconds() * 1000)
+
+        # Check if trader is an insider suspect
+        insider_score = trader_data.get("insider_score", 0)
+        is_insider = insider_score >= 60
 
         return {
             "trade_id": trade.trade_id,
@@ -177,6 +183,10 @@ class TradeProcessor:
             "trader_classification": trader_data.get("primary_classification"),
             "trader_copytrade_score": trader_data.get("copytrade_score"),
             "trader_bot_score": trader_data.get("bot_score"),
+            "trader_insider_score": insider_score,
+            "trader_insider_level": trader_data.get("insider_level"),
+            "trader_red_flags": trader_data.get("insider_red_flags", []),
+            "is_insider_suspect": is_insider,
             "trader_portfolio_value": trader_data.get("portfolio_value"),
             "condition_id": trade.condition_id,
             "asset_id": trade.asset_id,
@@ -222,6 +232,18 @@ class TradeProcessor:
             config = self._watchlist_config.get(trade["trader_address"], {})
             min_size = config.get("min_trade_size", 0)
             if trade["usd_value"] < min_size:
+                return False
+            return True
+
+        # Insider activity - only match if trader is an insider suspect
+        if rule_type == "insider_activity":
+            if not trade.get("is_insider_suspect"):
+                return False
+            min_score = conditions.get("min_score", 60)
+            if trade.get("trader_insider_score", 0) < min_score:
+                return False
+            min_usd = conditions.get("min_usd_value", 0)
+            if trade["usd_value"] < min_usd:
                 return False
             return True
 
@@ -300,6 +322,12 @@ class TradeProcessor:
         # Remove raw_data before insert (too large)
         for trade in batch:
             trade.pop("raw_data", None)
+
+        # Deduplicate by trade_id (keep latest) to avoid ON CONFLICT error
+        seen_ids: dict[str, dict] = {}
+        for trade in batch:
+            seen_ids[trade["trade_id"]] = trade
+        batch = list(seen_ids.values())
 
         try:
             # Use upsert to handle duplicate trade_ids

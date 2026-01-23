@@ -50,14 +50,16 @@ class Step6Classify:
 
         for batch in chunks(traders, 100):
             for trader in batch:
-                classification = self.classifier.classify(trader)
+                classification = self.classifier.get_detailed_analysis(trader)
 
-                # Update trader with scores
+                # Update trader with scores and insider details
                 self.db.upsert_trader({
                     "address": trader["address"],
                     "copytrade_score": classification["copytrade_score"],
                     "bot_score": classification["bot_score"],
                     "insider_score": classification["insider_score"],
+                    "insider_level": classification.get("insider_level"),
+                    "insider_red_flags": classification.get("insider_red_flags", []),
                     "primary_classification": classification["primary_classification"],
                     "last_updated_at": datetime.now().isoformat()
                 })
@@ -125,13 +127,15 @@ class Step6Classify:
 
         for batch in chunks(traders, 100):
             for trader in batch:
-                classification = self.classifier.classify(trader)
+                classification = self.classifier.get_detailed_analysis(trader)
 
                 self.db.upsert_trader({
                     "address": trader["address"],
                     "copytrade_score": classification["copytrade_score"],
                     "bot_score": classification["bot_score"],
                     "insider_score": classification["insider_score"],
+                    "insider_level": classification.get("insider_level"),
+                    "insider_red_flags": classification.get("insider_red_flags", []),
                     "primary_classification": classification["primary_classification"]
                 })
 

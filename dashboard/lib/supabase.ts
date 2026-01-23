@@ -64,15 +64,24 @@ export interface Trader {
   trade_count_alltime: number
   unique_markets_30d: number
   account_age_days: number
+  position_concentration: number
+  max_position_size: number
   copytrade_score: number
   bot_score: number
-  primary_classification: 'copytrade' | 'bot' | 'none' | null
+  insider_score: number
+  insider_level?: 'very_high' | 'high' | 'moderate' | 'low' | 'minimal'
+  insider_red_flags?: string[]
+  avg_entry_probability?: number
+  pnl_concentration?: number
+  primary_classification: 'copytrade' | 'bot' | 'insider' | 'none' | null
   total_pnl: number
   pipeline_step: number
   eliminated_at_step?: number
   elimination_reason?: string
   trade_frequency: number
   night_trade_ratio: number
+  last_trade_at?: string
+  last_updated_at?: string
 }
 
 export interface WatchlistEntry {
@@ -95,9 +104,13 @@ export interface LiveTrade {
   trader_address: string
   trader_username?: string
   is_known_trader: boolean
-  trader_classification?: 'copytrade' | 'bot' | 'none'
+  trader_classification?: 'copytrade' | 'bot' | 'insider' | 'none'
   trader_copytrade_score?: number
   trader_bot_score?: number
+  trader_insider_score?: number
+  trader_insider_level?: 'very_high' | 'high' | 'moderate' | 'low' | 'minimal'
+  trader_red_flags?: string[]
+  is_insider_suspect: boolean
   trader_portfolio_value?: number
   condition_id: string
   asset_id?: string
@@ -124,7 +137,7 @@ export interface TradeAlert {
   id: number
   trade_id: string
   trader_address: string
-  alert_type: 'whale_trade' | 'watchlist_activity' | 'unusual_time' | 'concentration' | 'new_market_entry' | 'pattern_detected'
+  alert_type: 'whale_trade' | 'watchlist_activity' | 'insider_activity' | 'unusual_time' | 'concentration' | 'new_market_entry' | 'pattern_detected'
   severity: 'info' | 'warning' | 'critical'
   title: string
   description?: string
@@ -142,8 +155,30 @@ export interface TradeFilter {
   whalesOnly?: boolean
   watchlistOnly?: boolean
   knownTradersOnly?: boolean
+  insidersOnly?: boolean
+  minInsiderScore?: number
   marketSlug?: string
   traderAddress?: string
+}
+
+// Insider-specific types
+export interface InsiderSuspect {
+  address: string
+  username?: string
+  portfolio_value: number
+  total_pnl: number
+  roi_percent: number
+  win_rate_30d: number
+  account_age_days: number
+  unique_markets_30d: number
+  position_concentration: number
+  max_position_size: number
+  avg_entry_probability?: number
+  insider_score: number
+  insider_level: 'very_high' | 'high' | 'moderate' | 'low' | 'minimal'
+  insider_red_flags: string[]
+  last_trade_at?: string
+  last_updated_at?: string
 }
 
 export interface TradeStats {

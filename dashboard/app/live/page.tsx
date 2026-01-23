@@ -1,97 +1,109 @@
 'use client'
 
-import { useState } from 'react'
-import LiveTradeFeed from '@/components/LiveTradeFeed'
-import TradeFilters from '@/components/TradeFilters'
-import AlertPanel from '@/components/AlertPanel'
-import TradeStatsCard from '@/components/TradeStats'
-import { TradeFilter } from '@/lib/supabase'
+import { useState, useCallback } from 'react'
+import SuspectList from '@/components/SuspectList'
+import InsiderFeed from '@/components/InsiderFeed'
+import InsiderDetails from '@/components/InsiderDetails'
+import InsiderAlerts from '@/components/InsiderAlerts'
 
-export default function LiveMonitorPage() {
-  const [filter, setFilter] = useState<TradeFilter>({})
+export default function InsiderCommandCenter() {
+  const [selectedAddress, setSelectedAddress] = useState<string | null>(null)
+  const [activeAddresses, setActiveAddresses] = useState<Set<string>>(new Set())
+  const [showAlerts, setShowAlerts] = useState(false)
+
+  // Track which traders are actively trading
+  const handleTradeReceived = useCallback((address: string) => {
+    setActiveAddresses(prev => {
+      const next = new Set(prev)
+      next.add(address)
+      // Remove after 30 seconds
+      setTimeout(() => {
+        setActiveAddresses(current => {
+          const updated = new Set(current)
+          updated.delete(address)
+          return updated
+        })
+      }, 30000)
+      return next
+    })
+  }, [])
 
   return (
-    <div>
+    <div className="h-[calc(100vh-120px)]">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Live Trade Monitor</h1>
-        <p className="text-gray-400">
-          Real-time feed of all Polymarket trades. Detect whales and track watched traders instantly.
-        </p>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Insider Command Center</h1>
+          <p className="text-gray-400 text-sm">
+            Real-time monitoring of suspected insider trading activity
+          </p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            Connected
+          </div>
+          <button
+            onClick={() => setShowAlerts(!showAlerts)}
+            className={`px-3 py-1.5 rounded text-sm ${
+              showAlerts ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+            }`}
+          >
+            {showAlerts ? 'Show Details' : 'Show Alerts'}
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Feed (2/3 width on large screens) */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* Filters */}
-          <TradeFilters filter={filter} onChange={setFilter} />
-
-          {/* Live Feed */}
-          <LiveTradeFeed filter={filter} maxTrades={200} />
+      {/* Main 3-Column Layout */}
+      <div className="grid grid-cols-12 gap-4 h-[calc(100%-60px)]">
+        {/* Left Panel: Suspect List */}
+        <div className="col-span-3 min-h-0">
+          <SuspectList
+            onSelectTrader={setSelectedAddress}
+            selectedAddress={selectedAddress}
+            activeAddresses={activeAddresses}
+          />
         </div>
 
-        {/* Sidebar (1/3 width on large screens) */}
-        <div className="space-y-6">
-          {/* 24h Stats */}
-          <TradeStatsCard />
+        {/* Center Panel: Live Feed */}
+        <div className="col-span-6 min-h-0">
+          <InsiderFeed
+            selectedAddresses={selectedAddress ? [selectedAddress] : []}
+            onTradeReceived={handleTradeReceived}
+          />
+        </div>
 
-          {/* Alerts */}
-          <AlertPanel />
+        {/* Right Panel: Details or Alerts */}
+        <div className="col-span-3 min-h-0">
+          {showAlerts ? (
+            <InsiderAlerts />
+          ) : (
+            <InsiderDetails
+              address={selectedAddress}
+              onClose={() => setSelectedAddress(null)}
+            />
+          )}
+        </div>
+      </div>
 
-          {/* Quick Actions */}
-          <div className="bg-gray-800 rounded-lg p-4">
-            <h3 className="text-sm font-medium text-gray-400 mb-3">Quick Actions</h3>
-            <div className="space-y-2">
-              <button
-                onClick={() => setFilter({ whalesOnly: true })}
-                className="w-full px-4 py-2 bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400 rounded text-sm text-left"
-              >
-                🐋 Show Whales Only
-              </button>
-              <button
-                onClick={() => setFilter({ watchlistOnly: true })}
-                className="w-full px-4 py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded text-sm text-left"
-              >
-                👁️ Show Watchlist Only
-              </button>
-              <button
-                onClick={() => setFilter({ minUsdValue: 50000 })}
-                className="w-full px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded text-sm text-left"
-              >
-                🔥 Show $50K+ Trades
-              </button>
-              <button
-                onClick={() => setFilter({})}
-                className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-sm text-left"
-              >
-                📊 Show All Trades
-              </button>
-            </div>
-          </div>
-
-          {/* Service Status */}
-          <div className="bg-gray-800 rounded-lg p-4">
-            <h3 className="text-sm font-medium text-gray-400 mb-3">Service Info</h3>
-            <div className="text-xs text-gray-500 space-y-1">
-              <p>
-                <span className="text-gray-400">Data Source:</span>{' '}
-                Polymarket RTDS WebSocket
-              </p>
-              <p>
-                <span className="text-gray-400">Whale Threshold:</span>{' '}
-                $10,000+ USD
-              </p>
-              <p>
-                <span className="text-gray-400">Target Latency:</span>{' '}
-                {'<'}500ms
-              </p>
-            </div>
-            <div className="mt-3 pt-3 border-t border-gray-700">
-              <p className="text-xs text-gray-600">
-                Run <code className="bg-gray-700 px-1 rounded">python -m src.realtime.service</code> to start monitoring
-              </p>
-            </div>
-          </div>
+      {/* Legend / Help */}
+      <div className="mt-4 flex items-center justify-between text-xs text-gray-500 border-t border-gray-700 pt-4">
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1">
+            <span className="w-3 h-3 rounded bg-red-500/30" /> Score 85+
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-3 h-3 rounded bg-orange-500/30" /> Score 70-84
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-3 h-3 rounded bg-yellow-500/30" /> Score 60-69
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="text-green-400">Active</span> = traded in last 30s
+          </span>
+        </div>
+        <div>
+          Run <code className="bg-gray-700 px-1 rounded">py -m src.realtime.service</code> to start monitoring
         </div>
       </div>
     </div>
