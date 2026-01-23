@@ -369,7 +369,20 @@ class RTDSClient:
     @property
     def is_connected(self) -> bool:
         """Check if currently connected."""
-        return self._ws is not None and self._ws.open
+        if self._ws is None:
+            return False
+        try:
+            # websockets 10.x+ uses .state, older versions use .open
+            if hasattr(self._ws, 'state'):
+                from websockets.protocol import State
+                return self._ws.state == State.OPEN
+            elif hasattr(self._ws, 'open'):
+                return self._ws.open
+            else:
+                # Fallback: assume connected if ws object exists
+                return True
+        except Exception:
+            return False
 
     @property
     def stats(self) -> dict:
