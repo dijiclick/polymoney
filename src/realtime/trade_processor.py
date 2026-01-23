@@ -228,8 +228,8 @@ class TradeProcessor:
         is_whale = trade.usd_value >= self.WHALE_THRESHOLD_USD
         trade_record["is_whale"] = is_whale
 
-        # Check watchlist
-        is_watchlist = trade.trader_address in self._watchlist_cache
+        # Check watchlist (addresses stored lowercase in cache)
+        is_watchlist = trade.trader_address.lower() in self._watchlist_cache
         trade_record["is_watchlist"] = is_watchlist
 
         # Check insider
@@ -325,7 +325,7 @@ class TradeProcessor:
             if not trade["is_watchlist"]:
                 return False
             # Check minimum trade size from watchlist config
-            config = self._watchlist_config.get(trade["trader_address"], {})
+            config = self._watchlist_config.get(trade["trader_address"].lower(), {})
             min_size = config.get("min_trade_size", 0)
             if trade["usd_value"] < min_size:
                 return False
