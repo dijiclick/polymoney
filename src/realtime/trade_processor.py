@@ -225,23 +225,28 @@ class TradeProcessor:
         trade_record = self._enrich_trade(trade)
 
         # Check for whale
-        trade_record["is_whale"] = trade.usd_value >= self.WHALE_THRESHOLD_USD
+        is_whale = trade.usd_value >= self.WHALE_THRESHOLD_USD
+        trade_record["is_whale"] = is_whale
 
         # Check watchlist
         is_watchlist = trade.trader_address in self._watchlist_cache
         trade_record["is_watchlist"] = is_watchlist
 
-        # Add to batch queue (non-blocking)
-        try:
-            self._queue.put_nowait(trade_record)
-        except asyncio.QueueFull:
-            logger.warning("Trade queue full, dropping trade")
-            self._errors += 1
-            return
+        # Check insider
+        is_insider = trade_record.get("is_insider_suspect", False)
+
+        # Only store important trades (whale, insider, or watchlist) to save database space
+        should_store = is_whale or is_insider or is_watchlist
+
+        if should_store:
+            try:
+                self._queue.put_nowait(trade_record)
+            except asyncio.QueueFull:
+                logger.warning("Trade queue full, dropping trade")
+                self._errors += 1
 
         # Trigger immediate alerts for critical events
-        is_insider = trade_record.get("is_insider_suspect", False)
-        if trade_record["is_whale"] or is_watchlist or is_insider:
+        if is_whale or is_watchlist or is_insider:
             asyncio.create_task(self._check_alerts(trade_record))
 
     def _enrich_trade(self, trade: RTDSMessage) -> dict:
