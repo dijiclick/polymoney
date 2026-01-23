@@ -65,6 +65,7 @@ class RTDSClient:
     MAX_RECONNECT_DELAY = 60  # seconds
     HEARTBEAT_INTERVAL = 30  # seconds
     CONNECTION_TIMEOUT = 30  # seconds
+    STALE_THRESHOLD = 120  # seconds without messages = stale connection
 
     def __init__(
         self,
@@ -125,8 +126,18 @@ class RTDSClient:
                     # Subscribe to trades
                     await self._subscribe()
 
-                    # Process messages
-                    await self._receive_loop()
+                    # Start stale connection monitor
+                    stale_task = asyncio.create_task(self._monitor_stale_connection())
+
+                    try:
+                        # Process messages
+                        await self._receive_loop()
+                    finally:
+                        stale_task.cancel()
+                        try:
+                            await stale_task
+                        except asyncio.CancelledError:
+                            pass
 
             except ConnectionClosed as e:
                 logger.warning(f"RTDS connection closed: code={e.code}, reason={e.reason}")
@@ -161,6 +172,29 @@ class RTDSClient:
         self._connected_at = None
         if self.on_disconnect:
             await self._safe_callback(self.on_disconnect, reason)
+
+    async def _monitor_stale_connection(self) -> None:
+        """Monitor for stale connections and force reconnect if no data received."""
+        while self._running and self._ws:
+            await asyncio.sleep(30)  # Check every 30 seconds
+
+            if self._last_message_time:
+                seconds_since_message = (
+                    datetime.now(timezone.utc) - self._last_message_time
+                ).total_seconds()
+
+                if seconds_since_message > self.STALE_THRESHOLD:
+                    logger.warning(
+                        f"Stale connection detected: {seconds_since_message:.0f}s since last message. "
+                        "Forcing reconnection..."
+                    )
+                    # Close the WebSocket to trigger reconnection
+                    if self._ws:
+                        try:
+                            await self._ws.close(code=4000, reason="Stale connection")
+                        except Exception as e:
+                            logger.debug(f"Error closing stale connection: {e}")
+                    break
 
     async def _subscribe(self) -> None:
         """Subscribe to the activity/trades topic."""
