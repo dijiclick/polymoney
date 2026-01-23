@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from ..database.supabase import get_supabase_client
 from ..database.models import PipelineRun
@@ -15,15 +15,32 @@ from .step4_winrate import Step4WinRate
 from .step5_analysis import Step5Analysis
 from .step6_classify import Step6Classify
 
+if TYPE_CHECKING:
+    from .tracker import PipelineTracker
+
 logger = logging.getLogger(__name__)
 
 
 class PipelineRunner:
     """Orchestrate the complete trader analysis pipeline."""
 
-    def __init__(self, filters: Optional[FilterConfig] = None):
+    def __init__(
+        self,
+        filters: Optional[FilterConfig] = None,
+        tracker: Optional["PipelineTracker"] = None
+    ):
+        """
+        Initialize the pipeline runner.
+
+        Args:
+            filters: Optional filter configuration
+            tracker: Optional PipelineTracker for real-time dashboard updates.
+                     If provided, progress will be pushed to Supabase for the
+                     live dashboard to display.
+        """
         self.filters = filters or FilterConfig.load()
         self.db = get_supabase_client()
+        self.tracker = tracker
 
         # Initialize steps
         self.step1 = Step1Goldsky(filters)
@@ -58,17 +75,22 @@ class PipelineRunner:
         logger.info(f"Starting full pipeline run for {days} days")
         start_time = datetime.now()
 
-        # Create pipeline run record
-        run = PipelineRun(started_at=start_time, status="running")
-        run_record = self.db.create_pipeline_run(run.to_dict())
-        self._run_id = run_record.get("id")
+        # Create pipeline run record (use tracker if available)
+        if self.tracker:
+            self._run_id = self.tracker.start_run(days=days)
+        else:
+            run = PipelineRun(started_at=start_time, status="running")
+            run_record = self.db.create_pipeline_run(run.to_dict())
+            self._run_id = run_record.get("id")
 
         # Helper to wrap callbacks with step info
-        def make_step_callback(step_name: str):
-            if not progress_callback:
-                return None
+        def make_step_callback(step_name: str, step_num: int):
             def wrapper(processed, total, qualified, eliminated=0):
-                progress_callback(step_name, processed, total, qualified, eliminated)
+                if progress_callback:
+                    progress_callback(step_name, processed, total, qualified, eliminated)
+                # Also update tracker if available
+                if self.tracker:
+                    self.tracker.update_progress(step_num, processed, qualified, total)
             return wrapper
 
         try:
@@ -76,9 +98,13 @@ class PipelineRunner:
             logger.info("=" * 50)
             logger.info("STEP 1: Goldsky Extraction")
             logger.info("=" * 50)
-            step1_cb = make_step_callback("Goldsky Extraction")
+            if self.tracker:
+                self.tracker.start_step(1)
+            step1_cb = make_step_callback("Goldsky Extraction", 1)
             step1_result = await self.step1.run(days=days, progress_callback=step1_cb)
             self._update_run_stats(step1_result, "step1")
+            if self.tracker:
+                self.tracker.complete_step(1, step1_result.get("qualified", 0))
             if step_callback:
                 step_callback(1)
 
@@ -86,9 +112,13 @@ class PipelineRunner:
             logger.info("=" * 50)
             logger.info("STEP 2: Balance Check")
             logger.info("=" * 50)
-            step2_cb = make_step_callback("Balance Check")
+            if self.tracker:
+                self.tracker.start_step(2, step1_result.get("qualified", 0))
+            step2_cb = make_step_callback("Balance Check", 2)
             step2_result = await self.step2.run(progress_callback=step2_cb)
             self._update_run_stats(step2_result, "step2")
+            if self.tracker:
+                self.tracker.complete_step(2, step2_result.get("qualified", 0))
             if step_callback:
                 step_callback(2)
 
@@ -96,9 +126,13 @@ class PipelineRunner:
             logger.info("=" * 50)
             logger.info("STEP 3: Position Analysis")
             logger.info("=" * 50)
-            step3_cb = make_step_callback("Position Analysis")
+            if self.tracker:
+                self.tracker.start_step(3, step2_result.get("qualified", 0))
+            step3_cb = make_step_callback("Position Analysis", 3)
             step3_result = await self.step3.run(progress_callback=step3_cb)
             self._update_run_stats(step3_result, "step3")
+            if self.tracker:
+                self.tracker.complete_step(3, step3_result.get("qualified", 0))
             if step_callback:
                 step_callback(3)
 
@@ -106,9 +140,13 @@ class PipelineRunner:
             logger.info("=" * 50)
             logger.info("STEP 4: Win Rate Calculation")
             logger.info("=" * 50)
-            step4_cb = make_step_callback("Win Rate Calc")
+            if self.tracker:
+                self.tracker.start_step(4, step3_result.get("qualified", 0))
+            step4_cb = make_step_callback("Win Rate Calc", 4)
             step4_result = await self.step4.run(progress_callback=step4_cb)
             self._update_run_stats(step4_result, "step4")
+            if self.tracker:
+                self.tracker.complete_step(4, step4_result.get("qualified", 0))
             if step_callback:
                 step_callback(4)
 
@@ -116,9 +154,13 @@ class PipelineRunner:
             logger.info("=" * 50)
             logger.info("STEP 5: Deep Analysis")
             logger.info("=" * 50)
-            step5_cb = make_step_callback("Deep Analysis")
+            if self.tracker:
+                self.tracker.start_step(5, step4_result.get("qualified", 0))
+            step5_cb = make_step_callback("Deep Analysis", 5)
             step5_result = await self.step5.run(progress_callback=step5_cb)
             self._update_run_stats(step5_result, "step5")
+            if self.tracker:
+                self.tracker.complete_step(5, step5_result.get("analyzed", 0))
             if step_callback:
                 step_callback(5)
 
@@ -126,9 +168,13 @@ class PipelineRunner:
             logger.info("=" * 50)
             logger.info("STEP 6: Classification")
             logger.info("=" * 50)
-            step6_cb = make_step_callback("Classification")
+            if self.tracker:
+                self.tracker.start_step(6, step5_result.get("analyzed", 0))
+            step6_cb = make_step_callback("Classification", 6)
             step6_result = self.step6.run(progress_callback=step6_cb)
             self._update_run_stats(step6_result, "step6")
+            if self.tracker:
+                self.tracker.complete_step(6, step6_result.get("classified", 0))
             if step_callback:
                 step_callback(6)
 
@@ -136,15 +182,21 @@ class PipelineRunner:
             end_time = datetime.now()
             duration = int((end_time - start_time).total_seconds())
 
-            self.db.update_pipeline_run(self._run_id, {
-                "status": "completed",
-                "completed_at": end_time.isoformat(),
-                "duration_seconds": duration,
-                "final_qualified": step6_result.get("classified", 0),
-                "copytrade_found": step6_result.get("copytrade_candidates", 0),
-                "bot_found": step6_result.get("likely_bots", 0),
-                "insider_found": step6_result.get("insider_suspects", 0)
-            })
+            # Complete the run
+            if self.tracker:
+                self.tracker.complete_run(
+                    copytrade=step6_result.get("copytrade_candidates", 0),
+                    bot=step6_result.get("likely_bots", 0)
+                )
+            else:
+                self.db.update_pipeline_run(self._run_id, {
+                    "status": "completed",
+                    "completed_at": end_time.isoformat(),
+                    "duration_seconds": duration,
+                    "final_qualified": step6_result.get("classified", 0),
+                    "copytrade_found": step6_result.get("copytrade_candidates", 0),
+                    "bot_found": step6_result.get("likely_bots", 0)
+                })
 
             logger.info("=" * 50)
             logger.info("PIPELINE COMPLETE")
@@ -152,7 +204,6 @@ class PipelineRunner:
             logger.info(f"Total qualified: {step6_result.get('classified', 0)}")
             logger.info(f"Copy trade candidates: {step6_result.get('copytrade_candidates', 0)}")
             logger.info(f"Likely bots: {step6_result.get('likely_bots', 0)}")
-            logger.info(f"Insider suspects: {step6_result.get('insider_suspects', 0)}")
             logger.info("=" * 50)
 
             return {
@@ -168,10 +219,13 @@ class PipelineRunner:
 
         except Exception as e:
             logger.error(f"Pipeline failed: {e}")
-            self.db.update_pipeline_run(self._run_id, {
-                "status": "failed",
-                "error_log": str(e)
-            })
+            if self.tracker:
+                self.tracker.fail_run(str(e))
+            else:
+                self.db.update_pipeline_run(self._run_id, {
+                    "status": "failed",
+                    "error_log": str(e)
+                })
             raise
 
     async def run_incremental(

@@ -55,15 +55,6 @@ profiles:
       min_portfolio_value: 1000
       min_trade_frequency: 10
 
-  insider:
-    enabled: true
-    min_score: 60
-    filters:
-      min_max_position_size: 5000
-      min_position_concentration: 50
-      max_account_age_days: 30
-      max_unique_markets: 3
-
 # Advanced filters
 advanced:
   categories:
