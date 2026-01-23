@@ -64,6 +64,13 @@ export default function RootLayout({
                     >
                       Watchlist
                     </Link>
+                    <Link
+                      href="/live"
+                      className="text-green-400 hover:bg-gray-700 hover:text-green-300 px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                      Live Feed
+                    </Link>
                   </div>
                 </div>
               </div>

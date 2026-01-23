@@ -86,3 +86,74 @@ export interface WatchlistEntry {
   added_at: string
   traders?: Trader
 }
+
+// Live Trade Monitoring Types
+export interface LiveTrade {
+  id: number
+  trade_id: string
+  tx_hash?: string
+  trader_address: string
+  trader_username?: string
+  is_known_trader: boolean
+  trader_classification?: 'copytrade' | 'bot' | 'none'
+  trader_copytrade_score?: number
+  trader_bot_score?: number
+  trader_portfolio_value?: number
+  condition_id: string
+  asset_id?: string
+  market_slug?: string
+  market_title?: string
+  event_slug?: string
+  category?: string
+  side: 'BUY' | 'SELL'
+  outcome?: string
+  outcome_index?: number
+  size: number
+  price: number
+  usd_value: number
+  executed_at: string
+  received_at: string
+  processing_latency_ms?: number
+  is_whale: boolean
+  is_watchlist: boolean
+  alert_triggered: boolean
+  created_at: string
+}
+
+export interface TradeAlert {
+  id: number
+  trade_id: string
+  trader_address: string
+  alert_type: 'whale_trade' | 'watchlist_activity' | 'unusual_time' | 'concentration' | 'new_market_entry' | 'pattern_detected'
+  severity: 'info' | 'warning' | 'critical'
+  title: string
+  description?: string
+  metadata?: Record<string, unknown>
+  acknowledged: boolean
+  acknowledged_at?: string
+  created_at: string
+}
+
+export interface TradeFilter {
+  minUsdValue?: number
+  maxUsdValue?: number
+  categories?: string[]
+  sides?: ('BUY' | 'SELL')[]
+  whalesOnly?: boolean
+  watchlistOnly?: boolean
+  knownTradersOnly?: boolean
+  marketSlug?: string
+  traderAddress?: string
+}
+
+export interface TradeStats {
+  total_trades: number
+  total_volume: number
+  unique_traders: number
+  unique_markets: number
+  avg_trade_size: number
+  largest_trade: number
+  whale_trades: number
+  whale_volume: number
+  avg_latency_ms: number
+}
