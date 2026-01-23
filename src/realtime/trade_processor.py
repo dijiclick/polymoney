@@ -4,7 +4,7 @@ Trade processor for enriching, storing, and alerting on live trades.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from supabase import create_client, Client
@@ -46,6 +46,9 @@ class TradeProcessor:
         self._watchlist_cache: set[str] = set()
         self._watchlist_config: dict[str, dict] = {}  # address -> config
         self._alert_rules: list[dict] = []
+
+        # Session-based tracking for real-time insider detection
+        self._session_trades: dict[str, list[dict]] = {}  # trader_addr -> trades
 
         # Processing queue
         self._queue: asyncio.Queue[dict] = asyncio.Queue()
@@ -131,6 +134,84 @@ class TradeProcessor:
             logger.error(f"Failed to load alert rules: {e}")
             self._errors += 1
 
+    def _calculate_realtime_score(self, trade: RTDSMessage) -> tuple[int, list[str]]:
+        """
+        Calculate heuristic insider score for unknown traders.
+
+        Uses session-based signals to detect suspicious patterns without
+        requiring the full Goldsky pipeline to run first.
+
+        Returns:
+            Tuple of (score 0-100, list of red flag strings)
+        """
+        score = 0
+        flags = []
+        addr = trade.trader_address.lower()
+
+        # Get trader's session history
+        history = self._session_trades.get(addr, [])
+
+        # 1. Trade size (0-30 pts)
+        # Large trades from unknown accounts are suspicious
+        if trade.usd_value >= 5000:
+            score += 30
+            flags.append("Large trade ($5K+) from new account")
+        elif trade.usd_value >= 1000:
+            score += 15
+
+        # 2. Market concentration (0-25 pts)
+        # Same trader betting same market repeatedly
+        same_market = sum(1 for t in history if t.get("condition_id") == trade.condition_id)
+        if same_market >= 4:
+            score += 25
+            flags.append(f"Concentrated betting ({same_market + 1} trades same market)")
+        elif same_market >= 2:
+            score += 15
+
+        # 3. Session volume (0-25 pts)
+        # High total volume from single trader in session
+        total_volume = sum(t.get("usd_value", 0) for t in history) + trade.usd_value
+        if total_volume >= 50000:
+            score += 25
+            flags.append(f"High session volume (${total_volume:,.0f})")
+        elif total_volume >= 20000:
+            score += 15
+
+        # 4. Off-hours trading (0-10 pts)
+        # 2am-6am UTC is unusual
+        hour = trade.executed_at.hour
+        if 2 <= hour <= 6:
+            score += 10
+            flags.append("Off-hours trading (2-6am UTC)")
+
+        # 5. One-sided trading (0-10 pts)
+        # All buys or all sells suggests conviction/info
+        if history:
+            sides = set(t.get("side") for t in history)
+            sides.add(trade.side)
+            if len(sides) == 1:
+                score += 10
+                flags.append(f"One-sided trading (all {trade.side})")
+
+        return min(score, 100), flags
+
+    def _track_session_trade(self, trade: RTDSMessage) -> None:
+        """Track trade in session history for real-time scoring."""
+        addr = trade.trader_address.lower()
+        if addr not in self._session_trades:
+            self._session_trades[addr] = []
+
+        self._session_trades[addr].append({
+            "condition_id": trade.condition_id,
+            "usd_value": trade.usd_value,
+            "side": trade.side,
+            "executed_at": trade.executed_at,
+        })
+
+        # Limit history per trader to prevent memory growth
+        if len(self._session_trades[addr]) > 100:
+            self._session_trades[addr] = self._session_trades[addr][-100:]
+
     async def process_trade(self, trade: RTDSMessage) -> None:
         """
         Process a single trade from RTDS.
@@ -164,15 +245,25 @@ class TradeProcessor:
             asyncio.create_task(self._check_alerts(trade_record))
 
     def _enrich_trade(self, trade: RTDSMessage) -> dict:
-        """Enrich trade with cached trader data."""
-        trader_data = self._trader_cache.get(trade.trader_address, {})
+        """Enrich trade with cached trader data or real-time heuristics."""
+        trader_data = self._trader_cache.get(trade.trader_address.lower(), {})
 
         now = datetime.now(timezone.utc)
         latency_ms = int((now - trade.executed_at).total_seconds() * 1000)
 
-        # Check if trader is an insider suspect
-        insider_score = trader_data.get("insider_score", 0)
+        # Determine insider score and flags
+        if trader_data:
+            # Known trader - use cached score from pipeline
+            insider_score = trader_data.get("insider_score") or 0
+            red_flags = trader_data.get("insider_red_flags") or []
+        else:
+            # Unknown trader - calculate real-time heuristic score
+            insider_score, red_flags = self._calculate_realtime_score(trade)
+
         is_insider = insider_score >= 60
+
+        # Track trade in session for future scoring
+        self._track_session_trade(trade)
 
         return {
             "trade_id": trade.trade_id,
@@ -185,7 +276,7 @@ class TradeProcessor:
             "trader_bot_score": trader_data.get("bot_score"),
             "trader_insider_score": insider_score,
             "trader_insider_level": trader_data.get("insider_level"),
-            "trader_red_flags": trader_data.get("insider_red_flags", []),
+            "trader_red_flags": red_flags,
             "is_insider_suspect": is_insider,
             "trader_portfolio_value": trader_data.get("portfolio_value"),
             "condition_id": trade.condition_id,
@@ -401,9 +492,20 @@ class TradeProcessor:
                     return_exceptions=True,
                 )
 
+                # Clean up old session data (> 2 hours) to prevent memory growth
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+                for addr in list(self._session_trades.keys()):
+                    self._session_trades[addr] = [
+                        t for t in self._session_trades[addr]
+                        if t["executed_at"] > cutoff
+                    ]
+                    if not self._session_trades[addr]:
+                        del self._session_trades[addr]
+
                 logger.debug(
                     f"Caches refreshed: {len(self._trader_cache)} traders, "
-                    f"{len(self._watchlist_cache)} watchlist"
+                    f"{len(self._watchlist_cache)} watchlist, "
+                    f"{len(self._session_trades)} session traders"
                 )
 
             except asyncio.CancelledError:
