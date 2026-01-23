@@ -1,22 +1,52 @@
 'use client'
 
-import { useState, useCallback } from 'react'
-import SuspectList from '@/components/SuspectList'
-import InsiderFeed from '@/components/InsiderFeed'
-import InsiderDetails from '@/components/InsiderDetails'
+import { useState, useCallback, useEffect } from 'react'
+import TradeFeedTabs, { TabId } from '@/components/TradeFeedTabs'
+import UnifiedTradeFeed from '@/components/UnifiedTradeFeed'
+import TradeFilters from '@/components/TradeFilters'
+import ContextSidebar from '@/components/ContextSidebar'
 import InsiderAlerts from '@/components/InsiderAlerts'
+import { TradeFilter, supabase } from '@/lib/supabase'
 
-export default function InsiderCommandCenter() {
+export default function LiveTradePage() {
+  const [activeTab, setActiveTab] = useState<TabId>('all')
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null)
   const [activeAddresses, setActiveAddresses] = useState<Set<string>>(new Set())
-  const [showAlerts, setShowAlerts] = useState(false)
+  const [filter, setFilter] = useState<TradeFilter>({})
+  const [alertCount, setAlertCount] = useState(0)
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false)
 
-  // Track which traders are actively trading
+  // Fetch unacknowledged alert count
+  useEffect(() => {
+    async function fetchAlertCount() {
+      const { count } = await supabase
+        .from('trade_alerts')
+        .select('*', { count: 'exact', head: true })
+        .eq('acknowledged', false)
+      setAlertCount(count || 0)
+    }
+
+    fetchAlertCount()
+
+    // Subscribe to alert changes
+    const subscription = supabase
+      .channel('alert_count_channel')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'trade_alerts' },
+        () => fetchAlertCount()
+      )
+      .subscribe()
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  // Track active traders (recently traded)
   const handleTradeReceived = useCallback((address: string) => {
     setActiveAddresses(prev => {
       const next = new Set(prev)
       next.add(address)
-      // Remove after 30 seconds
       setTimeout(() => {
         setActiveAddresses(current => {
           const updated = new Set(current)
@@ -28,14 +58,22 @@ export default function InsiderCommandCenter() {
     })
   }, [])
 
+  // Get effective filter based on tab
+  const getEffectiveFilter = useCallback((): TradeFilter => {
+    if (activeTab === 'insider') {
+      return { ...filter, insidersOnly: true }
+    }
+    return filter
+  }, [activeTab, filter])
+
   return (
-    <div className="h-[calc(100vh-120px)]">
+    <div className="h-[calc(100vh-120px)] flex flex-col">
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Insider Command Center</h1>
+          <h1 className="text-2xl font-bold">Live Trade Monitor</h1>
           <p className="text-gray-400 text-sm">
-            Real-time monitoring of suspected insider trading activity
+            Real-time trade monitoring with insider detection
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -43,67 +81,97 @@ export default function InsiderCommandCenter() {
             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             Connected
           </div>
+          {/* Mobile sidebar toggle */}
           <button
-            onClick={() => setShowAlerts(!showAlerts)}
-            className={`px-3 py-1.5 rounded text-sm ${
-              showAlerts ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
-            }`}
+            onClick={() => setShowMobileSidebar(!showMobileSidebar)}
+            className="lg:hidden px-3 py-1.5 rounded text-sm bg-gray-700 hover:bg-gray-600"
           >
-            {showAlerts ? 'Show Details' : 'Show Alerts'}
+            {showMobileSidebar ? 'Hide Panel' : 'Show Panel'}
           </button>
         </div>
       </div>
 
-      {/* Main 3-Column Layout */}
-      <div className="grid grid-cols-12 gap-4 h-[calc(100%-60px)]">
-        {/* Left Panel: Suspect List */}
-        <div className="col-span-3 min-h-0">
-          <SuspectList
-            onSelectTrader={setSelectedAddress}
-            selectedAddress={selectedAddress}
-            activeAddresses={activeAddresses}
-          />
-        </div>
+      {/* Tabs */}
+      <TradeFeedTabs
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab)
+          // Reset filter when switching tabs
+          if (tab === 'alerts') {
+            setFilter({})
+          }
+        }}
+        alertCount={alertCount}
+      />
 
-        {/* Center Panel: Live Feed */}
-        <div className="col-span-6 min-h-0">
-          <InsiderFeed
-            selectedAddresses={selectedAddress ? [selectedAddress] : []}
-            onTradeReceived={handleTradeReceived}
-          />
-        </div>
-
-        {/* Right Panel: Details or Alerts */}
-        <div className="col-span-3 min-h-0">
-          {showAlerts ? (
-            <InsiderAlerts />
-          ) : (
-            <InsiderDetails
-              address={selectedAddress}
-              onClose={() => setSelectedAddress(null)}
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 mt-4">
+        {/* Left: Feed + Filters */}
+        <div className="flex-1 lg:w-[65%] flex flex-col min-h-0">
+          {activeTab !== 'alerts' && (
+            <TradeFilters
+              filter={filter}
+              onChange={setFilter}
             />
           )}
+
+          <div className="flex-1 min-h-0">
+            {activeTab === 'alerts' ? (
+              <InsiderAlerts />
+            ) : (
+              <UnifiedTradeFeed
+                mode={activeTab === 'insider' ? 'insider' : 'all'}
+                filter={getEffectiveFilter()}
+                onTraderSelect={setSelectedAddress}
+                selectedTraderAddress={selectedAddress}
+                onTradeReceived={handleTradeReceived}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Right: Context Sidebar */}
+        <div className={`
+          lg:w-[35%] min-h-0
+          ${showMobileSidebar ? 'block' : 'hidden lg:block'}
+          ${showMobileSidebar ? 'fixed inset-0 z-50 bg-gray-900/95 p-4 lg:relative lg:p-0 lg:bg-transparent' : ''}
+        `}>
+          {showMobileSidebar && (
+            <button
+              onClick={() => setShowMobileSidebar(false)}
+              className="lg:hidden absolute top-4 right-4 text-gray-400 hover:text-white"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+          <ContextSidebar
+            selectedAddress={selectedAddress}
+            onSelectTrader={setSelectedAddress}
+            activeAddresses={activeAddresses}
+            showCompactSuspectList={activeTab !== 'alerts'}
+          />
         </div>
       </div>
 
-      {/* Legend / Help */}
+      {/* Footer Legend */}
       <div className="mt-4 flex items-center justify-between text-xs text-gray-500 border-t border-gray-700 pt-4">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
           <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded bg-red-500/30" /> Score 85+
+            <span className="w-3 h-3 rounded border-l-2 border-orange-500 bg-orange-900/30" /> Insider
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded bg-orange-500/30" /> Score 70-84
+            <span className="text-yellow-500 font-semibold">WHALE</span> = $10K+
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded bg-yellow-500/30" /> Score 60-69
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="text-green-400">Active</span> = traded in last 30s
+            <span className="text-red-400">85+</span> /
+            <span className="text-orange-400">70+</span> /
+            <span className="text-yellow-400">60+</span> = Score
           </span>
         </div>
-        <div>
-          Run <code className="bg-gray-700 px-1 rounded">py -m src.realtime.service</code> to start monitoring
+        <div className="hidden sm:block">
+          Run <code className="bg-gray-700 px-1 rounded">py -m src.realtime.service</code> to start
         </div>
       </div>
     </div>

@@ -25,12 +25,14 @@ export default function TradeFilters({ filter, onChange }: TradeFiltersProps) {
 
   const presetFilters = [
     { label: 'All Trades', filter: {} },
-    { label: 'Whales Only', filter: { whalesOnly: true } },
+    { label: '$100+', filter: { minUsdValue: 100 } },
+    { label: '$500+', filter: { minUsdValue: 500 } },
     { label: '$1K+', filter: { minUsdValue: 1000 } },
     { label: '$10K+', filter: { minUsdValue: 10000 } },
     { label: '$50K+', filter: { minUsdValue: 50000 } },
+    { label: 'Whales', filter: { whalesOnly: true } },
+    { label: 'Insiders', filter: { insidersOnly: true } },
     { label: 'Watchlist', filter: { watchlistOnly: true } },
-    { label: 'Known Traders', filter: { knownTradersOnly: true } },
   ]
 
   return (

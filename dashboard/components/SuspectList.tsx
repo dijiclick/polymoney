@@ -7,6 +7,7 @@ interface SuspectListProps {
   onSelectTrader: (address: string | null) => void
   selectedAddress: string | null
   activeAddresses?: Set<string>
+  compact?: boolean
 }
 
 interface Filters {
@@ -18,7 +19,8 @@ interface Filters {
 export default function SuspectList({
   onSelectTrader,
   selectedAddress,
-  activeAddresses = new Set()
+  activeAddresses = new Set(),
+  compact = false
 }: SuspectListProps) {
   const [suspects, setSuspects] = useState<InsiderSuspect[]>([])
   const [loading, setLoading] = useState(true)
@@ -103,11 +105,13 @@ export default function SuspectList({
   }
 
   return (
-    <div className="bg-gray-800 rounded-lg h-full flex flex-col">
+    <div className={`${compact ? '' : 'bg-gray-800 rounded-lg'} h-full flex flex-col`}>
       {/* Header */}
-      <div className="p-4 border-b border-gray-700">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold">Insider Suspects</h2>
+      <div className={`${compact ? 'p-3' : 'p-4'} border-b border-gray-700`}>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className={`${compact ? 'text-sm' : 'text-lg'} font-semibold`}>
+            {compact ? 'Suspects' : 'Insider Suspects'}
+          </h2>
           <button
             onClick={fetchSuspects}
             className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded"
@@ -117,7 +121,7 @@ export default function SuspectList({
         </div>
 
         {/* Filters */}
-        <div className="space-y-2 text-sm">
+        <div className={`space-y-2 ${compact ? 'text-xs' : 'text-sm'}`}>
           <div className="flex gap-2">
             <label className="flex items-center gap-1 text-gray-400">
               Score
@@ -132,36 +136,40 @@ export default function SuspectList({
                 <option value={85}>85+</option>
               </select>
             </label>
-            <label className="flex items-center gap-1 text-gray-400">
-              Age
-              <select
-                value={filters.maxAgeDays}
-                onChange={(e) => setFilters(f => ({ ...f, maxAgeDays: Number(e.target.value) }))}
-                className="bg-gray-700 rounded px-2 py-1 text-xs"
-              >
-                <option value={7}>7d</option>
-                <option value={14}>14d</option>
-                <option value={30}>30d</option>
-                <option value={60}>60d</option>
-                <option value={365}>Any</option>
-              </select>
-            </label>
+            {!compact && (
+              <label className="flex items-center gap-1 text-gray-400">
+                Age
+                <select
+                  value={filters.maxAgeDays}
+                  onChange={(e) => setFilters(f => ({ ...f, maxAgeDays: Number(e.target.value) }))}
+                  className="bg-gray-700 rounded px-2 py-1 text-xs"
+                >
+                  <option value={7}>7d</option>
+                  <option value={14}>14d</option>
+                  <option value={30}>30d</option>
+                  <option value={60}>60d</option>
+                  <option value={365}>Any</option>
+                </select>
+              </label>
+            )}
           </div>
-          <div className="flex gap-1">
-            {(['score', 'profit', 'recent'] as const).map(sort => (
-              <button
-                key={sort}
-                onClick={() => setFilters(f => ({ ...f, sortBy: sort }))}
-                className={`px-2 py-1 rounded text-xs ${
-                  filters.sortBy === sort
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                }`}
-              >
-                {sort === 'score' ? 'Score' : sort === 'profit' ? 'Profit' : 'Recent'}
-              </button>
-            ))}
-          </div>
+          {!compact && (
+            <div className="flex gap-1">
+              {(['score', 'profit', 'recent'] as const).map(sort => (
+                <button
+                  key={sort}
+                  onClick={() => setFilters(f => ({ ...f, sortBy: sort }))}
+                  className={`px-2 py-1 rounded text-xs ${
+                    filters.sortBy === sort
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                  }`}
+                >
+                  {sort === 'score' ? 'Score' : sort === 'profit' ? 'Profit' : 'Recent'}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -184,20 +192,20 @@ export default function SuspectList({
                 <button
                   key={suspect.address}
                   onClick={() => onSelectTrader(isSelected ? null : suspect.address)}
-                  className={`w-full p-3 text-left hover:bg-gray-750 transition-colors ${
+                  className={`w-full ${compact ? 'p-2' : 'p-3'} text-left hover:bg-gray-750 transition-colors ${
                     isSelected ? 'bg-blue-900/30 border-l-2 border-blue-500' : ''
                   }`}
                 >
                   <div className="flex items-start gap-2">
                     {/* Score Badge */}
-                    <div className={`px-2 py-1 rounded border text-sm font-bold ${getScoreBadge(suspect.insider_score)} ${getScoreColor(suspect.insider_score)}`}>
+                    <div className={`${compact ? 'px-1.5 py-0.5 text-xs' : 'px-2 py-1 text-sm'} rounded border font-bold ${getScoreBadge(suspect.insider_score)} ${getScoreColor(suspect.insider_score)}`}>
                       {suspect.insider_score}
                     </div>
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm truncate">
+                        <span className={`${compact ? 'text-xs' : 'text-sm'} truncate`}>
                           {suspect.username || formatAddress(suspect.address)}
                         </span>
                         {isActive && (
@@ -206,10 +214,14 @@ export default function SuspectList({
                       </div>
                       <div className="text-xs text-gray-400 mt-0.5">
                         {formatUsd(suspect.total_pnl)} profit
-                        <span className="mx-1">·</span>
-                        {suspect.account_age_days}d old
+                        {!compact && (
+                          <>
+                            <span className="mx-1">·</span>
+                            {suspect.account_age_days}d old
+                          </>
+                        )}
                       </div>
-                      {suspect.insider_red_flags && suspect.insider_red_flags.length > 0 && (
+                      {!compact && suspect.insider_red_flags && suspect.insider_red_flags.length > 0 && (
                         <div className="text-xs text-red-400/80 mt-1 truncate">
                           {suspect.insider_red_flags[0]}
                         </div>
@@ -217,9 +229,11 @@ export default function SuspectList({
                     </div>
 
                     {/* Last Activity */}
-                    <div className="text-right text-xs text-gray-500">
-                      {formatTimeAgo(suspect.last_trade_at)}
-                    </div>
+                    {!compact && (
+                      <div className="text-right text-xs text-gray-500">
+                        {formatTimeAgo(suspect.last_trade_at)}
+                      </div>
+                    )}
                   </div>
                 </button>
               )
@@ -229,8 +243,8 @@ export default function SuspectList({
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t border-gray-700 text-xs text-gray-500">
-        Showing {suspects.length} suspects
+      <div className={`${compact ? 'p-2' : 'p-3'} border-t border-gray-700 text-xs text-gray-500`}>
+        {suspects.length} suspects
       </div>
     </div>
   )
