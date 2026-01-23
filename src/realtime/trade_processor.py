@@ -402,6 +402,37 @@ class TradeProcessor:
             logger.error(f"Failed to create alert: {e}")
             self._errors += 1
 
+    async def _cleanup_old_trades(self, retention_days: int = 7) -> None:
+        """Delete trades older than retention period to manage database size."""
+        try:
+            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+
+            # Delete old trades from live_trades
+            result = self.supabase.table("live_trades").delete().lt(
+                "received_at", cutoff_date
+            ).execute()
+
+            deleted_count = len(result.data) if result.data else 0
+
+            if deleted_count > 0:
+                logger.info(
+                    f"Database cleanup: deleted {deleted_count} trades older than {retention_days} days"
+                )
+
+            # Also clean up old acknowledged alerts (keep unacknowledged indefinitely)
+            alert_result = self.supabase.table("trade_alerts").delete().lt(
+                "created_at", cutoff_date
+            ).eq("acknowledged", True).execute()
+
+            deleted_alerts = len(alert_result.data) if alert_result.data else 0
+
+            if deleted_alerts > 0:
+                logger.info(f"Database cleanup: deleted {deleted_alerts} old acknowledged alerts")
+
+        except Exception as e:
+            logger.error(f"Database cleanup failed: {e}")
+            self._errors += 1
+
     async def flush_batch(self) -> None:
         """Flush accumulated trades to database."""
         if not self._batch:
@@ -481,6 +512,11 @@ class TradeProcessor:
         """Periodically refresh caches."""
         logger.info("Starting cache refresh task")
 
+        # Track last cleanup time for database cleanup (runs hourly, not every minute)
+        last_db_cleanup = datetime.now(timezone.utc)
+        DB_CLEANUP_INTERVAL = timedelta(hours=1)
+        TRADE_RETENTION_DAYS = 7
+
         while True:
             try:
                 await asyncio.sleep(60)  # Refresh every minute
@@ -501,6 +537,12 @@ class TradeProcessor:
                     ]
                     if not self._session_trades[addr]:
                         del self._session_trades[addr]
+
+                # Database cleanup: delete old trades (runs hourly)
+                now = datetime.now(timezone.utc)
+                if now - last_db_cleanup >= DB_CLEANUP_INTERVAL:
+                    last_db_cleanup = now
+                    await self._cleanup_old_trades(TRADE_RETENTION_DAYS)
 
                 logger.debug(
                     f"Caches refreshed: {len(self._trader_cache)} traders, "
