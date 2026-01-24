@@ -419,9 +419,14 @@ function calculateDrawdown(trades: ParsedTrade[], redemptions: GoldskyRedemption
   }
 
   // Return drawdown as percentage of peak
-  // If peak is 0 or negative, there's no meaningful drawdown
-  if (peakPnL <= 0) return 0
-  return Math.round((maxDrawdown / peakPnL) * 100 * 100) / 100
+  // If peak is 0, negative, or too small (< $10), there's no meaningful drawdown
+  // This avoids noise from very small positions that can show 100% drawdown
+  if (peakPnL < 10) return 0
+
+  const drawdownPercent = Math.round((maxDrawdown / peakPnL) * 100 * 100) / 100
+
+  // Cap drawdown at 100% (can't lose more than you made)
+  return Math.min(drawdownPercent, 100)
 }
 
 /**

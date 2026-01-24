@@ -155,7 +155,7 @@ export async function GET(
       source: dbWallet ? 'mixed' : 'live',
       dataFreshness: 'fresh',
       address,
-      username: profile.pseudonym || profile.name || dbWallet?.username,
+      username: profile.name || profile.pseudonym || dbWallet?.username,
       profileImage: profile.profileImage,
       accountCreatedAt: profile.createdAt,
       positions,
@@ -282,7 +282,7 @@ async function updateWalletMetricsFromGoldsky(
 ) {
   try {
     await supabase.from('wallets').update({
-      username: profile?.pseudonym || profile?.name,
+      username: profile?.name || profile?.pseudonym,
       account_created_at: profile?.createdAt,
       balance: portfolioValue,
       // 7-day metrics (from Goldsky)

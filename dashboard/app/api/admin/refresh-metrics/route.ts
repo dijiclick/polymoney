@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
 
       // Update database
       const { error: updateError } = await supabase.from('wallets').update({
-        username: (profile as any).pseudonym || (profile as any).name || wallet.username,
+        username: (profile as any).name || (profile as any).pseudonym || wallet.username,
         account_created_at: (profile as any).createdAt,
         balance: portfolioValue,
         // 7-day metrics

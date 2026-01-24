@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
     const sortBy = searchParams.get('sortBy') || 'balance'
     const sortDir = searchParams.get('sortDir') === 'asc' ? true : false
 
+    const search = searchParams.get('search')?.toLowerCase().trim() || ''
     const offset = (page - 1) * limit
 
     // Validate sort column
@@ -55,6 +56,12 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from('wallets')
       .select('*', { count: 'exact' })
+
+    // Server-side search by username or address
+    if (search) {
+      // Use OR filter for username ILIKE or address ILIKE
+      query = query.or(`username.ilike.%${search}%,address.ilike.%${search}%`)
+    }
 
     // Filter by minimum balance
     if (minBalance > 0) {

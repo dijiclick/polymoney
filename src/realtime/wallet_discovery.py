@@ -273,7 +273,7 @@ class WalletDiscoveryProcessor:
             "source": "live",
             "balance": portfolio_value,
             "balance_updated_at": datetime.now(timezone.utc).isoformat(),
-            "username": profile.get("pseudonym") or profile.get("name"),
+            "username": profile.get("name") or profile.get("pseudonym"),
             "account_created_at": profile.get("createdAt"),
             # ===== 7-DAY METRICS (from Goldsky) =====
             "pnl_7d": goldsky_metrics.get("pnl_7d", 0),

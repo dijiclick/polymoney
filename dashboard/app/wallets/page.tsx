@@ -31,6 +31,16 @@ export default function WalletsPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [columnFilters, setColumnFilters] = useState<Record<string, ColumnFilter>>({})
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+
+  // Debounce search query to avoid excessive API calls
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery)
+      setPage(1) // Reset to first page when search changes
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
 
   // Fetch wallet stats
   const fetchStats = useCallback(async () => {
@@ -61,7 +71,8 @@ export default function WalletsPage() {
         page: String(page),
         limit: '50',
         sortBy,
-        sortDir
+        sortDir,
+        ...(debouncedSearch.trim() && { search: debouncedSearch.trim() })
       })
 
       const res = await fetch(`/api/wallets?${params}`)
@@ -77,7 +88,7 @@ export default function WalletsPage() {
     } finally {
       setLoading(false)
     }
-  }, [timePeriod, page, sortBy, sortDir])
+  }, [timePeriod, page, sortBy, sortDir, debouncedSearch])
 
   // Initial load
   useEffect(() => {
@@ -133,21 +144,11 @@ export default function WalletsPage() {
     setPage(1)
   }
 
-  // Apply client-side column filters and text search
+  // Apply client-side column filters (search is now server-side)
   const filteredWallets = useMemo(() => {
     let result = wallets
 
-    // Apply text search filter (name or address)
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim()
-      result = result.filter(wallet => {
-        const matchesAddress = wallet.address.toLowerCase().includes(query)
-        const matchesUsername = wallet.username?.toLowerCase().includes(query)
-        return matchesAddress || matchesUsername
-      })
-    }
-
-    // Apply column filters
+    // Apply column filters (client-side for numeric filtering)
     if (Object.keys(columnFilters).length > 0) {
       result = result.filter(wallet => {
         for (const [column, filter] of Object.entries(columnFilters)) {
@@ -175,7 +176,7 @@ export default function WalletsPage() {
     }
 
     return result
-  }, [wallets, columnFilters, searchQuery])
+  }, [wallets, columnFilters])
 
   // Count active filters
   const activeFilterCount = Object.keys(columnFilters).length
