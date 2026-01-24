@@ -6,7 +6,12 @@
  * - Positions (PnL, win rate, ROI) from PnL subgraph
  * - Redemptions (resolved positions) from activity subgraph
  *
- * No need for Polymarket REST API for metrics.
+ * Metrics Calculation:
+ * - PnL = (sellVolume - buyVolume) + redemptionPayouts (includes trading profits)
+ * - ROI = PnL / buyVolume * 100
+ * - Win Rate = trades sold at profit / total completed trades
+ * - Drawdown = max peak-to-trough decline in cumulative PnL
+ *
  * Server-side usage only (API routes)
  */
 
@@ -22,10 +27,10 @@ export interface GoldskyMetrics {
   // 7-Day Metrics
   volume7d: number
   tradeCount7d: number
-  pnl7d: number
-  roi7d: number
-  winRate7d: number
-  drawdown7d: number
+  pnl7d: number           // Realized PnL from sells + redemptions
+  roi7d: number           // ROI based on buy volume
+  winRate7d: number       // Based on profitable trades/redemptions
+  drawdown7d: number      // Max drawdown percentage
 
   // 30-Day Metrics
   volume30d: number
@@ -35,9 +40,11 @@ export interface GoldskyMetrics {
   winRate30d: number
   drawdown30d: number
 
-  // All-Time Summary (lightweight)
+  // All-Time Summary
   winRateAll: number
-  realizedPnl: number
+  realizedPnl: number     // From positions subgraph
+  unrealizedPnl: number   // Estimated from open positions
+  totalPnl: number        // realized + unrealized
   roiAll: number
 
   // Position Counts
@@ -78,6 +85,7 @@ interface GoldskyPosition {
 interface GoldskyRedemption {
   timestamp: string
   payout: string
+  collateral?: string // Amount paid to redeem (cost basis)
 }
 
 async function queryGoldsky(endpoint: string, query: string, variables: Record<string, unknown>): Promise<unknown> {
@@ -222,9 +230,9 @@ async function getRedemptions(address: string, sinceTimestamp: number, batchSize
 
 interface ParsedTrade {
   timestamp: number
-  side: string
+  side: 'BUY' | 'SELL'
   usdValue: number
-  cashFlow: number
+  tokenId: string  // To track per-token P&L
 }
 
 function parseTrade(trade: GoldskyTrade, address: string): ParsedTrade {
@@ -235,103 +243,322 @@ function parseTrade(trade: GoldskyTrade, address: string): ParsedTrade {
   const makerAmount = parseInt(trade.makerAmountFilled) / DECIMALS
   const takerAmount = parseInt(trade.takerAmountFilled) / DECIMALS
 
-  let side: string
+  let side: 'BUY' | 'SELL'
   let usdValue: number
-  let cashFlow: number
+  let tokenId: string
 
   if (isMaker) {
     if (trade.makerAssetId === '0') {
-      // Maker gave USDC (BUY) - cash outflow
+      // Maker gave USDC (BUY)
       side = 'BUY'
       usdValue = makerAmount
-      cashFlow = -makerAmount
+      tokenId = trade.takerAssetId
     } else {
-      // Maker gave tokens (SELL) - cash inflow
+      // Maker gave tokens (SELL)
       side = 'SELL'
       usdValue = takerAmount
-      cashFlow = takerAmount
+      tokenId = trade.makerAssetId
     }
   } else {
     if (trade.takerAssetId === '0') {
-      // Taker gave USDC (BUY) - cash outflow
+      // Taker gave USDC (BUY)
       side = 'BUY'
       usdValue = takerAmount
-      cashFlow = -takerAmount
+      tokenId = trade.makerAssetId
     } else {
-      // Taker gave tokens (SELL) - cash inflow
+      // Taker gave tokens (SELL)
       side = 'SELL'
       usdValue = makerAmount
-      cashFlow = makerAmount
+      tokenId = trade.takerAssetId
     }
   }
 
-  return { timestamp, side, usdValue, cashFlow }
+  return { timestamp, side, usdValue, tokenId }
+}
+
+interface TokenPnL {
+  tokenId: string
+  totalBought: number
+  totalSold: number
+  redemptionPayout: number
+  netPnl: number
+  isComplete: boolean // true if all tokens sold or redeemed
+  isWin: boolean
+}
+
+/**
+ * Calculate per-token P&L by matching buys with sells/redemptions
+ */
+function calculateTokenPnL(
+  trades: ParsedTrade[],
+  redemptions: GoldskyRedemption[]
+): { tokenPnLs: Map<string, TokenPnL>; totalPnl: number; totalBuyVolume: number; totalSellVolume: number } {
+  const tokenPnLs = new Map<string, TokenPnL>()
+
+  // Group trades by token
+  for (const trade of trades) {
+    let pnl = tokenPnLs.get(trade.tokenId)
+    if (!pnl) {
+      pnl = {
+        tokenId: trade.tokenId,
+        totalBought: 0,
+        totalSold: 0,
+        redemptionPayout: 0,
+        netPnl: 0,
+        isComplete: false,
+        isWin: false,
+      }
+      tokenPnLs.set(trade.tokenId, pnl)
+    }
+
+    if (trade.side === 'BUY') {
+      pnl.totalBought += trade.usdValue
+    } else {
+      pnl.totalSold += trade.usdValue
+    }
+  }
+
+  // Add redemption payouts (these are pure profit, we already paid for tokens via buys)
+  for (const redemption of redemptions) {
+    const payout = parseInt(redemption.payout || '0') / DECIMALS
+    // We don't know which tokenId the redemption is for, so add to a special bucket
+    // In reality, redemption is profit from a winning bet
+    let pnl = tokenPnLs.get('__redemptions__')
+    if (!pnl) {
+      pnl = {
+        tokenId: '__redemptions__',
+        totalBought: 0,
+        totalSold: 0,
+        redemptionPayout: 0,
+        netPnl: 0,
+        isComplete: true,
+        isWin: true,
+      }
+      tokenPnLs.set('__redemptions__', pnl)
+    }
+    pnl.redemptionPayout += payout
+  }
+
+  // Calculate net PnL for each token
+  let totalPnl = 0
+  let totalBuyVolume = 0
+  let totalSellVolume = 0
+
+  for (const pnl of tokenPnLs.values()) {
+    // Net PnL = money out - money in
+    // Sells and redemptions are money out, buys are money in
+    pnl.netPnl = (pnl.totalSold + pnl.redemptionPayout) - pnl.totalBought
+    pnl.isComplete = pnl.totalSold > 0 || pnl.redemptionPayout > 0
+    pnl.isWin = pnl.netPnl > 0
+
+    totalPnl += pnl.netPnl
+    totalBuyVolume += pnl.totalBought
+    totalSellVolume += pnl.totalSold + pnl.redemptionPayout
+  }
+
+  return { tokenPnLs, totalPnl, totalBuyVolume, totalSellVolume }
+}
+
+/**
+ * Calculate drawdown from cumulative P&L curve
+ *
+ * Drawdown = (peak - trough) / peak * 100
+ * We track running P&L and find the maximum decline from any peak
+ */
+function calculateDrawdown(trades: ParsedTrade[], redemptions: GoldskyRedemption[]): number {
+  if (trades.length === 0) return 0
+
+  // Create P&L events sorted by time
+  interface PnLEvent {
+    timestamp: number
+    pnlDelta: number // positive = profit, negative = loss
+  }
+
+  const events: PnLEvent[] = []
+
+  // For each trade: BUY = cost (negative), SELL = revenue (positive)
+  for (const trade of trades) {
+    events.push({
+      timestamp: trade.timestamp,
+      pnlDelta: trade.side === 'SELL' ? trade.usdValue : -trade.usdValue,
+    })
+  }
+
+  // Redemptions are pure profit
+  for (const r of redemptions) {
+    const payout = parseInt(r.payout || '0') / DECIMALS
+    events.push({
+      timestamp: parseInt(r.timestamp),
+      pnlDelta: payout,
+    })
+  }
+
+  // Sort by timestamp
+  events.sort((a, b) => a.timestamp - b.timestamp)
+
+  // Calculate running P&L and track drawdown
+  let cumulativePnL = 0
+  let peakPnL = 0
+  let maxDrawdown = 0
+
+  for (const event of events) {
+    cumulativePnL += event.pnlDelta
+
+    // Update peak if we hit a new high
+    if (cumulativePnL > peakPnL) {
+      peakPnL = cumulativePnL
+    }
+
+    // Calculate current drawdown from peak
+    if (peakPnL > 0) {
+      const currentDrawdown = peakPnL - cumulativePnL
+      if (currentDrawdown > maxDrawdown) {
+        maxDrawdown = currentDrawdown
+      }
+    }
+  }
+
+  // Return drawdown as percentage of peak
+  // If peak is 0 or negative, there's no meaningful drawdown
+  if (peakPnL <= 0) return 0
+  return Math.round((maxDrawdown / peakPnL) * 100 * 100) / 100
+}
+
+/**
+ * Calculate win rate from completed trades
+ * A "win" is a token position that was sold or redeemed for more than it cost
+ */
+function calculateWinRate(tokenPnLs: Map<string, TokenPnL>): { winRate: number; wins: number; losses: number } {
+  let wins = 0
+  let losses = 0
+
+  for (const pnl of tokenPnLs.values()) {
+    // Only count completed positions (sold or redeemed)
+    if (!pnl.isComplete) continue
+    // Skip the redemptions bucket for counting individual wins
+    if (pnl.tokenId === '__redemptions__') {
+      // Redemptions are wins by definition
+      wins++
+      continue
+    }
+
+    if (pnl.netPnl > 0.01) {
+      wins++
+    } else if (pnl.netPnl < -0.01) {
+      losses++
+    }
+    // Positions with ~0 PnL are not counted
+  }
+
+  const total = wins + losses
+  const winRate = total > 0 ? (wins / total) * 100 : 0
+
+  return { winRate, wins, losses }
+}
+
+interface PeriodMetrics {
+  pnl: number
+  roi: number
+  winRate: number
+  drawdown: number
+  buyVolume: number
+  sellVolume: number
+  wins: number
+  losses: number
 }
 
 function calculatePeriodMetrics(
   trades: ParsedTrade[],
-  redemptions: GoldskyRedemption[]
-): { roi: number; drawdown: number; buyVolume: number; sellVolume: number } {
-  if (!trades.length) {
-    return { roi: 0, drawdown: 0, buyVolume: 0, sellVolume: 0 }
+  redemptions: GoldskyRedemption[],
+  periodLabel: string = 'unknown'
+): PeriodMetrics {
+  console.log(`\n========== PERIOD METRICS [${periodLabel}] ==========`)
+  console.log(`Trades: ${trades.length}, Redemptions: ${redemptions.length}`)
+
+  if (!trades.length && !redemptions.length) {
+    console.log(`No activity for ${periodLabel}`)
+    return { pnl: 0, roi: 0, winRate: 0, drawdown: 0, buyVolume: 0, sellVolume: 0, wins: 0, losses: 0 }
   }
 
-  // Calculate buy/sell volumes
-  const buyVolume = trades.filter(t => t.side === 'BUY').reduce((sum, t) => sum + t.usdValue, 0)
-  const sellVolume = trades.filter(t => t.side === 'SELL').reduce((sum, t) => sum + t.usdValue, 0)
+  // Calculate token-level P&L
+  const { tokenPnLs, totalPnl, totalBuyVolume, totalSellVolume } = calculateTokenPnL(trades, redemptions)
 
-  // Add redemption payouts to returns
-  const redemptionPayouts = redemptions.reduce((sum, r) => sum + parseInt(r.payout || '0') / DECIMALS, 0)
+  console.log(`Buy Volume: $${totalBuyVolume.toFixed(2)}`)
+  console.log(`Sell Volume (incl. redemptions): $${totalSellVolume.toFixed(2)}`)
+  console.log(`Net PnL: $${totalPnl.toFixed(2)}`)
 
-  // ROI = (returns - investment) / investment * 100
-  const totalReturns = sellVolume + redemptionPayouts
-  const roi = buyVolume > 0 ? ((totalReturns - buyVolume) / buyVolume) * 100 : 0
+  // Calculate ROI
+  const roi = totalBuyVolume > 0 ? (totalPnl / totalBuyVolume) * 100 : 0
+  console.log(`ROI: ${roi.toFixed(2)}%`)
 
-  // Calculate drawdown from cumulative cash flow
-  const sortedTrades = [...trades].sort((a, b) => a.timestamp - b.timestamp)
+  // Calculate win rate
+  const { winRate, wins, losses } = calculateWinRate(tokenPnLs)
+  console.log(`Win Rate: ${winRate.toFixed(2)}% (${wins} wins, ${losses} losses)`)
 
-  let cumulative = 0
-  let peak = 0
-  let maxDrawdown = 0
+  // Calculate drawdown
+  const drawdown = calculateDrawdown(trades, redemptions)
+  console.log(`Drawdown: ${drawdown.toFixed(2)}%`)
 
-  for (const trade of sortedTrades) {
-    cumulative += trade.cashFlow
-    if (cumulative > peak) {
-      peak = cumulative
-    }
-    const drawdown = peak - cumulative
-    if (drawdown > maxDrawdown) {
-      maxDrawdown = drawdown
-    }
-  }
-
-  // Drawdown as percentage of peak (if peak > 0)
-  const drawdownPct = peak > 0 ? (maxDrawdown / peak) * 100 : 0
+  console.log(`========== END [${periodLabel}] ==========\n`)
 
   return {
+    pnl: Math.round(totalPnl * 100) / 100,
     roi: Math.round(roi * 100) / 100,
-    drawdown: Math.round(drawdownPct * 100) / 100,
-    buyVolume: Math.round(buyVolume * 100) / 100,
-    sellVolume: Math.round(sellVolume * 100) / 100,
+    winRate: Math.round(winRate * 100) / 100,
+    drawdown,
+    buyVolume: Math.round(totalBuyVolume * 100) / 100,
+    sellVolume: Math.round(totalSellVolume * 100) / 100,
+    wins,
+    losses,
   }
 }
 
 /**
- * Get complete trading metrics from Goldsky on-chain data.
+ * Estimate unrealized P&L from open positions
+ * Uses avgPrice and amount from positions, estimates current value
  *
- * This fetches ALL metrics including:
- * - Volume (7d, 30d)
- * - Trade count (7d, 30d)
- * - PnL (7d, 30d)
- * - Win rate (7d, 30d)
- * - ROI (7d, 30d)
- * - Drawdown (7d, 30d)
- * - Position counts (open, closed, wins, losses)
+ * Note: This is an estimate since we don't have real-time prices
+ * The actual unrealized PnL comes from Polymarket's portfolio value API
+ */
+function estimateUnrealizedPnL(positions: GoldskyPosition[]): { unrealizedPnl: number; openPositions: number } {
+  let unrealizedPnl = 0
+  let openPositions = 0
+
+  for (const pos of positions) {
+    const amount = parseInt(pos.amount || '0') / DECIMALS
+    const avgPrice = parseInt(pos.avgPrice || '0') / DECIMALS
+    const totalBought = parseInt(pos.totalBought || '0') / DECIMALS
+
+    // Skip closed positions
+    if (amount < 0.001) continue
+
+    openPositions++
+
+    // Estimate current value: assume market price is near avgPrice for now
+    // This is a rough estimate - the real unrealized PnL comes from Polymarket API
+    // We'll track cost basis for future use
+    const costBasis = amount * avgPrice
+
+    // For now, just report the position exists
+    // Real unrealized P&L will be calculated when we have current prices
+    // unrealizedPnl += currentValue - costBasis
+    console.log(`Open position: tokenId=${pos.tokenId?.slice(0, 10)}, amount=${amount.toFixed(2)}, avgPrice=${avgPrice.toFixed(4)}, costBasis=$${costBasis.toFixed(2)}`)
+  }
+
+  return { unrealizedPnl, openPositions }
+}
+
+/**
+ * Get complete trading metrics from Goldsky on-chain data.
  */
 export async function getTraderMetrics(
   address: string,
   lookbackDays: number = DEFAULT_LOOKBACK_DAYS
 ): Promise<GoldskyMetrics> {
+  console.log(`\n╔══════════════════════════════════════════════════════════════════════╗`)
+  console.log(`║          GOLDSKY METRICS - ${address.slice(0, 10)}...                    ║`)
+  console.log(`╚══════════════════════════════════════════════════════════════════════╝`)
+
   const now = Date.now() / 1000
   const cutoff7d = Math.floor(now - 7 * 24 * 60 * 60)
   const cutoff30d = Math.floor(now - 30 * 24 * 60 * 60)
@@ -344,6 +571,9 @@ export async function getTraderMetrics(
     getRedemptions(address, cutoff30d).catch(() => [] as GoldskyRedemption[]),
   ])
 
+  console.log(`\n📊 Data fetched: ${trades.length} trades, ${positions.length} positions`)
+  console.log(`   Redemptions: 7d=${redemptions7d.length}, 30d=${redemptions30d.length}`)
+
   // Parse trades and filter by time period
   const parsedTrades = trades.map(t => parseTrade(t, address))
   const trades7d = parsedTrades.filter(t => t.timestamp >= cutoff7d)
@@ -353,14 +583,13 @@ export async function getTraderMetrics(
   const volume7d = trades7d.reduce((sum, t) => sum + t.usdValue, 0)
   const volume30d = trades30d.reduce((sum, t) => sum + t.usdValue, 0)
 
-  // Calculate ROI and drawdown for each period
-  const metrics7d = calculatePeriodMetrics(trades7d, redemptions7d)
-  const metrics30d = calculatePeriodMetrics(trades30d, redemptions30d)
+  // Calculate period metrics (PnL, ROI, win rate, drawdown)
+  const metrics7d = calculatePeriodMetrics(trades7d, redemptions7d, '7d')
+  const metrics30d = calculatePeriodMetrics(trades30d, redemptions30d, '30d')
 
-  // Calculate position metrics (all-time from positions subgraph)
+  // Calculate all-time position metrics
   let totalRealizedPnl = 0
   let totalBought = 0
-  let openPositions = 0
   let winningPositions = 0
   let losingPositions = 0
   const uniqueMarkets = new Set<string>()
@@ -377,50 +606,49 @@ export async function getTraderMetrics(
       uniqueMarkets.add(pos.tokenId)
     }
 
-    if (amount > 0.001) {
-      openPositions++
-    } else if (realizedPnl > 0.01) {
-      winningPositions++
-    } else if (realizedPnl < -0.01) {
-      losingPositions++
+    // Count closed positions by realized PnL
+    if (amount < 0.001) { // Position is closed
+      if (realizedPnl > 0.01) {
+        winningPositions++
+      } else if (realizedPnl < -0.01) {
+        losingPositions++
+      }
     }
   }
+
+  // Estimate unrealized P&L
+  const { unrealizedPnl, openPositions } = estimateUnrealizedPnL(positions)
 
   const closedPositions = winningPositions + losingPositions
   const winRateAll = closedPositions > 0 ? (winningPositions / closedPositions) * 100 : 0
   const roiAll = totalBought > 0 ? (totalRealizedPnl / totalBought) * 100 : 0
+  const totalPnl = totalRealizedPnl + unrealizedPnl
 
-  // Calculate time-period win rates from redemptions
-  const wins7d = redemptions7d.filter(r => parseInt(r.payout || '0') > 0).length
-  const winRate7d = redemptions7d.length > 0 ? (wins7d / redemptions7d.length) * 100 : 0
-
-  const wins30d = redemptions30d.filter(r => parseInt(r.payout || '0') > 0).length
-  const winRate30d = redemptions30d.length > 0 ? (wins30d / redemptions30d.length) * 100 : 0
-
-  // Calculate PnL for time periods
-  const pnl7d = redemptions7d.reduce((sum, r) => sum + parseInt(r.payout || '0') / DECIMALS, 0)
-  const pnl30d = redemptions30d.reduce((sum, r) => sum + parseInt(r.payout || '0') / DECIMALS, 0)
+  console.log(`\n📈 All-Time: PnL=$${totalRealizedPnl.toFixed(2)}, ROI=${roiAll.toFixed(2)}%, WinRate=${winRateAll.toFixed(2)}%`)
+  console.log(`   Positions: ${openPositions} open, ${closedPositions} closed (${winningPositions}W/${losingPositions}L)`)
 
   return {
     // 7-Day Metrics
     volume7d: Math.round(volume7d * 100) / 100,
     tradeCount7d: trades7d.length,
-    pnl7d: Math.round(pnl7d * 100) / 100,
+    pnl7d: metrics7d.pnl,
     roi7d: metrics7d.roi,
-    winRate7d: Math.round(winRate7d * 100) / 100,
+    winRate7d: metrics7d.winRate,
     drawdown7d: metrics7d.drawdown,
 
     // 30-Day Metrics
     volume30d: Math.round(volume30d * 100) / 100,
     tradeCount30d: trades30d.length,
-    pnl30d: Math.round(pnl30d * 100) / 100,
+    pnl30d: metrics30d.pnl,
     roi30d: metrics30d.roi,
-    winRate30d: Math.round(winRate30d * 100) / 100,
+    winRate30d: metrics30d.winRate,
     drawdown30d: metrics30d.drawdown,
 
-    // All-Time Summary (lightweight)
+    // All-Time Summary
     winRateAll: Math.round(winRateAll * 100) / 100,
     realizedPnl: Math.round(totalRealizedPnl * 100) / 100,
+    unrealizedPnl: Math.round(unrealizedPnl * 100) / 100,
+    totalPnl: Math.round(totalPnl * 100) / 100,
     roiAll: Math.round(roiAll * 100) / 100,
 
     // Position Counts

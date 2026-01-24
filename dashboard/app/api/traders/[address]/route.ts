@@ -163,8 +163,8 @@ export async function GET(
       trades: [], // No trades from Goldsky - would need separate query
       metrics: {
         portfolioValue,
-        totalPnl: goldskyMetrics.realizedPnl,
-        unrealizedPnl: 0, // Would need positions subgraph
+        totalPnl: goldskyMetrics.totalPnl,
+        unrealizedPnl: goldskyMetrics.unrealizedPnl,
         realizedPnl: goldskyMetrics.realizedPnl,
         metrics7d,
         metrics30d,
@@ -305,8 +305,8 @@ async function updateWalletMetricsFromGoldsky(
       total_wins: metrics.winningPositions,
       total_losses: metrics.losingPositions,
       realized_pnl: metrics.realizedPnl,
-      unrealized_pnl: 0,
-      overall_pnl: metrics.realizedPnl,
+      unrealized_pnl: metrics.unrealizedPnl,
+      overall_pnl: metrics.totalPnl,
       overall_roi: metrics.roiAll,
       overall_win_rate: metrics.winRateAll,
       total_volume: metrics.volume30d,

@@ -178,6 +178,78 @@ export default function WalletTable({
     return (wallet as any)[metric + suffix] || 0
   }
 
+  // Debug: Log wallet data to browser console
+  useEffect(() => {
+    if (wallets.length > 0) {
+      const suffix = timePeriod === '30d' ? '_30d' : '_7d'
+
+      console.log(`\n%c═══════════════════════════════════════════════════════════════`, 'color: #3b82f6')
+      console.log(`%c  WALLET TABLE DEBUG - ${timePeriod.toUpperCase()} Period - ${wallets.length} wallets`, 'color: #3b82f6; font-weight: bold')
+      console.log(`%c═══════════════════════════════════════════════════════════════`, 'color: #3b82f6')
+
+      wallets.forEach((wallet, index) => {
+        const pnlVal = (wallet as any)[`pnl${suffix}`]
+        const roiVal = (wallet as any)[`roi${suffix}`]
+        const winRateVal = (wallet as any)[`win_rate${suffix}`]
+        const drawdownVal = (wallet as any)[`drawdown${suffix}`]
+        const volumeVal = (wallet as any)[`volume${suffix}`]
+        const tradeCountVal = (wallet as any)[`trade_count${suffix}`]
+
+        console.log(`\n%c[${index + 1}] ${wallet.username || wallet.address.slice(0, 10)}...`, 'color: #10b981; font-weight: bold')
+        console.log(`%cRaw DB values for ${timePeriod}:`, 'color: #f59e0b')
+        console.table({
+          address: wallet.address,
+          username: wallet.username,
+          balance: wallet.balance,
+          [`pnl${suffix}`]: pnlVal,
+          [`roi${suffix}`]: roiVal,
+          [`win_rate${suffix}`]: winRateVal,
+          [`drawdown${suffix}`]: drawdownVal,
+          [`volume${suffix}`]: volumeVal,
+          [`trade_count${suffix}`]: tradeCountVal,
+          active_positions: wallet.active_positions,
+          total_positions: wallet.total_positions,
+          total_wins: wallet.total_wins,
+          total_losses: wallet.total_losses,
+          realized_pnl: wallet.realized_pnl,
+          overall_pnl: wallet.overall_pnl,
+          overall_roi: wallet.overall_roi,
+          overall_win_rate: wallet.overall_win_rate,
+        })
+
+        // Show the displayed values
+        const fmtMoney = (v: number | undefined | null) => {
+          if (v === undefined || v === null) return '-'
+          const abs = Math.abs(v)
+          if (abs >= 1000000) return `$${(v / 1000000).toFixed(2)}M`
+          if (abs >= 1000) return `$${(v / 1000).toFixed(1)}K`
+          return `$${v.toFixed(0)}`
+        }
+        const fmtPct = (v: number | undefined | null) => {
+          if (v === undefined || v === null) return '-'
+          return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
+        }
+        const fmtPctPlain = (v: number | undefined | null) => {
+          if (v === undefined || v === null) return '-'
+          return `${v.toFixed(1)}%`
+        }
+
+        console.log(`%cDisplayed in table:`, 'color: #8b5cf6')
+        console.table({
+          'Active Positions Value': fmtMoney(wallet.balance),
+          'Win Rate': fmtPctPlain(winRateVal),
+          'ROI': fmtPct(roiVal),
+          'PnL': fmtMoney(pnlVal),
+          'Active': wallet.active_positions || 0,
+          'Positions': wallet.total_positions || 0,
+          'Drawdown': fmtPctPlain(drawdownVal),
+        })
+      })
+
+      console.log(`\n%c═══════════════════════════════════════════════════════════════`, 'color: #3b82f6')
+    }
+  }, [wallets, timePeriod])
+
   // Dynamic column name based on time period
   const getColumnName = (base: string) => {
     return timePeriod === '30d' ? `${base}_30d` : `${base}_7d`
