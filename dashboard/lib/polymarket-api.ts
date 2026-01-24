@@ -224,6 +224,7 @@ export function parseTrades(activity: unknown[]): ParsedTrade[] {
 function calculatePeriodMetrics(
   trades: ParsedTrade[],
   positions: PolymarketPosition[],
+  closedPositions: PolymarketClosedPosition[],
   days: number
 ): TimePeriodMetrics {
   const now = Date.now()
@@ -232,70 +233,40 @@ function calculatePeriodMetrics(
   // Filter trades by time period (timestamp is in seconds)
   const periodTrades = trades.filter(t => t.timestamp * 1000 >= cutoffMs)
 
-  // Calculate volume (total USD traded)
+  // Calculate volume (total USD traded in period)
   const volume = periodTrades.reduce((sum, t) => sum + t.usdValue, 0)
 
-  // Calculate PnL from trades in period
-  // BUY = spending money (negative), SELL = receiving money (positive)
-  // Also add unrealized PnL from current positions
-  let tradePnl = 0
-  for (const t of periodTrades) {
-    if (t.side === 'SELL') {
-      tradePnl += t.usdValue
-    } else {
-      tradePnl -= t.usdValue
-    }
-  }
+  // Filter closed positions by resolution date for win rate calculation
+  const periodClosedPositions = closedPositions.filter(p => {
+    if (!p.resolvedAt) return false
+    const resolvedMs = new Date(p.resolvedAt).getTime()
+    return resolvedMs >= cutoffMs
+  })
 
-  // Add unrealized PnL from positions (always current)
-  const unrealizedPnl = positions.reduce((sum, p) => sum + p.cashPnl, 0)
-  const pnl = tradePnl + unrealizedPnl
+  // Calculate PnL from positions resolved in this period
+  const realizedPnl = periodClosedPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
 
-  // Calculate ROI: PnL / invested amount
+  // Calculate win rate from positions resolved in this period
+  const winningPositions = periodClosedPositions.filter(p => p.realizedPnl > 0)
+  const winRate = periodClosedPositions.length > 0
+    ? (winningPositions.length / periodClosedPositions.length) * 100
+    : 0
+
+  // Calculate ROI: PnL / invested amount for positions resolved in period
   const invested = periodTrades
     .filter(t => t.side === 'BUY')
     .reduce((sum, t) => sum + t.usdValue, 0)
-  const roi = invested > 0 ? (pnl / invested) * 100 : 0
-
-  // Calculate drawdown from cumulative PnL
-  let drawdown = 0
-  if (periodTrades.length > 0) {
-    const sortedTrades = [...periodTrades].sort((a, b) => a.timestamp - b.timestamp)
-    let cumulative = 0
-    let peak = 0
-
-    for (const t of sortedTrades) {
-      if (t.side === 'SELL') {
-        cumulative += t.usdValue
-      } else {
-        cumulative -= t.usdValue
-      }
-      if (cumulative > peak) {
-        peak = cumulative
-      }
-      if (peak > 0) {
-        const currentDrawdown = ((peak - cumulative) / peak) * 100
-        if (currentDrawdown > drawdown) {
-          drawdown = currentDrawdown
-        }
-      }
-    }
-  }
-
-  // Win rate from positions with PnL (best proxy we have)
-  const positionsWithPnl = positions.filter(p => p.cashPnl !== 0)
-  const winningPositions = positionsWithPnl.filter(p => p.cashPnl > 0)
-  const winRate = positionsWithPnl.length > 0
-    ? (winningPositions.length / positionsWithPnl.length) * 100
-    : 0
+  const roi = invested > 0 ? (realizedPnl / invested) * 100 : 0
 
   return {
-    pnl,
+    pnl: realizedPnl,
     roi,
     volume,
-    drawdown,
     tradeCount: periodTrades.length,
     winRate,
+    positionsResolved: periodClosedPositions.length,
+    winningPositions: winningPositions.length,
+    losingPositions: periodClosedPositions.length - winningPositions.length,
   }
 }
 
@@ -328,9 +299,9 @@ export function calculateMetrics(
   // Parse all trades
   const allTrades = parseTrades(activity)
 
-  // Calculate time-period metrics
-  const metrics7d = calculatePeriodMetrics(allTrades, positions, 7)
-  const metrics30d = calculatePeriodMetrics(allTrades, positions, 30)
+  // Calculate time-period metrics (now includes closedPositions for accurate win rate)
+  const metrics7d = calculatePeriodMetrics(allTrades, positions, closedPositions, 7)
+  const metrics30d = calculatePeriodMetrics(allTrades, positions, closedPositions, 30)
 
   // Calculate average trade interval
   const avgTradeIntervalHours = calculateAvgTradeInterval(allTrades)
@@ -346,6 +317,12 @@ export function calculateMetrics(
   const unrealizedPnl = positions.reduce((sum, p) => sum + p.cashPnl, 0)
   const realizedPnl = closedPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
   const totalPnl = unrealizedPnl + realizedPnl
+
+  // Win rate calculation (all-time from closed positions)
+  const totalWins = closedPositions.filter(p => p.realizedPnl > 0).length
+  const winRateAllTime = closedPositions.length > 0
+    ? (totalWins / closedPositions.length) * 100
+    : 0
 
   // ROI calculation
   const totalInvested = portfolioValue + Math.abs(realizedPnl) - unrealizedPnl
@@ -370,16 +347,16 @@ export function calculateMetrics(
 
     // Legacy fields for compatibility
     winRate30d: metrics30d.winRate,
-    winRateAllTime: metrics30d.winRate,
+    winRateAllTime,
     roiPercent,
     tradeCount30d: metrics30d.tradeCount,
-    tradeCountAllTime: allTrades.length + closedPositions.length,
+    tradeCountAllTime: allTrades.length,
     uniqueMarkets30d: marketSet.size,
     positionConcentration,
     maxPositionSize,
     avgPositionSize,
-    totalPositions: positions.length + closedPositions.length,
-    maxDrawdown: metrics30d.drawdown,
+    totalPositions: closedPositions.length,
+    maxDrawdown: 0, // Not available from API
     tradeFrequency: metrics30d.tradeCount / 30,
     nightTradeRatio: 0,
   }

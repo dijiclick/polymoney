@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import {
-  getFullTraderData,
+  getProfile,
+  getPortfolioValue,
+  getPositions,
   parsePositions,
-  parseClosedPositions,
-  calculateMetrics,
-  parseTrades,
   isValidEthAddress,
 } from '@/lib/polymarket-api'
+import { getTraderMetrics as getGoldskyMetrics, GoldskyMetrics } from '@/lib/goldsky-api'
 import { TraderProfileResponse, TraderFetchError, TimePeriodMetrics } from '@/lib/types/trader'
 
 // Cache duration: 5 minutes
@@ -37,223 +37,224 @@ export async function GET(
   // Check if force refresh requested
   const forceRefresh = request.nextUrl.searchParams.get('refresh') === 'true'
 
-  // 2. Check database for cached data
-  const { data: dbTrader } = await supabase
-    .from('traders')
+  // 2. Check database for cached data from wallets table (unified source)
+  const { data: dbWallet } = await supabase
+    .from('wallets')
     .select('*')
     .eq('address', address)
     .single()
 
-  // 3. Check if cached data is fresh enough
-  const isFresh = dbTrader?.last_updated_at &&
-    Date.now() - new Date(dbTrader.last_updated_at).getTime() < CACHE_DURATION_MS
+  // 3. Check if cached data is fresh enough (using metrics_updated_at)
+  const isFresh = dbWallet?.metrics_updated_at &&
+    Date.now() - new Date(dbWallet.metrics_updated_at).getTime() < CACHE_DURATION_MS
 
-  // 4. If fresh cached data and no force refresh, return it
-  if (dbTrader && isFresh && !forceRefresh) {
-    // Also fetch positions from DB
-    const { data: dbPositions } = await supabase
-      .from('trader_positions')
-      .select('*')
-      .eq('address', address)
-      .order('current_value', { ascending: false })
+  // 4. If fresh cached data and no force refresh, return it from wallets table
+  if (dbWallet && isFresh && !forceRefresh) {
+    const metrics7d: TimePeriodMetrics = {
+      pnl: dbWallet.pnl_7d || 0,
+      roi: dbWallet.roi_7d || 0,
+      volume: dbWallet.volume_7d || 0,
+      tradeCount: dbWallet.trade_count_7d || 0,
+      winRate: dbWallet.win_rate_7d || 0,
+      drawdown: dbWallet.drawdown_7d || 0,
+    }
 
-    // Create default time period metrics from cached data
-    const defaultPeriodMetrics: TimePeriodMetrics = {
-      pnl: dbTrader.total_pnl || 0,
-      roi: dbTrader.roi_percent || 0,
-      volume: 0,
-      drawdown: dbTrader.max_drawdown || 0,
-      tradeCount: dbTrader.trade_count_30d || 0,
-      winRate: dbTrader.win_rate_30d || 0,
+    const metrics30d: TimePeriodMetrics = {
+      pnl: dbWallet.pnl_30d || 0,
+      roi: dbWallet.roi_30d || 0,
+      volume: dbWallet.volume_30d || 0,
+      tradeCount: dbWallet.trade_count_30d || 0,
+      winRate: dbWallet.win_rate_30d || 0,
+      drawdown: dbWallet.drawdown_30d || 0,
     }
 
     const response: TraderProfileResponse = {
       source: 'database',
       dataFreshness: 'cached',
-      cachedAt: dbTrader.last_updated_at,
+      cachedAt: dbWallet.metrics_updated_at,
       address,
-      username: dbTrader.username,
-      profileImage: dbTrader.profile_image,
-      accountCreatedAt: dbTrader.account_created_at,
-      positions: (dbPositions || []).map((p) => ({
-        conditionId: p.condition_id,
-        asset: p.asset_id || '',
-        marketSlug: p.market_slug,
-        title: p.market_title,
-        outcome: p.outcome,
-        outcomeIndex: p.outcome_index || 0,
-        size: p.size || 0,
-        avgPrice: p.avg_price || 0,
-        currentPrice: p.current_price || 0,
-        initialValue: p.initial_value || 0,
-        currentValue: p.current_value || 0,
-        cashPnl: p.pnl || 0,
-        percentPnl: p.pnl_percent || 0,
-      })),
-      closedPositionsCount: dbTrader.closed_positions_alltime || 0,
-      trades: [], // No trades in cached response
+      username: dbWallet.username,
+      profileImage: undefined,
+      accountCreatedAt: dbWallet.account_created_at,
+      positions: [],
+      closedPositionsCount: dbWallet.total_positions || 0,
+      trades: [],
       metrics: {
-        portfolioValue: dbTrader.portfolio_value || 0,
-        totalPnl: dbTrader.total_pnl || 0,
-        unrealizedPnl: dbTrader.unrealized_pnl || 0,
-        realizedPnl: dbTrader.realized_pnl || 0,
-        metrics7d: defaultPeriodMetrics,
-        metrics30d: defaultPeriodMetrics,
+        portfolioValue: dbWallet.balance || 0,
+        totalPnl: dbWallet.overall_pnl || 0,
+        unrealizedPnl: dbWallet.unrealized_pnl || 0,
+        realizedPnl: dbWallet.realized_pnl || 0,
+        metrics7d,
+        metrics30d,
         avgTradeIntervalHours: 0,
-        activePositions: dbTrader.active_positions || 0,
-        winRate30d: dbTrader.win_rate_30d || 0,
-        winRateAllTime: dbTrader.win_rate_alltime || 0,
-        roiPercent: dbTrader.roi_percent || 0,
-        tradeCount30d: dbTrader.trade_count_30d || 0,
-        tradeCountAllTime: dbTrader.trade_count_alltime || 0,
-        uniqueMarkets30d: dbTrader.unique_markets_30d || 0,
-        accountAgeDays: dbTrader.account_age_days,
-        positionConcentration: dbTrader.position_concentration || 0,
-        maxPositionSize: dbTrader.max_position_size || 0,
-        avgPositionSize: dbTrader.avg_position_size || 0,
-        totalPositions: dbTrader.total_positions || 0,
-        maxDrawdown: dbTrader.max_drawdown || 0,
-        tradeFrequency: dbTrader.trade_frequency || 0,
-        nightTradeRatio: dbTrader.night_trade_ratio || 0,
+        activePositions: dbWallet.active_positions || 0,
+        winRate30d: dbWallet.win_rate_30d || 0,
+        winRateAllTime: dbWallet.overall_win_rate || 0,
+        roiPercent: dbWallet.overall_roi || 0,
+        tradeCount30d: dbWallet.trade_count_30d || 0,
+        tradeCountAllTime: dbWallet.total_trades || 0,
+        uniqueMarkets30d: 0,
+        accountAgeDays: undefined,
+        positionConcentration: 0,
+        maxPositionSize: 0,
+        avgPositionSize: 0,
+        totalPositions: (dbWallet.total_positions || 0) + (dbWallet.active_positions || 0),
+        maxDrawdown: 0,
+        tradeFrequency: (dbWallet.trade_count_30d || 0) / 30,
+        nightTradeRatio: 0,
       },
-      scores: dbTrader.copytrade_score !== null ? {
-        copytradeScore: dbTrader.copytrade_score || 0,
-        botScore: dbTrader.bot_score || 0,
-        insiderScore: dbTrader.insider_score || 0,
-        insiderLevel: dbTrader.insider_level,
-        insiderRedFlags: dbTrader.insider_red_flags,
-        primaryClassification: dbTrader.primary_classification,
-      } : undefined,
+      scores: undefined,
       isNewlyFetched: false,
-      lastUpdatedAt: dbTrader.last_updated_at,
+      lastUpdatedAt: dbWallet.metrics_updated_at,
+      goldskyEnhanced: true, // Cached data comes from Goldsky
     }
 
     return NextResponse.json(response)
   }
 
-  // 5. Fetch from Polymarket API
+  // 5. Fetch ALL metrics from Goldsky + basic info from Polymarket API
   try {
-    const liveData = await getFullTraderData(address)
+    // Goldsky: ALL metrics (volume, trades, PnL, win rate, ROI, positions)
+    // Polymarket API: Only profile info, portfolio value, and current positions for display
+    const [goldskyMetrics, profile, portfolioValue, rawPositions] = await Promise.all([
+      getGoldskyMetrics(address, 30),
+      getProfile(address).catch(() => ({} as { pseudonym?: string; name?: string; profileImage?: string; createdAt?: string })),
+      getPortfolioValue(address).catch(() => 0),
+      getPositions(address).catch(() => []),
+    ])
 
-    // 6. Parse and calculate metrics
-    const positions = parsePositions(liveData.positions)
-    const closedPositions = parseClosedPositions(liveData.closedPositions)
-    const trades = parseTrades(liveData.activity)
-    const metrics = calculateMetrics(
-      liveData.portfolioValue,
-      positions,
-      closedPositions,
-      liveData.activity
-    )
+    // Parse positions for display
+    const positions = parsePositions(rawPositions)
 
-    // 7. Cache to database (don't await, run in background)
-    cacheTraderData(address, metrics, positions, closedPositions, liveData.profile)
+    // Build metrics from Goldsky data (includes ROI and drawdown for each period)
+    const metrics7d: TimePeriodMetrics = {
+      pnl: goldskyMetrics.pnl7d,
+      roi: goldskyMetrics.roi7d,
+      volume: goldskyMetrics.volume7d,
+      tradeCount: goldskyMetrics.tradeCount7d,
+      winRate: goldskyMetrics.winRate7d,
+      drawdown: goldskyMetrics.drawdown7d,
+    }
 
-    // 8. Build response
+    const metrics30d: TimePeriodMetrics = {
+      pnl: goldskyMetrics.pnl30d,
+      roi: goldskyMetrics.roi30d,
+      volume: goldskyMetrics.volume30d,
+      tradeCount: goldskyMetrics.tradeCount30d,
+      winRate: goldskyMetrics.winRate30d,
+      drawdown: goldskyMetrics.drawdown30d,
+    }
+
+    // 6. Update wallets table with fresh Goldsky data (if wallet exists)
+    if (dbWallet) {
+      updateWalletMetricsFromGoldsky(address, goldskyMetrics, portfolioValue, positions.length, profile)
+    }
+
+    // 7. Build response with Goldsky metrics
     const response: TraderProfileResponse = {
-      source: dbTrader ? 'mixed' : 'live',
+      source: dbWallet ? 'mixed' : 'live',
       dataFreshness: 'fresh',
       address,
-      username: liveData.profile.pseudonym || liveData.profile.name || dbTrader?.username,
-      profileImage: liveData.profile.profileImage || dbTrader?.profile_image,
-      accountCreatedAt: liveData.profile.createdAt,
+      username: profile.pseudonym || profile.name || dbWallet?.username,
+      profileImage: profile.profileImage,
+      accountCreatedAt: profile.createdAt,
       positions,
-      closedPositionsCount: closedPositions.length,
-      trades: trades.slice(0, 25), // Return 25 most recent trades
-      metrics,
-      scores: dbTrader?.copytrade_score !== null && dbTrader?.copytrade_score !== undefined ? {
-        copytradeScore: dbTrader.copytrade_score || 0,
-        botScore: dbTrader.bot_score || 0,
-        insiderScore: dbTrader.insider_score || 0,
-        insiderLevel: dbTrader.insider_level,
-        insiderRedFlags: dbTrader.insider_red_flags,
-        primaryClassification: dbTrader.primary_classification,
-      } : undefined,
+      closedPositionsCount: goldskyMetrics.closedPositions,
+      trades: [], // No trades from Goldsky - would need separate query
+      metrics: {
+        portfolioValue,
+        totalPnl: goldskyMetrics.realizedPnl,
+        unrealizedPnl: 0, // Would need positions subgraph
+        realizedPnl: goldskyMetrics.realizedPnl,
+        metrics7d,
+        metrics30d,
+        avgTradeIntervalHours: 0,
+        activePositions: goldskyMetrics.openPositions,
+        winRate30d: goldskyMetrics.winRate30d,
+        winRateAllTime: goldskyMetrics.winRateAll,
+        roiPercent: goldskyMetrics.roiAll,
+        tradeCount30d: goldskyMetrics.tradeCount30d,
+        tradeCountAllTime: goldskyMetrics.tradeCount30d, // Use 30d as proxy
+        uniqueMarkets30d: goldskyMetrics.uniqueMarkets,
+        accountAgeDays: undefined,
+        positionConcentration: 0,
+        maxPositionSize: 0,
+        avgPositionSize: 0,
+        totalPositions: goldskyMetrics.totalPositions,
+        maxDrawdown: goldskyMetrics.drawdown30d,
+        tradeFrequency: goldskyMetrics.tradeCount30d / 30,
+        nightTradeRatio: 0,
+      },
+      scores: undefined,
       isNewlyFetched: true,
       lastUpdatedAt: new Date().toISOString(),
+      goldskyEnhanced: true,
     }
 
     return NextResponse.json(response)
   } catch (error) {
     console.error('Error fetching trader data:', error)
 
-    // If API fails but we have stale cached data, return it with warning
-    if (dbTrader) {
-      const { data: dbPositions } = await supabase
-        .from('trader_positions')
-        .select('*')
-        .eq('address', address)
-        .order('current_value', { ascending: false })
+    // If Goldsky fails but we have stale cached data, return it with warning
+    if (dbWallet) {
+      const stalePeriodMetrics7d: TimePeriodMetrics = {
+        pnl: dbWallet.pnl_7d || 0,
+        roi: dbWallet.roi_7d || 0,
+        volume: dbWallet.volume_7d || 0,
+        tradeCount: dbWallet.trade_count_7d || 0,
+        winRate: dbWallet.win_rate_7d || 0,
+        drawdown: dbWallet.drawdown_7d || 0,
+      }
 
-      const stalePeriodMetrics: TimePeriodMetrics = {
-        pnl: dbTrader.total_pnl || 0,
-        roi: dbTrader.roi_percent || 0,
-        volume: 0,
-        drawdown: dbTrader.max_drawdown || 0,
-        tradeCount: dbTrader.trade_count_30d || 0,
-        winRate: dbTrader.win_rate_30d || 0,
+      const stalePeriodMetrics30d: TimePeriodMetrics = {
+        pnl: dbWallet.pnl_30d || 0,
+        roi: dbWallet.roi_30d || 0,
+        volume: dbWallet.volume_30d || 0,
+        tradeCount: dbWallet.trade_count_30d || 0,
+        winRate: dbWallet.win_rate_30d || 0,
+        drawdown: dbWallet.drawdown_30d || 0,
       }
 
       const response: TraderProfileResponse = {
         source: 'database',
         dataFreshness: 'stale',
-        cachedAt: dbTrader.last_updated_at,
+        cachedAt: dbWallet.metrics_updated_at,
         address,
-        username: dbTrader.username,
-        profileImage: dbTrader.profile_image,
-        accountCreatedAt: dbTrader.account_created_at,
-        positions: (dbPositions || []).map((p) => ({
-          conditionId: p.condition_id,
-          asset: p.asset_id || '',
-          marketSlug: p.market_slug,
-          title: p.market_title,
-          outcome: p.outcome,
-          outcomeIndex: p.outcome_index || 0,
-          size: p.size || 0,
-          avgPrice: p.avg_price || 0,
-          currentPrice: p.current_price || 0,
-          initialValue: p.initial_value || 0,
-          currentValue: p.current_value || 0,
-          cashPnl: p.pnl || 0,
-          percentPnl: p.pnl_percent || 0,
-        })),
-        closedPositionsCount: dbTrader.closed_positions_alltime || 0,
+        username: dbWallet.username,
+        profileImage: undefined,
+        accountCreatedAt: dbWallet.account_created_at,
+        positions: [],
+        closedPositionsCount: dbWallet.total_positions || 0,
         trades: [],
         metrics: {
-          portfolioValue: dbTrader.portfolio_value || 0,
-          totalPnl: dbTrader.total_pnl || 0,
-          unrealizedPnl: dbTrader.unrealized_pnl || 0,
-          realizedPnl: dbTrader.realized_pnl || 0,
-          metrics7d: stalePeriodMetrics,
-          metrics30d: stalePeriodMetrics,
+          portfolioValue: dbWallet.balance || 0,
+          totalPnl: dbWallet.overall_pnl || 0,
+          unrealizedPnl: dbWallet.unrealized_pnl || 0,
+          realizedPnl: dbWallet.realized_pnl || 0,
+          metrics7d: stalePeriodMetrics7d,
+          metrics30d: stalePeriodMetrics30d,
           avgTradeIntervalHours: 0,
-          activePositions: dbTrader.active_positions || 0,
-          winRate30d: dbTrader.win_rate_30d || 0,
-          winRateAllTime: dbTrader.win_rate_alltime || 0,
-          roiPercent: dbTrader.roi_percent || 0,
-          tradeCount30d: dbTrader.trade_count_30d || 0,
-          tradeCountAllTime: dbTrader.trade_count_alltime || 0,
-          uniqueMarkets30d: dbTrader.unique_markets_30d || 0,
-          accountAgeDays: dbTrader.account_age_days,
-          positionConcentration: dbTrader.position_concentration || 0,
-          maxPositionSize: dbTrader.max_position_size || 0,
-          avgPositionSize: dbTrader.avg_position_size || 0,
-          totalPositions: dbTrader.total_positions || 0,
-          maxDrawdown: dbTrader.max_drawdown || 0,
-          tradeFrequency: dbTrader.trade_frequency || 0,
-          nightTradeRatio: dbTrader.night_trade_ratio || 0,
+          activePositions: dbWallet.active_positions || 0,
+          winRate30d: dbWallet.win_rate_30d || 0,
+          winRateAllTime: dbWallet.overall_win_rate || 0,
+          roiPercent: dbWallet.overall_roi || 0,
+          tradeCount30d: dbWallet.trade_count_30d || 0,
+          tradeCountAllTime: dbWallet.total_trades || 0,
+          uniqueMarkets30d: 0,
+          accountAgeDays: undefined,
+          positionConcentration: 0,
+          maxPositionSize: 0,
+          avgPositionSize: 0,
+          totalPositions: (dbWallet.total_positions || 0) + (dbWallet.active_positions || 0),
+          maxDrawdown: 0,
+          tradeFrequency: (dbWallet.trade_count_30d || 0) / 30,
+          nightTradeRatio: 0,
         },
-        scores: dbTrader.copytrade_score !== null ? {
-          copytradeScore: dbTrader.copytrade_score || 0,
-          botScore: dbTrader.bot_score || 0,
-          insiderScore: dbTrader.insider_score || 0,
-          insiderLevel: dbTrader.insider_level,
-          insiderRedFlags: dbTrader.insider_red_flags,
-          primaryClassification: dbTrader.primary_classification,
-        } : undefined,
+        scores: undefined,
         isNewlyFetched: false,
-        lastUpdatedAt: dbTrader.last_updated_at,
+        lastUpdatedAt: dbWallet.metrics_updated_at,
         warning: 'Live data unavailable, showing cached data',
+        goldskyEnhanced: true,
       }
 
       return NextResponse.json(response)
@@ -270,70 +271,50 @@ export async function GET(
 }
 
 /**
- * Cache trader data to Supabase (runs in background)
+ * Update wallet metrics in Supabase from Goldsky data
  */
-async function cacheTraderData(
+async function updateWalletMetricsFromGoldsky(
   address: string,
-  metrics: TraderProfileResponse['metrics'],
-  positions: TraderProfileResponse['positions'],
-  closedPositions: { conditionId: string; title?: string; outcome?: string; realizedPnl: number; isWin: boolean }[],
+  metrics: GoldskyMetrics,
+  portfolioValue: number,
+  activePositionCount: number,
   profile?: { pseudonym?: string; name?: string; profileImage?: string; createdAt?: string }
 ) {
   try {
-    // Upsert trader metrics
-    await supabase.from('traders').upsert({
-      address,
+    await supabase.from('wallets').update({
       username: profile?.pseudonym || profile?.name,
-      profile_image: profile?.profileImage,
       account_created_at: profile?.createdAt,
-      portfolio_value: metrics.portfolioValue,
-      total_pnl: metrics.totalPnl,
-      unrealized_pnl: metrics.unrealizedPnl,
-      realized_pnl: metrics.realizedPnl,
+      balance: portfolioValue,
+      // 7-day metrics (from Goldsky)
+      pnl_7d: metrics.pnl7d,
+      roi_7d: metrics.roi7d,
+      win_rate_7d: metrics.winRate7d,
+      volume_7d: metrics.volume7d,
+      trade_count_7d: metrics.tradeCount7d,
+      drawdown_7d: metrics.drawdown7d,
+      // 30-day metrics (from Goldsky)
+      pnl_30d: metrics.pnl30d,
+      roi_30d: metrics.roi30d,
       win_rate_30d: metrics.winRate30d,
-      win_rate_alltime: metrics.winRateAllTime,
-      roi_percent: metrics.roiPercent,
+      volume_30d: metrics.volume30d,
       trade_count_30d: metrics.tradeCount30d,
-      trade_count_alltime: metrics.tradeCountAllTime,
-      unique_markets_30d: metrics.uniqueMarkets30d,
-      position_concentration: metrics.positionConcentration,
-      max_position_size: metrics.maxPositionSize,
-      avg_position_size: metrics.avgPositionSize,
-      active_positions: metrics.activePositions,
-      total_positions: metrics.totalPositions,
-      max_drawdown: metrics.maxDrawdown,
-      trade_frequency: metrics.tradeFrequency,
-      night_trade_ratio: metrics.nightTradeRatio,
-      closed_positions_alltime: closedPositions.length,
-      last_updated_at: new Date().toISOString(),
-    }, {
-      onConflict: 'address',
-    })
-
-    // Delete old positions and insert new ones
-    await supabase.from('trader_positions').delete().eq('address', address)
-
-    if (positions.length > 0) {
-      await supabase.from('trader_positions').insert(
-        positions.map((p) => ({
-          address,
-          condition_id: p.conditionId,
-          asset_id: p.asset,
-          market_slug: p.marketSlug,
-          market_title: p.title,
-          outcome: p.outcome,
-          outcome_index: p.outcomeIndex,
-          size: p.size,
-          avg_price: p.avgPrice,
-          current_price: p.currentPrice,
-          initial_value: p.initialValue,
-          current_value: p.currentValue,
-          pnl: p.cashPnl,
-          pnl_percent: p.percentPnl,
-        }))
-      )
-    }
+      drawdown_30d: metrics.drawdown30d,
+      // Overall metrics (from Goldsky)
+      total_positions: metrics.closedPositions,
+      active_positions: activePositionCount,
+      total_wins: metrics.winningPositions,
+      total_losses: metrics.losingPositions,
+      realized_pnl: metrics.realizedPnl,
+      unrealized_pnl: 0,
+      overall_pnl: metrics.realizedPnl,
+      overall_roi: metrics.roiAll,
+      overall_win_rate: metrics.winRateAll,
+      total_volume: metrics.volume30d,
+      total_trades: metrics.tradeCount30d,
+      metrics_updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('address', address)
   } catch (error) {
-    console.error('Error caching trader data:', error)
+    console.error('Error updating wallet metrics:', error)
   }
 }

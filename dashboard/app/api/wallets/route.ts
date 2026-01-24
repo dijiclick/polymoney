@@ -4,6 +4,7 @@ import { supabase, Wallet, WalletSource } from '@/lib/supabase'
 // Valid columns for sorting
 const VALID_SORT_COLUMNS = [
   'balance',
+  // Period metrics (7d/30d)
   'win_rate_7d',
   'win_rate_30d',
   'pnl_7d',
@@ -14,6 +15,18 @@ const VALID_SORT_COLUMNS = [
   'volume_30d',
   'trade_count_7d',
   'trade_count_30d',
+  // Overall/all-time metrics
+  'overall_win_rate',
+  'overall_pnl',
+  'overall_roi',
+  'realized_pnl',
+  'unrealized_pnl',
+  'total_volume',
+  'total_positions',
+  'active_positions',
+  'total_trades',
+  'total_wins',
+  'total_losses',
   'created_at',
   'updated_at'
 ]
@@ -72,7 +85,7 @@ export async function GET(request: NextRequest) {
     // Simple mapping - no more categories/best_rank processing
     const wallets: Wallet[] = (data || []).map((wallet: any) => ({
       ...wallet,
-      // Ensure numeric fields have defaults
+      // ===== PERIOD METRICS (7d and 30d - independently calculated) =====
       pnl_7d: wallet.pnl_7d || 0,
       pnl_30d: wallet.pnl_30d || 0,
       roi_7d: wallet.roi_7d || 0,
@@ -83,6 +96,18 @@ export async function GET(request: NextRequest) {
       volume_30d: wallet.volume_30d || 0,
       trade_count_7d: wallet.trade_count_7d || 0,
       trade_count_30d: wallet.trade_count_30d || 0,
+      // ===== OVERALL/ALL-TIME METRICS =====
+      total_positions: wallet.total_positions || 0,
+      active_positions: wallet.active_positions || 0,
+      total_wins: wallet.total_wins || 0,
+      total_losses: wallet.total_losses || 0,
+      realized_pnl: wallet.realized_pnl || 0,
+      unrealized_pnl: wallet.unrealized_pnl || 0,
+      overall_pnl: wallet.overall_pnl || 0,
+      overall_roi: wallet.overall_roi || 0,
+      overall_win_rate: wallet.overall_win_rate || 0,
+      total_volume: wallet.total_volume || 0,
+      total_trades: wallet.total_trades || 0,
     }))
 
     return NextResponse.json({

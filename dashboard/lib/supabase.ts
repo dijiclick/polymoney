@@ -107,17 +107,33 @@ export interface Wallet {
   source: WalletSource
   balance: number
   balance_updated_at?: string
-  // Pre-calculated metrics stored in DB
-  pnl_7d: number
-  pnl_30d: number
-  roi_7d: number
-  roi_30d: number
-  win_rate_7d: number
-  win_rate_30d: number
-  volume_7d: number
-  volume_30d: number
-  trade_count_7d: number
-  trade_count_30d: number
+  username?: string
+  account_created_at?: string
+  // ===== PERIOD METRICS (independently calculated) =====
+  // 7-day: based on trades EXECUTED and positions RESOLVED in last 7 days
+  pnl_7d: number           // realized PnL from positions resolved in 7d
+  roi_7d: number           // ROI for positions resolved in 7d
+  win_rate_7d: number      // win rate for positions resolved in 7d
+  volume_7d: number        // volume from trades executed in 7d
+  trade_count_7d: number   // trades executed in 7d
+  // 30-day: based on trades EXECUTED and positions RESOLVED in last 30 days
+  pnl_30d: number          // realized PnL from positions resolved in 30d
+  roi_30d: number          // ROI for positions resolved in 30d
+  win_rate_30d: number     // win rate for positions resolved in 30d
+  volume_30d: number       // volume from trades executed in 30d
+  trade_count_30d: number  // trades executed in 30d
+  // ===== OVERALL/ALL-TIME METRICS (matches Polymarket profile) =====
+  total_positions: number   // closed positions (all-time)
+  active_positions: number  // currently open positions
+  total_wins: number        // positions with positive PnL
+  total_losses: number      // positions with negative/zero PnL
+  realized_pnl: number      // sum of all realized PnL
+  unrealized_pnl: number    // sum of cashPnl from open positions
+  overall_pnl: number       // realized + unrealized
+  overall_roi: number       // overall ROI percentage
+  overall_win_rate: number  // total_wins / total_positions * 100
+  total_volume: number      // all-time volume
+  total_trades: number      // all-time trade count
   metrics_updated_at?: string
   created_at: string
   updated_at: string

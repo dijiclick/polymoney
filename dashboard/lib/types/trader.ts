@@ -34,9 +34,13 @@ export interface TimePeriodMetrics {
   pnl: number
   roi: number
   volume: number  // total trade volume
-  drawdown: number
   tradeCount: number
   winRate: number
+  drawdown?: number  // maximum peak-to-trough decline (%)
+  // Optional fields
+  positionsResolved?: number  // positions resolved in this period
+  winningPositions?: number
+  losingPositions?: number
 }
 
 export interface TraderMetrics {
@@ -109,6 +113,7 @@ export interface TraderProfileResponse {
   isNewlyFetched: boolean
   lastUpdatedAt?: string
   warning?: string
+  goldskyEnhanced?: boolean  // True if metrics were enhanced with Goldsky on-chain data
 }
 
 export interface TraderFetchError {
