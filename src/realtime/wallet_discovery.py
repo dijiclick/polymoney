@@ -406,7 +406,12 @@ class WalletDiscoveryProcessor:
 
         for pos in period_positions:
             realized_pnl = float(pos.get("realizedPnl", 0))
-            initial_value = float(pos.get("initialValue", 0))
+
+            # Calculate initial investment: totalBought * avgPrice
+            # (initialValue field doesn't exist in API response)
+            total_bought = float(pos.get("totalBought", 0))
+            avg_price = float(pos.get("avgPrice", 0))
+            initial_value = total_bought * avg_price
 
             total_pnl += realized_pnl
             total_invested += initial_value
