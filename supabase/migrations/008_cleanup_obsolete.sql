@@ -53,14 +53,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================
--- DROP OLD RLS POLICIES (if they exist)
--- ============================================
-
--- These were for wallet_leaderboard_rankings which is now dropped
-DROP POLICY IF EXISTS "Allow public read on rankings" ON wallet_leaderboard_rankings;
-DROP POLICY IF EXISTS "Allow service role full access on rankings" ON wallet_leaderboard_rankings;
-
--- ============================================
 -- CLEANUP: Remove any remaining 'both' or 'leaderboard' source entries
 -- ============================================
 
