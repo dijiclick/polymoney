@@ -1,9 +1,9 @@
 @echo off
-title Polymarket Copy Trading Service
+title Polymarket Live Feed Service
 cd /d "%~dp0"
 
 echo ============================================================
-echo    POLYMARKET COPY TRADING SERVICE
+echo    POLYMARKET LIVE FEED SERVICE
 echo ============================================================
 echo.
 
@@ -24,11 +24,11 @@ if not exist ".env" (
     exit /b 1
 )
 
-echo Starting copy trading service...
+echo Starting live feed service...
 echo Press Ctrl+C to stop.
 echo.
 
 :: Run the service
-venv\Scripts\python.exe -m src.execution.service
+venv\Scripts\python.exe -m src.realtime.service
 
 pause

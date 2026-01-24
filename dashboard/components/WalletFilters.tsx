@@ -56,13 +56,14 @@ export default function WalletFilters({ filter, onChange }: Props) {
           </select>
         </div>
 
-        {/* Min Balance */}
+        {/* Min Portfolio Value */}
         <div>
-          <label className="block text-sm text-gray-400 mb-1">Min Balance ($)</label>
+          <label className="block text-sm text-gray-400 mb-1">Min Portfolio ($)</label>
           <input
             type="number"
-            value={filter.minBalance || 200}
-            onChange={(e) => onChange({ ...filter, minBalance: parseInt(e.target.value) || 0 })}
+            value={filter.minBalance ?? ''}
+            onChange={(e) => onChange({ ...filter, minBalance: e.target.value === '' ? 0 : parseInt(e.target.value) })}
+            placeholder="0"
             min={0}
             step={100}
             className="w-full bg-gray-700 rounded px-3 py-2 text-white border border-gray-600 focus:border-blue-500 focus:outline-none"

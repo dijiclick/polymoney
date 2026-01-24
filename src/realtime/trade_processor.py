@@ -75,29 +75,43 @@ class TradeProcessor:
             return_exceptions=True,
         )
         logger.info(
-            f"Loaded {len(self._trader_cache)} traders, "
+            f"Loaded {len(self._trader_cache)} wallets, "
             f"{len(self._watchlist_cache)} watchlist, "
             f"{len(self._alert_rules)} alert rules"
         )
 
     async def _load_trader_cache(self) -> None:
-        """Load known traders into cache."""
+        """Load known wallets into cache."""
         try:
+            # Use the new wallets table from wallet analytics schema
             result = (
-                self.supabase.table("traders")
-                .select(
-                    "address, username, copytrade_score, bot_score, "
-                    "insider_score, insider_level, insider_red_flags, "
-                    "primary_classification, portfolio_value"
-                )
+                self.supabase.table("wallets")
+                .select("address, source, balance")
                 .execute()
             )
 
-            self._trader_cache = {t["address"].lower(): t for t in (result.data or [])}
-            logger.debug(f"Loaded {len(self._trader_cache)} traders to cache")
+            # Build cache with wallet data
+            self._trader_cache = {}
+            for w in result.data or []:
+                addr = w["address"].lower()
+                self._trader_cache[addr] = {
+                    "address": addr,
+                    "source": w.get("source"),
+                    "portfolio_value": w.get("balance"),
+                    # Legacy fields for compatibility - set to None/defaults
+                    "username": None,
+                    "copytrade_score": None,
+                    "bot_score": None,
+                    "insider_score": None,
+                    "insider_level": None,
+                    "insider_red_flags": [],
+                    "primary_classification": None,
+                }
+
+            logger.debug(f"Loaded {len(self._trader_cache)} wallets to cache")
 
         except Exception as e:
-            logger.error(f"Failed to load trader cache: {e}")
+            logger.error(f"Failed to load wallet cache: {e}")
             self._errors += 1
 
     async def _load_watchlist(self) -> None:
@@ -550,7 +564,7 @@ class TradeProcessor:
                     await self._cleanup_old_trades(TRADE_RETENTION_DAYS)
 
                 logger.debug(
-                    f"Caches refreshed: {len(self._trader_cache)} traders, "
+                    f"Caches refreshed: {len(self._trader_cache)} wallets, "
                     f"{len(self._watchlist_cache)} watchlist, "
                     f"{len(self._session_trades)} session traders"
                 )

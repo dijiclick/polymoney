@@ -37,7 +37,7 @@ class LeaderboardWalletCollector:
     and stores them with source='leaderboard'.
     """
 
-    BASE_URL = "https://data-api.polymarket.com/leaderboard"
+    BASE_URL = "https://data-api.polymarket.com/v1/leaderboard"
 
     def __init__(self):
         self.db = get_supabase_client()
@@ -65,7 +65,7 @@ class LeaderboardWalletCollector:
         category: str,
         period: str = "MONTH",
         order_by: str = "PNL",
-        limit: int = 50
+        limit: int = 1000
     ) -> list[dict]:
         """Fetch leaderboard data for a category."""
         await self._ensure_session()
@@ -89,7 +89,7 @@ class LeaderboardWalletCollector:
         self,
         categories: Optional[list[str]] = None,
         period: str = "MONTH",
-        limit_per_category: int = 50,
+        limit_per_category: int = 1000,
         progress_callback: Optional[Callable[[str, int, int], None]] = None
     ) -> dict:
         """
@@ -241,7 +241,7 @@ class LeaderboardWalletCollector:
         self,
         category: str,
         period: str = "MONTH",
-        limit: int = 50
+        limit: int = 1000
     ) -> dict:
         """Collect wallets from a single category."""
         return await self.collect(

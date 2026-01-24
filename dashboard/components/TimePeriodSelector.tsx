@@ -9,10 +9,7 @@ interface Props {
 
 const periods: { value: TimePeriod; label: string }[] = [
   { value: '7d', label: '7 Days' },
-  { value: '14d', label: '14 Days' },
   { value: '30d', label: '30 Days' },
-  { value: '90d', label: '90 Days' },
-  { value: 'all', label: 'All Time' },
 ]
 
 export default function TimePeriodSelector({ value, onChange }: Props) {

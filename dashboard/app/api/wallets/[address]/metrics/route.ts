@@ -19,17 +19,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Get start date for the period
     const startDate = getTimePeriodStartDate(period)
 
-    // Build query for trades
-    let query = supabase
+    // Build query for trades with time filter
+    const query = supabase
       .from('wallet_trades')
       .select('*')
       .eq('address', address.toLowerCase())
+      .gte('executed_at', startDate.toISOString())
       .order('executed_at', { ascending: true })
-
-    // Apply time filter if not 'all'
-    if (startDate) {
-      query = query.gte('executed_at', startDate.toISOString())
-    }
 
     const { data: trades, error } = await query
 

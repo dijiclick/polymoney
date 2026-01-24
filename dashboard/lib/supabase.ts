@@ -198,7 +198,7 @@ export interface TradeStats {
 // ============================================
 
 export type WalletSource = 'goldsky' | 'leaderboard' | 'both'
-export type TimePeriod = '7d' | '14d' | '30d' | '90d' | 'all'
+export type TimePeriod = '7d' | '30d'
 
 export interface Wallet {
   address: string
@@ -271,17 +271,13 @@ export interface WalletWithMetrics extends Wallet {
 export function getTimePeriodDays(period: TimePeriod): number {
   switch (period) {
     case '7d': return 7
-    case '14d': return 14
     case '30d': return 30
-    case '90d': return 90
-    case 'all': return 0 // 0 means no limit
   }
 }
 
 // Helper to get start date from time period
-export function getTimePeriodStartDate(period: TimePeriod): Date | null {
+export function getTimePeriodStartDate(period: TimePeriod): Date {
   const days = getTimePeriodDays(period)
-  if (days === 0) return null
   const date = new Date()
   date.setDate(date.getDate() - days)
   return date

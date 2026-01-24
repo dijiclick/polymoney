@@ -24,8 +24,8 @@ export default function WalletsPage() {
   const [loading, setLoading] = useState(true)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [filter, setFilter] = useState<WalletFilter>({
-    timePeriod: '30d',
-    minBalance: 200
+    timePeriod: '7d',
+    minBalance: 0
   })
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -177,7 +177,7 @@ export default function WalletsPage() {
             color="green"
           />
           <StatCard
-            title="Qualified ($200+)"
+            title="Portfolio $200+"
             value={stats.qualified200}
             color="purple"
           />

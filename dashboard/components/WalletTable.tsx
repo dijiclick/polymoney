@@ -87,7 +87,7 @@ export default function WalletTable({
             <tr>
               <th className="px-4 py-3 text-left">Address</th>
               <th className="px-4 py-3 text-center">Source</th>
-              <SortHeader column="balance" label="Balance" />
+              <SortHeader column="balance" label="Portfolio" />
               <th className="px-4 py-3 text-right">PnL ({timePeriod})</th>
               <th className="px-4 py-3 text-right">ROI ({timePeriod})</th>
               <th className="px-4 py-3 text-right">Volume ({timePeriod})</th>

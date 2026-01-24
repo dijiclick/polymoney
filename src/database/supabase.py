@@ -292,9 +292,16 @@ class SupabaseClient:
     # =========================================================================
 
     def upsert_leaderboard_ranking(self, ranking_data: dict) -> dict:
-        """Insert a leaderboard ranking record."""
+        """Insert or update a leaderboard ranking record (one per wallet/category/day)."""
         ranking_data["address"] = ranking_data["address"].lower()
-        result = self._client.table("wallet_leaderboard_rankings").insert(ranking_data).execute()
+        # Add fetched_date if not present (for upsert conflict resolution)
+        if "fetched_date" not in ranking_data:
+            from datetime import date
+            ranking_data["fetched_date"] = date.today().isoformat()
+        result = self._client.table("wallet_leaderboard_rankings").upsert(
+            ranking_data,
+            on_conflict="address,category,fetched_date"
+        ).execute()
         return result.data[0] if result.data else {}
 
     def get_wallet_rankings(self, address: str) -> list[dict]:
