@@ -21,8 +21,8 @@ export default function LiveTradePage() {
   const [alertCount, setAlertCount] = useState(0)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const [discoveryStats, setDiscoveryStats] = useState<DiscoveryStats>({ totalWallets: 0, tradesCount: 0 })
+  const [isConnected, setIsConnected] = useState(true)
 
-  // Fetch unacknowledged alert count and discovery stats
   useEffect(() => {
     async function fetchAlertCount() {
       const { count } = await supabase
@@ -33,12 +33,10 @@ export default function LiveTradePage() {
     }
 
     async function fetchDiscoveryStats() {
-      // Get total wallets count
       const { count: walletsCount } = await supabase
         .from('wallets')
         .select('*', { count: 'exact', head: true })
 
-      // Get total trades count (>= $100)
       const { count: tradesCount } = await supabase
         .from('live_trades')
         .select('*', { count: 'exact', head: true })
@@ -52,7 +50,6 @@ export default function LiveTradePage() {
     fetchAlertCount()
     fetchDiscoveryStats()
 
-    // Subscribe to alert changes
     const alertSubscription = supabase
       .channel('alert_count_channel')
       .on('postgres_changes',
@@ -61,7 +58,6 @@ export default function LiveTradePage() {
       )
       .subscribe()
 
-    // Subscribe to wallet changes for discovery stats
     const walletSubscription = supabase
       .channel('wallet_stats_channel')
       .on('postgres_changes',
@@ -76,7 +72,6 @@ export default function LiveTradePage() {
     }
   }, [])
 
-  // Track active traders (recently traded)
   const handleTradeReceived = useCallback((address: string) => {
     setActiveAddresses(prev => {
       const next = new Set(prev)
@@ -92,7 +87,6 @@ export default function LiveTradePage() {
     })
   }, [])
 
-  // Get effective filter based on tab
   const getEffectiveFilter = useCallback((): TradeFilter => {
     if (activeTab === 'insider') {
       return { ...filter, insidersOnly: true }
@@ -102,38 +96,58 @@ export default function LiveTradePage() {
 
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col">
-      {/* Header */}
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Live Trade Monitor</h1>
-          <p className="text-gray-400 text-sm">
-            Real-time trade monitoring with insider detection
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          {/* Discovery Stats */}
-          <div className="hidden md:flex items-center gap-3 text-sm">
-            <div className="flex items-center gap-1.5 text-gray-400">
-              <span className="text-blue-400 font-medium">{discoveryStats.tradesCount.toLocaleString()}</span>
-              <span>trades ($100+)</span>
+      {/* Hero Header */}
+      <div className="relative overflow-hidden mb-6">
+        <div className="absolute inset-0 bg-gradient-to-br from-emerald-600/10 via-blue-600/5 to-transparent"></div>
+        <div className="relative py-4">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold mb-1 bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
+                Live Trade Monitor
+              </h1>
+              <p className="text-gray-500 text-sm">
+                Real-time trade monitoring with insider detection
+              </p>
             </div>
-            <span className="text-gray-600">|</span>
-            <div className="flex items-center gap-1.5 text-gray-400">
-              <span className="text-green-400 font-medium">{discoveryStats.totalWallets.toLocaleString()}</span>
-              <span>wallets analyzed</span>
+
+            {/* Stats Cards */}
+            <div className="flex items-center gap-3">
+              <div className="bg-gray-900/50 backdrop-blur-sm rounded-xl border border-gray-800/50 px-4 py-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Trades</p>
+                    <p className="text-base font-bold text-white">{discoveryStats.tradesCount.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-900/50 backdrop-blur-sm rounded-xl border border-gray-800/50 px-4 py-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Wallets</p>
+                    <p className="text-base font-bold text-white">{discoveryStats.totalWallets.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${isConnected ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+                <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+                <span className={`text-xs font-medium ${isConnected ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {isConnected ? 'Live' : 'Offline'}
+                </span>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-sm text-gray-400">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            Connected
-          </div>
-          {/* Mobile sidebar toggle */}
-          <button
-            onClick={() => setShowMobileSidebar(!showMobileSidebar)}
-            className="lg:hidden px-3 py-1.5 rounded text-sm bg-gray-700 hover:bg-gray-600"
-          >
-            {showMobileSidebar ? 'Hide Panel' : 'Show Panel'}
-          </button>
         </div>
       </div>
 
@@ -142,7 +156,6 @@ export default function LiveTradePage() {
         activeTab={activeTab}
         onTabChange={(tab) => {
           setActiveTab(tab)
-          // Reset filter when switching tabs
           if (tab === 'alerts') {
             setFilter({})
           }
@@ -173,6 +186,7 @@ export default function LiveTradePage() {
                 onTraderSelect={setSelectedAddress}
                 selectedTraderAddress={selectedAddress}
                 onTradeReceived={handleTradeReceived}
+                onConnectionChange={setIsConnected}
               />
             )}
           </div>
@@ -203,25 +217,15 @@ export default function LiveTradePage() {
         </div>
       </div>
 
-      {/* Footer Legend */}
-      <div className="mt-4 flex items-center justify-between text-xs text-gray-500 border-t border-gray-700 pt-4">
-        <div className="flex items-center gap-4 flex-wrap">
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded border-l-2 border-orange-500 bg-orange-900/30" /> Insider
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="text-yellow-500 font-semibold">WHALE</span> = $10K+
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="text-red-400">85+</span> /
-            <span className="text-orange-400">70+</span> /
-            <span className="text-yellow-400">60+</span> = Score
-          </span>
-        </div>
-        <div className="hidden sm:block">
-          Run <code className="bg-gray-700 px-1 rounded">py -m src.realtime.service</code> to start
-        </div>
-      </div>
+      {/* Mobile Sidebar Toggle */}
+      <button
+        onClick={() => setShowMobileSidebar(!showMobileSidebar)}
+        className="lg:hidden fixed bottom-4 right-4 z-40 w-12 h-12 rounded-full bg-blue-600 text-white shadow-lg shadow-blue-500/25 flex items-center justify-center hover:bg-blue-500 transition-colors"
+      >
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+        </svg>
+      </button>
     </div>
   )
 }
