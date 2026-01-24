@@ -1,6 +1,6 @@
 'use client'
 
-import { WalletFilter, WalletSource } from '@/lib/supabase'
+import { WalletFilter } from '@/lib/supabase'
 
 interface Props {
   filter: WalletFilter
@@ -9,25 +9,14 @@ interface Props {
 
 export default function WalletFilters({ filter, onChange }: Props) {
   return (
-    <div className="bg-gray-800 rounded-lg p-4 mb-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Source Filter */}
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Source</label>
-          <select
-            value={filter.source || 'all'}
-            onChange={(e) => onChange({ ...filter, source: e.target.value as WalletSource | 'all' })}
-            className="w-full bg-gray-700 rounded px-3 py-2 text-white border border-gray-600 focus:border-blue-500 focus:outline-none"
-          >
-            <option value="all">All Sources</option>
-            <option value="goldsky">Goldsky</option>
-            <option value="live">Live Discovery</option>
-          </select>
-        </div>
-
-        {/* Min Portfolio Value */}
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Min Portfolio ($)</label>
+    <div className="flex flex-wrap gap-4 items-end">
+      {/* Min Portfolio Value */}
+      <div className="flex-1 min-w-[200px]">
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+          Min Portfolio
+        </label>
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
           <input
             type="number"
             value={filter.minBalance ?? ''}
@@ -35,13 +24,17 @@ export default function WalletFilters({ filter, onChange }: Props) {
             placeholder="0"
             min={0}
             step={100}
-            className="w-full bg-gray-700 rounded px-3 py-2 text-white border border-gray-600 focus:border-blue-500 focus:outline-none"
+            className="w-full bg-gray-800/50 rounded-xl pl-8 pr-4 py-3 text-white border border-gray-700/50 focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 focus:outline-none transition-all"
           />
         </div>
+      </div>
 
-        {/* Min Win Rate */}
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Min Win Rate (%)</label>
+      {/* Min Win Rate */}
+      <div className="flex-1 min-w-[200px]">
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+          Min Win Rate
+        </label>
+        <div className="relative">
           <input
             type="number"
             value={filter.minWinRate ?? ''}
@@ -50,8 +43,9 @@ export default function WalletFilters({ filter, onChange }: Props) {
             min={0}
             max={100}
             step={5}
-            className="w-full bg-gray-700 rounded px-3 py-2 text-white border border-gray-600 focus:border-blue-500 focus:outline-none"
+            className="w-full bg-gray-800/50 rounded-xl pl-4 pr-8 py-3 text-white border border-gray-700/50 focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 focus:outline-none transition-all"
           />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500">%</span>
         </div>
       </div>
     </div>
