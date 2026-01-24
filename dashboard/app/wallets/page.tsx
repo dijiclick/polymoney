@@ -189,19 +189,6 @@ export default function WalletsPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Hero Section */}
-      <div className="relative overflow-hidden mb-8">
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-purple-600/5 to-transparent"></div>
-        <div className="relative py-8">
-          <h1 className="text-4xl font-bold mb-3 bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
-            Trader Leaderboard
-          </h1>
-          <p className="text-gray-400 text-lg max-w-2xl">
-            Discover top-performing Polymarket traders. Click the filter icon on any column to set min/max values.
-          </p>
-        </div>
-      </div>
-
       {/* Stats Overview */}
       {stats && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
