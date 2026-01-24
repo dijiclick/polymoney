@@ -21,13 +21,13 @@ export default function WalletsPage() {
   const [stats, setStats] = useState<WalletStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<WalletFilter>({
-    timePeriod: '7d',
+    timePeriod: '30d',
     minBalance: 0,
     minWinRate: 0
   })
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
-  const [sortBy, setSortBy] = useState('win_rate_7d')
+  const [sortBy, setSortBy] = useState('win_rate_30d')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   // Fetch wallet stats

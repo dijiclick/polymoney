@@ -122,6 +122,9 @@ export interface Wallet {
   win_rate_30d: number     // win rate for positions resolved in 30d
   volume_30d: number       // volume from trades executed in 30d
   trade_count_30d: number  // trades executed in 30d
+  // ===== DRAWDOWN METRICS =====
+  drawdown_7d: number      // max drawdown in last 7 days (percentage)
+  drawdown_30d: number     // max drawdown in last 30 days (percentage)
   // ===== OVERALL/ALL-TIME METRICS (matches Polymarket profile) =====
   total_positions: number   // closed positions (all-time)
   active_positions: number  // currently open positions

@@ -15,6 +15,8 @@ const VALID_SORT_COLUMNS = [
   'volume_30d',
   'trade_count_7d',
   'trade_count_30d',
+  'drawdown_7d',
+  'drawdown_30d',
   // Overall/all-time metrics
   'overall_win_rate',
   'overall_pnl',
@@ -96,6 +98,9 @@ export async function GET(request: NextRequest) {
       volume_30d: wallet.volume_30d || 0,
       trade_count_7d: wallet.trade_count_7d || 0,
       trade_count_30d: wallet.trade_count_30d || 0,
+      // ===== DRAWDOWN METRICS =====
+      drawdown_7d: wallet.drawdown_7d || 0,
+      drawdown_30d: wallet.drawdown_30d || 0,
       // ===== OVERALL/ALL-TIME METRICS =====
       total_positions: wallet.total_positions || 0,
       active_positions: wallet.active_positions || 0,
