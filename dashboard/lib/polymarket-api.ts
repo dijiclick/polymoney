@@ -7,8 +7,10 @@ import {
   PolymarketPosition,
   PolymarketClosedPosition,
   TraderMetrics,
+  TimePeriodMetrics,
   RawPolymarketPosition,
   RawPolymarketClosedPosition,
+  ParsedTrade,
 } from './types/trader'
 
 const DATA_API_BASE = 'https://data-api.polymarket.com'
@@ -154,6 +156,136 @@ export function parseClosedPositions(rawPositions: RawPolymarketClosedPosition[]
   })
 }
 
+interface ActivityTrade {
+  type?: string
+  side?: string
+  size?: string | number
+  usdcSize?: string | number
+  price?: string | number
+  cashPnl?: string | number
+  timestamp?: number | string
+  title?: string
+  slug?: string
+  outcome?: string
+  transactionHash?: string
+}
+
+/**
+ * Parse activity trades into structured format
+ */
+export function parseTrades(activity: unknown[]): ParsedTrade[] {
+  const trades = (activity as ActivityTrade[]).filter(a => a.type === 'TRADE')
+
+  return trades.map(t => ({
+    timestamp: typeof t.timestamp === 'number' ? t.timestamp : parseInt(String(t.timestamp || 0)),
+    side: (t.side?.toUpperCase() === 'BUY' ? 'BUY' : 'SELL') as 'BUY' | 'SELL',
+    market: t.title || t.slug || 'Unknown',
+    outcome: t.outcome,
+    size: parseFloat(String(t.size || 0)),
+    price: parseFloat(String(t.price || 0)),
+    usdValue: parseFloat(String(t.usdcSize || 0)),
+    txHash: t.transactionHash,
+  })).sort((a, b) => b.timestamp - a.timestamp) // Most recent first
+}
+
+/**
+ * Calculate metrics for a specific time period
+ */
+function calculatePeriodMetrics(
+  trades: ParsedTrade[],
+  positions: PolymarketPosition[],
+  days: number
+): TimePeriodMetrics {
+  const now = Date.now()
+  const cutoffMs = now - days * 24 * 60 * 60 * 1000
+
+  // Filter trades by time period (timestamp is in seconds)
+  const periodTrades = trades.filter(t => t.timestamp * 1000 >= cutoffMs)
+
+  // Calculate volume (total USD traded)
+  const volume = periodTrades.reduce((sum, t) => sum + t.usdValue, 0)
+
+  // Calculate PnL from trades in period
+  // BUY = spending money (negative), SELL = receiving money (positive)
+  // Also add unrealized PnL from current positions
+  let tradePnl = 0
+  for (const t of periodTrades) {
+    if (t.side === 'SELL') {
+      tradePnl += t.usdValue
+    } else {
+      tradePnl -= t.usdValue
+    }
+  }
+
+  // Add unrealized PnL from positions (always current)
+  const unrealizedPnl = positions.reduce((sum, p) => sum + p.cashPnl, 0)
+  const pnl = tradePnl + unrealizedPnl
+
+  // Calculate ROI: PnL / invested amount
+  const invested = periodTrades
+    .filter(t => t.side === 'BUY')
+    .reduce((sum, t) => sum + t.usdValue, 0)
+  const roi = invested > 0 ? (pnl / invested) * 100 : 0
+
+  // Calculate drawdown from cumulative PnL
+  let drawdown = 0
+  if (periodTrades.length > 0) {
+    const sortedTrades = [...periodTrades].sort((a, b) => a.timestamp - b.timestamp)
+    let cumulative = 0
+    let peak = 0
+
+    for (const t of sortedTrades) {
+      if (t.side === 'SELL') {
+        cumulative += t.usdValue
+      } else {
+        cumulative -= t.usdValue
+      }
+      if (cumulative > peak) {
+        peak = cumulative
+      }
+      if (peak > 0) {
+        const currentDrawdown = ((peak - cumulative) / peak) * 100
+        if (currentDrawdown > drawdown) {
+          drawdown = currentDrawdown
+        }
+      }
+    }
+  }
+
+  // Win rate from positions with PnL (best proxy we have)
+  const positionsWithPnl = positions.filter(p => p.cashPnl !== 0)
+  const winningPositions = positionsWithPnl.filter(p => p.cashPnl > 0)
+  const winRate = positionsWithPnl.length > 0
+    ? (winningPositions.length / positionsWithPnl.length) * 100
+    : 0
+
+  return {
+    pnl,
+    roi,
+    volume,
+    drawdown,
+    tradeCount: periodTrades.length,
+    winRate,
+  }
+}
+
+/**
+ * Calculate average time between trades in hours
+ */
+function calculateAvgTradeInterval(trades: ParsedTrade[]): number {
+  if (trades.length < 2) return 0
+
+  const sorted = [...trades].sort((a, b) => a.timestamp - b.timestamp)
+  let totalIntervalMs = 0
+
+  for (let i = 1; i < sorted.length; i++) {
+    totalIntervalMs += (sorted[i].timestamp - sorted[i - 1].timestamp) * 1000
+  }
+
+  const avgMs = totalIntervalMs / (sorted.length - 1)
+  return avgMs / (1000 * 60 * 60) // Convert to hours
+}
+
 /**
  * Calculate trader metrics from positions and activity data
  */
@@ -163,6 +295,16 @@ export function calculateMetrics(
   closedPositions: PolymarketClosedPosition[],
   activity: unknown[]
 ): TraderMetrics {
+  // Parse all trades
+  const allTrades = parseTrades(activity)
+
+  // Calculate time-period metrics
+  const metrics7d = calculatePeriodMetrics(allTrades, positions, 7)
+  const metrics30d = calculatePeriodMetrics(allTrades, positions, 30)
+
+  // Calculate average trade interval
+  const avgTradeIntervalHours = calculateAvgTradeInterval(allTrades)
+
   // Position metrics
   const currentValues = positions.map((p) => p.currentValue)
   const totalPositionValue = currentValues.reduce((sum, v) => sum + v, 0)
@@ -175,52 +317,41 @@ export function calculateMetrics(
   const realizedPnl = closedPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
   const totalPnl = unrealizedPnl + realizedPnl
 
-  // Win rate calculations
-  const now = Date.now()
-  const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000
-
-  // For 30d win rate, we'd need timestamps on closed positions
-  // For now, calculate overall win rate
-  const winningPositions = closedPositions.filter((p) => p.isWin)
-  const winRateAllTime = closedPositions.length > 0 ? (winningPositions.length / closedPositions.length) * 100 : 0
-
-  // Approximate 30d win rate (if we had timestamps)
-  // For now use alltime as approximation
-  const winRate30d = winRateAllTime
-
   // ROI calculation
   const totalInvested = portfolioValue + Math.abs(realizedPnl) - unrealizedPnl
   const roiPercent = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0
-
-  // Trade count from activity
-  const tradeCount30d = Array.isArray(activity) ? activity.length : 0
-  const tradeCountAllTime = tradeCount30d + closedPositions.length
 
   // Unique markets
   const marketSet = new Set<string>()
   positions.forEach((p) => marketSet.add(p.conditionId))
   closedPositions.forEach((p) => marketSet.add(p.conditionId))
-  const uniqueMarkets30d = marketSet.size
 
   return {
     portfolioValue,
     totalPnl,
     unrealizedPnl,
     realizedPnl,
-    winRate30d,
-    winRateAllTime,
+
+    // Time-period metrics
+    metrics7d,
+    metrics30d,
+    avgTradeIntervalHours,
+    activePositions: positions.length,
+
+    // Legacy fields for compatibility
+    winRate30d: metrics30d.winRate,
+    winRateAllTime: metrics30d.winRate,
     roiPercent,
-    tradeCount30d,
-    tradeCountAllTime,
-    uniqueMarkets30d,
+    tradeCount30d: metrics30d.tradeCount,
+    tradeCountAllTime: allTrades.length + closedPositions.length,
+    uniqueMarkets30d: marketSet.size,
     positionConcentration,
     maxPositionSize,
     avgPositionSize,
-    activePositions: positions.length,
     totalPositions: positions.length + closedPositions.length,
-    maxDrawdown: 0, // Would need historical data to calculate
-    tradeFrequency: tradeCount30d / 30, // trades per day
-    nightTradeRatio: 0, // Would need trade timestamps to calculate
+    maxDrawdown: metrics30d.drawdown,
+    tradeFrequency: metrics30d.tradeCount / 30,
+    nightTradeRatio: 0,
   }
 }
 

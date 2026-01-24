@@ -249,8 +249,9 @@ class TradeProcessor:
         # Check insider
         is_insider = trade_record.get("is_insider_suspect", False)
 
-        # Only store important trades (whale, insider, or watchlist) to save database space
-        should_store = is_whale or is_insider or is_watchlist
+        # Store trades >= $100 to database for live feed display
+        MIN_TRADE_VALUE_USD = 100
+        should_store = trade.usd_value >= MIN_TRADE_VALUE_USD or is_whale or is_insider or is_watchlist
 
         if should_store:
             try:
@@ -422,20 +423,36 @@ class TradeProcessor:
             self._errors += 1
 
     async def _cleanup_old_trades(self, retention_days: int = 7) -> None:
-        """Delete trades older than retention period to manage database size."""
-        try:
-            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        """Delete trades older than retention period to manage database size.
 
-            # Delete old trades from live_trades
-            result = self.supabase.table("live_trades").delete().lt(
-                "received_at", cutoff_date
+        Regular trades are kept for 1 day, while important trades
+        (whales/insiders/watchlist) are kept for the full retention period.
+        """
+        try:
+            now = datetime.now(timezone.utc)
+
+            # Delete regular (non-important) trades older than 1 day
+            regular_cutoff = (now - timedelta(days=1)).isoformat()
+            regular_result = self.supabase.table("live_trades").delete().lt(
+                "received_at", regular_cutoff
+            ).eq("is_whale", False).eq("is_insider_suspect", False).eq("is_watchlist", False).execute()
+
+            regular_deleted = len(regular_result.data) if regular_result.data else 0
+
+            # Delete important trades older than retention period
+            important_cutoff = (now - timedelta(days=retention_days)).isoformat()
+            important_result = self.supabase.table("live_trades").delete().lt(
+                "received_at", important_cutoff
             ).execute()
 
-            deleted_count = len(result.data) if result.data else 0
+            important_deleted = len(important_result.data) if important_result.data else 0
 
-            if deleted_count > 0:
+            total_deleted = regular_deleted + important_deleted
+
+            if total_deleted > 0:
                 logger.info(
-                    f"Database cleanup: deleted {deleted_count} trades older than {retention_days} days"
+                    f"Database cleanup: deleted {regular_deleted} regular trades (>1d), "
+                    f"{important_deleted} important trades (>{retention_days}d)"
                 )
 
             # Also clean up old acknowledged alerts (keep unacknowledged indefinitely)

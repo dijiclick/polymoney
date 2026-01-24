@@ -5,9 +5,10 @@ import {
   parsePositions,
   parseClosedPositions,
   calculateMetrics,
+  parseTrades,
   isValidEthAddress,
 } from '@/lib/polymarket-api'
-import { TraderProfileResponse, TraderFetchError } from '@/lib/types/trader'
+import { TraderProfileResponse, TraderFetchError, TimePeriodMetrics } from '@/lib/types/trader'
 
 // Cache duration: 5 minutes
 const CACHE_DURATION_MS = 5 * 60 * 1000
@@ -56,6 +57,16 @@ export async function GET(
       .eq('address', address)
       .order('current_value', { ascending: false })
 
+    // Create default time period metrics from cached data
+    const defaultPeriodMetrics: TimePeriodMetrics = {
+      pnl: dbTrader.total_pnl || 0,
+      roi: dbTrader.roi_percent || 0,
+      volume: 0,
+      drawdown: dbTrader.max_drawdown || 0,
+      tradeCount: dbTrader.trade_count_30d || 0,
+      winRate: dbTrader.win_rate_30d || 0,
+    }
+
     const response: TraderProfileResponse = {
       source: 'database',
       dataFreshness: 'cached',
@@ -79,11 +90,16 @@ export async function GET(
         percentPnl: p.pnl_percent || 0,
       })),
       closedPositionsCount: dbTrader.closed_positions_alltime || 0,
+      trades: [], // No trades in cached response
       metrics: {
         portfolioValue: dbTrader.portfolio_value || 0,
         totalPnl: dbTrader.total_pnl || 0,
         unrealizedPnl: dbTrader.unrealized_pnl || 0,
         realizedPnl: dbTrader.realized_pnl || 0,
+        metrics7d: defaultPeriodMetrics,
+        metrics30d: defaultPeriodMetrics,
+        avgTradeIntervalHours: 0,
+        activePositions: dbTrader.active_positions || 0,
         winRate30d: dbTrader.win_rate_30d || 0,
         winRateAllTime: dbTrader.win_rate_alltime || 0,
         roiPercent: dbTrader.roi_percent || 0,
@@ -94,7 +110,6 @@ export async function GET(
         positionConcentration: dbTrader.position_concentration || 0,
         maxPositionSize: dbTrader.max_position_size || 0,
         avgPositionSize: dbTrader.avg_position_size || 0,
-        activePositions: dbTrader.active_positions || 0,
         totalPositions: dbTrader.total_positions || 0,
         maxDrawdown: dbTrader.max_drawdown || 0,
         tradeFrequency: dbTrader.trade_frequency || 0,
@@ -122,6 +137,7 @@ export async function GET(
     // 6. Parse and calculate metrics
     const positions = parsePositions(liveData.positions)
     const closedPositions = parseClosedPositions(liveData.closedPositions)
+    const trades = parseTrades(liveData.activity)
     const metrics = calculateMetrics(
       liveData.portfolioValue,
       positions,
@@ -141,6 +157,7 @@ export async function GET(
       profileImage: dbTrader?.profile_image,
       positions,
       closedPositionsCount: closedPositions.length,
+      trades: trades.slice(0, 25), // Return 25 most recent trades
       metrics,
       scores: dbTrader?.copytrade_score !== null && dbTrader?.copytrade_score !== undefined ? {
         copytradeScore: dbTrader.copytrade_score || 0,
@@ -166,6 +183,15 @@ export async function GET(
         .eq('address', address)
         .order('current_value', { ascending: false })
 
+      const stalePeriodMetrics: TimePeriodMetrics = {
+        pnl: dbTrader.total_pnl || 0,
+        roi: dbTrader.roi_percent || 0,
+        volume: 0,
+        drawdown: dbTrader.max_drawdown || 0,
+        tradeCount: dbTrader.trade_count_30d || 0,
+        winRate: dbTrader.win_rate_30d || 0,
+      }
+
       const response: TraderProfileResponse = {
         source: 'database',
         dataFreshness: 'stale',
@@ -189,11 +215,16 @@ export async function GET(
           percentPnl: p.pnl_percent || 0,
         })),
         closedPositionsCount: dbTrader.closed_positions_alltime || 0,
+        trades: [],
         metrics: {
           portfolioValue: dbTrader.portfolio_value || 0,
           totalPnl: dbTrader.total_pnl || 0,
           unrealizedPnl: dbTrader.unrealized_pnl || 0,
           realizedPnl: dbTrader.realized_pnl || 0,
+          metrics7d: stalePeriodMetrics,
+          metrics30d: stalePeriodMetrics,
+          avgTradeIntervalHours: 0,
+          activePositions: dbTrader.active_positions || 0,
           winRate30d: dbTrader.win_rate_30d || 0,
           winRateAllTime: dbTrader.win_rate_alltime || 0,
           roiPercent: dbTrader.roi_percent || 0,
@@ -204,7 +235,6 @@ export async function GET(
           positionConcentration: dbTrader.position_concentration || 0,
           maxPositionSize: dbTrader.max_position_size || 0,
           avgPositionSize: dbTrader.avg_position_size || 0,
-          activePositions: dbTrader.active_positions || 0,
           totalPositions: dbTrader.total_positions || 0,
           maxDrawdown: dbTrader.max_drawdown || 0,
           tradeFrequency: dbTrader.trade_frequency || 0,

@@ -29,11 +29,31 @@ export interface PolymarketClosedPosition {
   isWin: boolean
 }
 
+// Time-period specific metrics (7d, 30d)
+export interface TimePeriodMetrics {
+  pnl: number
+  roi: number
+  volume: number  // total trade volume
+  drawdown: number
+  tradeCount: number
+  winRate: number
+}
+
 export interface TraderMetrics {
   portfolioValue: number
   totalPnl: number
   unrealizedPnl: number
   realizedPnl: number
+
+  // Time-period metrics
+  metrics7d: TimePeriodMetrics
+  metrics30d: TimePeriodMetrics
+
+  // Activity metrics
+  avgTradeIntervalHours: number  // average time between trades
+  activePositions: number
+
+  // Legacy fields (kept for compatibility)
   winRate30d: number
   winRateAllTime: number
   roiPercent: number
@@ -44,7 +64,6 @@ export interface TraderMetrics {
   positionConcentration: number
   maxPositionSize: number
   avgPositionSize: number
-  activePositions: number
   totalPositions: number
   maxDrawdown: number
   tradeFrequency: number
@@ -75,6 +94,9 @@ export interface TraderProfileResponse {
   // Positions
   positions: PolymarketPosition[]
   closedPositionsCount: number
+
+  // Recent trades
+  trades: ParsedTrade[]
 
   // Calculated metrics
   metrics: TraderMetrics
@@ -132,4 +154,21 @@ export interface RawPolymarketActivity {
   size: string
   price: string
   side: 'BUY' | 'SELL'
+  usdcSize?: string
+  title?: string
+  slug?: string
+  outcome?: string
+  transactionHash?: string
+}
+
+// Parsed trade for display
+export interface ParsedTrade {
+  timestamp: number
+  side: 'BUY' | 'SELL'
+  market: string
+  outcome?: string
+  size: number
+  price: number
+  usdValue: number
+  txHash?: string
 }

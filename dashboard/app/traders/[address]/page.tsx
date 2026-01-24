@@ -3,10 +3,9 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import StatCard from '@/components/StatCard'
 import TraderProfileSkeleton from '@/components/TraderProfileSkeleton'
 import DataSourceBadge from '@/components/DataSourceBadge'
-import { TraderProfileResponse, TraderFetchError } from '@/lib/types/trader'
+import { TraderProfileResponse, TraderFetchError, ParsedTrade } from '@/lib/types/trader'
 
 export default function TraderDetailPage() {
   const params = useParams()
@@ -58,20 +57,32 @@ export default function TraderDetailPage() {
     }
   }, [address])
 
-  const formatAddress = (addr: string) => {
-    return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-  }
+  const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
   const formatMoney = (value: number | undefined | null) => {
-    if (value === undefined || value === null) return '$0.00'
-    if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(2)}M`
-    if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(1)}K`
-    return `$${value.toFixed(2)}`
+    if (value === undefined || value === null) return '$0'
+    const absVal = Math.abs(value)
+    const sign = value >= 0 ? '' : '-'
+    if (absVal >= 1000000) return `${sign}$${(absVal / 1000000).toFixed(2)}M`
+    if (absVal >= 1000) return `${sign}$${(absVal / 1000).toFixed(1)}K`
+    return `${sign}$${absVal.toFixed(2)}`
   }
 
   const formatPercent = (value: number | undefined | null) => {
-    if (value === undefined || value === null) return '0.0%'
+    if (value === undefined || value === null) return '0%'
     return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
+  }
+
+  const formatTradeTime = (timestamp: number) => {
+    const now = Date.now()
+    const diff = now - timestamp * 1000
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'Just now'
+    if (mins < 60) return `${mins}m ago`
+    const hours = Math.floor(mins / 60)
+    if (hours < 24) return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    return `${days}d ago`
   }
 
   if (loading) {
@@ -95,8 +106,8 @@ export default function TraderDetailPage() {
           >
             Try Again
           </button>
-          <Link href="/traders" className="text-blue-400 hover:underline py-2">
-            Back to Traders
+          <Link href="/live" className="text-blue-400 hover:underline py-2">
+            Back to Live Feed
           </Link>
         </div>
       </div>
@@ -111,252 +122,172 @@ export default function TraderDetailPage() {
     )
   }
 
-  const { metrics, scores, positions } = data
+  const { metrics, positions, trades } = data
 
   return (
-    <div>
+    <div className="max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex justify-between items-start mb-8">
+      <div className="flex justify-between items-start mb-6">
         <div>
-          <h1 className="text-3xl font-bold mb-2">
+          <h1 className="text-2xl font-bold mb-1">
             {data.username || formatAddress(address)}
           </h1>
-          <div className="flex items-center gap-4">
-            <span className="text-gray-400 font-mono text-sm">{address}</span>
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-gray-500 font-mono">{address}</span>
             <a
               href={`https://polymarket.com/profile/${address}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-400 hover:underline text-sm"
+              className="text-blue-400 hover:underline"
             >
               View on Polymarket
             </a>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex gap-2">
-            {scores && scores.copytradeScore >= 60 && (
-              <span className="bg-blue-600 px-3 py-1 rounded-full text-sm">
-                Copy Trade
-              </span>
-            )}
-            {scores && scores.botScore >= 60 && (
-              <span className="bg-purple-600 px-3 py-1 rounded-full text-sm">
-                Likely Bot
-              </span>
-            )}
-            {scores && scores.insiderScore >= 60 && (
-              <span className="bg-red-600 px-3 py-1 rounded-full text-sm">
-                Insider Suspect
-              </span>
-            )}
-          </div>
-          <DataSourceBadge
-            source={data.source}
-            freshness={data.dataFreshness}
-            cachedAt={data.cachedAt}
-            onRefresh={() => fetchTrader(true)}
-            refreshing={refreshing}
-          />
-        </div>
+        <DataSourceBadge
+          source={data.source}
+          freshness={data.dataFreshness}
+          cachedAt={data.cachedAt}
+          onRefresh={() => fetchTrader(true)}
+          refreshing={refreshing}
+        />
       </div>
 
-      {/* Warning banner if data is stale */}
+      {/* Warning banner */}
       {data.warning && (
-        <div className="bg-yellow-900/50 border border-yellow-700 text-yellow-200 px-4 py-3 rounded mb-6">
+        <div className="bg-yellow-900/50 border border-yellow-700 text-yellow-200 px-4 py-2 rounded mb-6 text-sm">
           {data.warning}
         </div>
       )}
 
-      {/* Main Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <StatCard
-          title="Portfolio Value"
-          value={formatMoney(metrics.portfolioValue)}
-          color="blue"
-        />
-        <StatCard
-          title="Total PnL"
-          value={formatMoney(metrics.totalPnl)}
-          color={metrics.totalPnl >= 0 ? 'green' : 'red'}
-        />
-        <StatCard
-          title="Win Rate (30d)"
-          value={`${(metrics.winRate30d || 0).toFixed(1)}%`}
-          color={metrics.winRate30d >= 60 ? 'green' : 'gray'}
-        />
-        <StatCard
-          title="ROI"
-          value={formatPercent(metrics.roiPercent)}
-          color={metrics.roiPercent >= 0 ? 'green' : 'red'}
-        />
-      </div>
-
-      {/* Scores */}
-      <div className="bg-gray-800 rounded-lg p-6 mb-8">
-        <h2 className="text-xl font-semibold mb-4">Classification Scores</h2>
-        {scores ? (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-            <div>
-              <div className="flex justify-between mb-2">
-                <span className="text-gray-400">Copy Trade Score</span>
-                <span className="font-bold">{scores.copytradeScore}/100</span>
-              </div>
-              <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-500"
-                  style={{ width: `${scores.copytradeScore}%` }}
-                />
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between mb-2">
-                <span className="text-gray-400">Bot Score</span>
-                <span className="font-bold">{scores.botScore}/100</span>
-              </div>
-              <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-purple-500"
-                  style={{ width: `${scores.botScore}%` }}
-                />
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between mb-2">
-                <span className="text-gray-400">Insider Score</span>
-                <span className="font-bold">{scores.insiderScore}/100</span>
-              </div>
-              <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-red-500"
-                  style={{ width: `${scores.insiderScore}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p className="text-gray-500">
-            Classification scores not available. This trader hasn&apos;t been processed by the analysis pipeline yet.
-          </p>
-        )}
-      </div>
-
-      {/* Detailed Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-        {/* Trading Activity */}
-        <div className="bg-gray-800 rounded-lg p-6">
-          <h3 className="text-lg font-semibold mb-4">Trading Activity</h3>
-          <dl className="space-y-3">
-            <div className="flex justify-between">
-              <dt className="text-gray-400">Trades (30d)</dt>
-              <dd>{metrics.tradeCount30d || 0}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-400">Trades (All Time)</dt>
-              <dd>{metrics.tradeCountAllTime || 0}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-400">Unique Markets (30d)</dt>
-              <dd>{metrics.uniqueMarkets30d || 0}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-400">Trade Frequency</dt>
-              <dd>{(metrics.tradeFrequency || 0).toFixed(1)}/day</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-400">Account Age</dt>
-              <dd>{metrics.accountAgeDays ? `${metrics.accountAgeDays} days` : 'N/A'}</dd>
-            </div>
-          </dl>
-        </div>
-
-        {/* Performance */}
-        <div className="bg-gray-800 rounded-lg p-6">
-          <h3 className="text-lg font-semibold mb-4">Performance</h3>
-          <dl className="space-y-3">
-            <div className="flex justify-between">
-              <dt className="text-gray-400">Win Rate (All Time)</dt>
-              <dd>{(metrics.winRateAllTime || 0).toFixed(1)}%</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-400">Max Drawdown</dt>
-              <dd className="text-red-400">{(metrics.maxDrawdown || 0).toFixed(1)}%</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-400">Realized PnL</dt>
-              <dd className={metrics.realizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}>
-                {formatMoney(metrics.realizedPnl)}
-              </dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-400">Unrealized PnL</dt>
-              <dd className={metrics.unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}>
-                {formatMoney(metrics.unrealizedPnl)}
-              </dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-400">Night Trade Ratio</dt>
-              <dd>{(metrics.nightTradeRatio || 0).toFixed(0)}%</dd>
-            </div>
-          </dl>
+      {/* Portfolio Value */}
+      <div className="bg-gray-800 rounded-lg p-6 mb-6">
+        <div className="text-gray-400 text-sm mb-1">Portfolio Value</div>
+        <div className="text-3xl font-bold text-blue-400">
+          {formatMoney(metrics.portfolioValue)}
         </div>
       </div>
 
-      {/* Position Summary */}
-      <div className="bg-gray-800 rounded-lg p-6 mb-8">
-        <h3 className="text-lg font-semibold mb-4">Position Summary</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <p className="text-gray-400 text-sm">Active Positions</p>
-            <p className="text-xl font-bold">{metrics.activePositions || 0}</p>
-          </div>
-          <div>
-            <p className="text-gray-400 text-sm">Closed Positions</p>
-            <p className="text-xl font-bold">{data.closedPositionsCount || 0}</p>
-          </div>
-          <div>
-            <p className="text-gray-400 text-sm">Avg Position Size</p>
-            <p className="text-xl font-bold">{formatMoney(metrics.avgPositionSize)}</p>
-          </div>
-          <div>
-            <p className="text-gray-400 text-sm">Position Concentration</p>
-            <p className="text-xl font-bold">{(metrics.positionConcentration || 0).toFixed(1)}%</p>
-          </div>
-        </div>
+      {/* Metrics Table - 7d vs 30d */}
+      <div className="bg-gray-800 rounded-lg overflow-hidden mb-6">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-gray-700">
+              <th className="text-left py-3 px-4 text-gray-400 font-medium">Metric</th>
+              <th className="text-right py-3 px-4 text-gray-400 font-medium">7 Days</th>
+              <th className="text-right py-3 px-4 text-gray-400 font-medium">30 Days</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-gray-700/50">
+              <td className="py-3 px-4 text-gray-300">PnL</td>
+              <td className={`py-3 px-4 text-right font-mono ${metrics.metrics7d.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {formatMoney(metrics.metrics7d.pnl)}
+              </td>
+              <td className={`py-3 px-4 text-right font-mono ${metrics.metrics30d.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {formatMoney(metrics.metrics30d.pnl)}
+              </td>
+            </tr>
+            <tr className="border-b border-gray-700/50">
+              <td className="py-3 px-4 text-gray-300">ROI</td>
+              <td className={`py-3 px-4 text-right font-mono ${metrics.metrics7d.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {formatPercent(metrics.metrics7d.roi)}
+              </td>
+              <td className={`py-3 px-4 text-right font-mono ${metrics.metrics30d.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {formatPercent(metrics.metrics30d.roi)}
+              </td>
+            </tr>
+            <tr className="border-b border-gray-700/50">
+              <td className="py-3 px-4 text-gray-300">Volume</td>
+              <td className="py-3 px-4 text-right font-mono text-gray-300">
+                {formatMoney(metrics.metrics7d.volume)}
+              </td>
+              <td className="py-3 px-4 text-right font-mono text-gray-300">
+                {formatMoney(metrics.metrics30d.volume)}
+              </td>
+            </tr>
+            <tr className="border-b border-gray-700/50">
+              <td className="py-3 px-4 text-gray-300">Drawdown</td>
+              <td className="py-3 px-4 text-right font-mono text-red-400">
+                -{metrics.metrics7d.drawdown.toFixed(1)}%
+              </td>
+              <td className="py-3 px-4 text-right font-mono text-red-400">
+                -{metrics.metrics30d.drawdown.toFixed(1)}%
+              </td>
+            </tr>
+            <tr className="border-b border-gray-700/50">
+              <td className="py-3 px-4 text-gray-300">Trades</td>
+              <td className="py-3 px-4 text-right font-mono text-gray-300">
+                {metrics.metrics7d.tradeCount}
+              </td>
+              <td className="py-3 px-4 text-right font-mono text-gray-300">
+                {metrics.metrics30d.tradeCount}
+              </td>
+            </tr>
+            <tr>
+              <td className="py-3 px-4 text-gray-300">Win Rate</td>
+              <td className="py-3 px-4 text-right font-mono text-gray-300">
+                {metrics.metrics7d.winRate.toFixed(1)}%
+              </td>
+              <td className="py-3 px-4 text-right font-mono text-gray-300">
+                {metrics.metrics30d.winRate.toFixed(1)}%
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      {/* Current Positions */}
-      <div className="bg-gray-800 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4">Current Positions ({positions.length})</h3>
-        {positions.length > 0 ? (
-          <div className="overflow-x-auto">
+      {/* Trade Activity */}
+      <div className="bg-gray-800 rounded-lg mb-6">
+        <div className="p-4 border-b border-gray-700">
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold">Recent Trades</h2>
+            {metrics.avgTradeIntervalHours > 0 && (
+              <span className="text-sm text-gray-400">
+                Avg interval: {metrics.avgTradeIntervalHours < 1
+                  ? `${Math.round(metrics.avgTradeIntervalHours * 60)}m`
+                  : `${metrics.avgTradeIntervalHours.toFixed(1)}h`}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {trades && trades.length > 0 ? (
+          <div className="max-h-[400px] overflow-y-auto">
             <table className="w-full">
-              <thead>
-                <tr className="text-gray-400 text-sm">
-                  <th className="text-left pb-3">Market</th>
-                  <th className="text-left pb-3">Outcome</th>
-                  <th className="text-right pb-3">Size</th>
-                  <th className="text-right pb-3">Avg Price</th>
-                  <th className="text-right pb-3">Current</th>
-                  <th className="text-right pb-3">Value</th>
-                  <th className="text-right pb-3">PnL</th>
+              <thead className="sticky top-0 bg-gray-800">
+                <tr className="text-xs text-gray-500">
+                  <th className="text-left py-2 px-4">Time</th>
+                  <th className="text-left py-2 px-4">Side</th>
+                  <th className="text-left py-2 px-4">Market</th>
+                  <th className="text-right py-2 px-4">Price</th>
+                  <th className="text-right py-2 px-4">Value</th>
                 </tr>
               </thead>
               <tbody>
-                {positions.map((pos, idx) => (
-                  <tr key={`${pos.conditionId}-${pos.outcomeIndex}-${idx}`} className="border-t border-gray-700">
-                    <td className="py-3 max-w-xs">
-                      <span className="truncate block" title={pos.title || pos.conditionId}>
-                        {pos.title || `${pos.conditionId.slice(0, 10)}...`}
+                {trades.map((trade: ParsedTrade, idx: number) => (
+                  <tr key={trade.txHash || idx} className="border-t border-gray-700/30 hover:bg-gray-750">
+                    <td className="py-2 px-4 text-sm text-gray-400">
+                      {formatTradeTime(trade.timestamp)}
+                    </td>
+                    <td className="py-2 px-4">
+                      <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                        trade.side === 'BUY' ? 'bg-green-600/80' : 'bg-red-600/80'
+                      }`}>
+                        {trade.side}
                       </span>
                     </td>
-                    <td className="py-3">{pos.outcome || `Outcome ${pos.outcomeIndex}`}</td>
-                    <td className="py-3 text-right">{pos.size.toFixed(2)}</td>
-                    <td className="py-3 text-right">{(pos.avgPrice * 100).toFixed(1)}c</td>
-                    <td className="py-3 text-right">{(pos.currentPrice * 100).toFixed(1)}c</td>
-                    <td className="py-3 text-right">{formatMoney(pos.currentValue)}</td>
-                    <td className={`py-3 text-right ${pos.cashPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {formatMoney(pos.cashPnl)} ({pos.percentPnl >= 0 ? '+' : ''}{pos.percentPnl.toFixed(1)}%)
+                    <td className="py-2 px-4 text-sm text-gray-300 truncate max-w-[200px]" title={trade.market}>
+                      {trade.market}
+                      {trade.outcome && (
+                        <span className="text-gray-500 ml-1">({trade.outcome})</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-4 text-right text-sm text-gray-400">
+                      {(trade.price * 100).toFixed(0)}¢
+                    </td>
+                    <td className="py-2 px-4 text-right text-sm font-mono text-gray-300">
+                      {formatMoney(trade.usdValue)}
                     </td>
                   </tr>
                 ))}
@@ -364,7 +295,70 @@ export default function TraderDetailPage() {
             </table>
           </div>
         ) : (
-          <p className="text-gray-500 text-center py-4">No current positions</p>
+          <div className="p-8 text-center text-gray-500">
+            No recent trades available
+          </div>
+        )}
+      </div>
+
+      {/* Current Positions */}
+      <div className="bg-gray-800 rounded-lg">
+        <div className="p-4 border-b border-gray-700">
+          <h2 className="text-lg font-semibold">
+            Current Positions ({positions.length})
+          </h2>
+        </div>
+
+        {positions.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-xs text-gray-500">
+                  <th className="text-left py-2 px-4">Market</th>
+                  <th className="text-left py-2 px-4">Outcome</th>
+                  <th className="text-right py-2 px-4">Size</th>
+                  <th className="text-right py-2 px-4">Entry</th>
+                  <th className="text-right py-2 px-4">Now</th>
+                  <th className="text-right py-2 px-4">Value</th>
+                  <th className="text-right py-2 px-4">PnL</th>
+                </tr>
+              </thead>
+              <tbody>
+                {positions.map((pos, idx) => (
+                  <tr key={`${pos.conditionId}-${idx}`} className="border-t border-gray-700/30 hover:bg-gray-750">
+                    <td className="py-3 px-4 text-sm text-gray-300 truncate max-w-[180px]" title={pos.title || pos.conditionId}>
+                      {pos.title || `${pos.conditionId.slice(0, 12)}...`}
+                    </td>
+                    <td className="py-3 px-4 text-sm text-gray-400">
+                      {pos.outcome || `#${pos.outcomeIndex}`}
+                    </td>
+                    <td className="py-3 px-4 text-right text-sm font-mono text-gray-300">
+                      {pos.size.toFixed(1)}
+                    </td>
+                    <td className="py-3 px-4 text-right text-sm text-gray-400">
+                      {(pos.avgPrice * 100).toFixed(0)}¢
+                    </td>
+                    <td className="py-3 px-4 text-right text-sm text-gray-400">
+                      {(pos.currentPrice * 100).toFixed(0)}¢
+                    </td>
+                    <td className="py-3 px-4 text-right text-sm font-mono text-gray-300">
+                      {formatMoney(pos.currentValue)}
+                    </td>
+                    <td className={`py-3 px-4 text-right text-sm font-mono ${pos.cashPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {formatMoney(pos.cashPnl)}
+                      <span className="text-gray-500 text-xs ml-1">
+                        ({pos.percentPnl >= 0 ? '+' : ''}{pos.percentPnl.toFixed(0)}%)
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="p-8 text-center text-gray-500">
+            No active positions
+          </div>
         )}
       </div>
     </div>
