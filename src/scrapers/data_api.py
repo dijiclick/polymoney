@@ -71,6 +71,27 @@ class PolymarketDataAPI:
             return await response.json()
 
     # =========================================================================
+    # Profile Endpoint (Gamma API)
+    # =========================================================================
+
+    async def get_profile(self, address: str) -> dict:
+        """Get a trader's public profile from Gamma API."""
+        try:
+            await self._ensure_session()
+            await self._rate_limit_wait()
+
+            url = f"https://gamma-api.polymarket.com/public-profile"
+            async with self._session.get(url, params={"address": address}) as response:
+                if response.status == 404:
+                    return {}
+                if response.status != 200:
+                    return {}
+                return await response.json()
+        except Exception as e:
+            logger.error(f"Error getting profile for {address}: {e}")
+            return {}
+
+    # =========================================================================
     # Trader Data Endpoints
     # =========================================================================
 
@@ -96,10 +117,10 @@ class PolymarketDataAPI:
             logger.error(f"Error getting positions for {address}: {e}")
             return []
 
-    async def get_closed_positions(self, address: str) -> list[dict]:
+    async def get_closed_positions(self, address: str, limit: int = 500) -> list[dict]:
         """Get a trader's closed/resolved positions."""
         try:
-            result = await self._get("closed-positions", {"user": address})
+            result = await self._get("closed-positions", {"user": address, "limit": limit})
             if isinstance(result, list):
                 return result
             return []
@@ -107,10 +128,10 @@ class PolymarketDataAPI:
             logger.error(f"Error getting closed positions for {address}: {e}")
             return []
 
-    async def get_activity(self, address: str) -> list[dict]:
+    async def get_activity(self, address: str, limit: int = 500) -> list[dict]:
         """Get a trader's activity history."""
         try:
-            result = await self._get("activity", {"user": address})
+            result = await self._get("activity", {"user": address, "limit": limit})
             if isinstance(result, list):
                 return result
             return []

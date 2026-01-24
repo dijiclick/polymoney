@@ -154,14 +154,18 @@ class TradeMonitorService:
         uptime = client_stats.get("uptime_seconds", 0)
         uptime_str = f"{int(uptime // 3600)}h {int((uptime % 3600) // 60)}m"
 
+        # Discovery stats
+        discovery = processor_stats.get("discovery", {})
+        discovered = discovery.get("wallets_discovered", 0)
+        analyzed = discovery.get("wallets_processed", 0)
+
         logger.info(
             f"[STATS] "
             f"Trades: {processor_stats['trades_processed']:,} seen, "
             f"{processor_stats['trades_stored']:,} saved (>=$100) | "
+            f"Wallets: {discovered:,} discovered, {analyzed:,} analyzed | "
             f"Alerts: {processor_stats['alerts_triggered']} | "
-            f"Queue: {processor_stats['queue_size']} | "
             f"Errors: {processor_stats['errors']} | "
-            f"Connected: {client_stats['connected']} | "
             f"Uptime: {uptime_str}"
         )
 

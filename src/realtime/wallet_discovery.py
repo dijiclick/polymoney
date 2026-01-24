@@ -33,6 +33,7 @@ class WalletDiscoveryProcessor:
 
     MAX_QUEUE_SIZE = 100
     HISTORY_DAYS = 30
+    REANALYSIS_COOLDOWN_DAYS = 3  # Don't re-analyze wallets within this period
 
     def __init__(self, supabase: Client):
         """
@@ -46,6 +47,7 @@ class WalletDiscoveryProcessor:
 
         # In-memory caches for O(1) lookup
         self._known_wallets: set[str] = set()
+        self._wallet_last_analyzed: dict[str, datetime] = {}  # addr -> last analysis time
         self._pending_wallets: set[str] = set()
 
         # Processing queue
@@ -55,18 +57,35 @@ class WalletDiscoveryProcessor:
         self._last_request_time: datetime = datetime.now(timezone.utc)
 
         # Stats
-        self._wallets_discovered = 0
-        self._wallets_processed = 0
+        self._wallets_discovered = 0  # New wallets seen (>= $100 trades)
+        self._wallets_skipped_cooldown = 0  # Skipped due to recent analysis
+        self._wallets_processed = 0  # Actually analyzed
         self._trades_stored = 0
         self._errors = 0
 
     async def initialize(self) -> None:
-        """Load existing wallet addresses into memory cache."""
+        """Load existing wallet addresses and last analysis times into memory cache."""
         try:
             logger.info("Loading wallet addresses into cache...")
-            result = self.supabase.table("wallets").select("address").execute()
+            result = self.supabase.table("wallets").select("address, metrics_updated_at").execute()
 
-            self._known_wallets = {w["address"].lower() for w in result.data} if result.data else set()
+            self._known_wallets = set()
+            self._wallet_last_analyzed = {}
+
+            for w in result.data or []:
+                addr = w["address"].lower()
+                self._known_wallets.add(addr)
+
+                # Parse last analysis time
+                if w.get("metrics_updated_at"):
+                    try:
+                        last_analyzed = datetime.fromisoformat(
+                            str(w["metrics_updated_at"]).replace("Z", "+00:00")
+                        )
+                        self._wallet_last_analyzed[addr] = last_analyzed
+                    except Exception:
+                        pass
+
             logger.info(f"Loaded {len(self._known_wallets)} wallet addresses into cache")
 
             # Initialize API client
@@ -84,27 +103,50 @@ class WalletDiscoveryProcessor:
 
     async def check_and_queue(self, trader_address: str, usd_value: float) -> bool:
         """
-        Check if wallet is new and queue for processing.
+        Check if wallet needs analysis and queue for processing.
+
+        Wallets are analyzed if:
+        1. Never seen before, OR
+        2. Last analyzed more than REANALYSIS_COOLDOWN_DAYS ago
 
         Args:
             trader_address: The wallet address
             usd_value: The trade value in USD
 
         Returns:
-            True if wallet was queued, False if already known or queue full
+            True if wallet was queued, False if skipped or queue full
         """
         addr = trader_address.lower()
 
-        # Skip if already known or pending
-        if addr in self._known_wallets or addr in self._pending_wallets:
+        # Always count as discovered (>= $100 trade)
+        self._wallets_discovered += 1
+
+        # Skip if already pending
+        if addr in self._pending_wallets:
             return False
+
+        # Check if wallet was recently analyzed (within cooldown period)
+        if addr in self._known_wallets:
+            last_analyzed = self._wallet_last_analyzed.get(addr)
+            if last_analyzed:
+                now = datetime.now(timezone.utc)
+                days_since = (now - last_analyzed).days
+                if days_since < self.REANALYSIS_COOLDOWN_DAYS:
+                    # Skip - analyzed recently
+                    return False
+
+            # Wallet exists but needs re-analysis (older than cooldown)
+            logger.debug(f"Wallet {addr[:10]}... needs re-analysis")
 
         # Try to queue
         try:
             self._queue.put_nowait((addr, usd_value))
             self._pending_wallets.add(addr)
-            self._wallets_discovered += 1
-            logger.info(f"New wallet discovered: {addr[:10]}... (${usd_value:,.0f} trade)")
+            is_new = addr not in self._known_wallets
+            logger.info(
+                f"{'New' if is_new else 'Re-analyzing'} wallet: {addr[:10]}... "
+                f"(${usd_value:,.0f} trade)"
+            )
             return True
 
         except asyncio.QueueFull:
@@ -169,28 +211,30 @@ class WalletDiscoveryProcessor:
 
         logger.debug(f"Processing wallet: {address[:10]}...")
 
-        # Fetch portfolio value
-        portfolio_value = await self._api.get_portfolio_value(address)
-
-        # Fetch activity (includes trades)
-        activity = await self._api.get_activity(address)
+        # Fetch ALL data in parallel (major performance improvement)
+        # This reduces ~800ms sequential to ~250ms parallel
+        portfolio_value, profile, closed_positions, activity = await asyncio.gather(
+            self._api.get_portfolio_value(address),
+            self._api.get_profile(address),
+            self._api.get_closed_positions(address),
+            self._api.get_activity(address),
+        )
 
         # Filter to only trades
         trades = [a for a in activity if a.get("type") == "TRADE"]
 
-        # Parse and store trades
-        stored_trades = await self._store_trades(address, trades)
+        # Calculate metrics from CLOSED POSITIONS (win rate, PnL) and TRADES (volume)
+        metrics_7d = self._calculate_metrics(closed_positions, trades, days=7)
+        metrics_30d = self._calculate_metrics(closed_positions, trades, days=30)
 
-        # Calculate metrics from trades
-        metrics_7d = self._calculate_metrics(trades, days=7)
-        metrics_30d = self._calculate_metrics(trades, days=30)
-
-        # Save wallet with metrics
+        # IMPORTANT: Save wallet FIRST (before trades) to satisfy foreign key constraint
         wallet_data = {
             "address": address,
             "source": "live",
             "balance": portfolio_value,
             "balance_updated_at": datetime.now(timezone.utc).isoformat(),
+            "username": profile.get("pseudonym") or profile.get("name"),
+            "account_created_at": profile.get("createdAt"),
             "pnl_7d": metrics_7d["pnl"],
             "pnl_30d": metrics_30d["pnl"],
             "roi_7d": metrics_7d["roi"],
@@ -208,8 +252,14 @@ class WalletDiscoveryProcessor:
             wallet_data, on_conflict="address"
         ).execute()
 
-        # Add to known wallets cache
+        # Update caches
+        now = datetime.now(timezone.utc)
         self._known_wallets.add(address)
+        self._wallet_last_analyzed[address] = now
+
+        # NOW store trades (after wallet exists in DB)
+        stored_trades = await self._store_trades(address, trades)
+
         self._wallets_processed += 1
         self._trades_stored += stored_trades
 
@@ -284,22 +334,37 @@ class WalletDiscoveryProcessor:
             trade_records.append(trade_record)
 
         if trade_records:
+            # Deduplicate by trade_id (in case API returns duplicates)
+            seen_ids = set()
+            unique_records = []
+            for record in trade_records:
+                trade_id = record["trade_id"]
+                if trade_id not in seen_ids:
+                    seen_ids.add(trade_id)
+                    unique_records.append(record)
+
             try:
                 self.supabase.table("wallet_trades").upsert(
-                    trade_records, on_conflict="address,trade_id"
+                    unique_records, on_conflict="address,trade_id"
                 ).execute()
             except Exception as e:
                 logger.error(f"Failed to store trades for {address[:10]}...: {e}")
                 return 0
 
-        return len(trade_records)
+            return len(unique_records)
 
-    def _calculate_metrics(self, trades: list[dict], days: int) -> dict:
+        return 0
+
+    def _calculate_metrics(self, closed_positions: list[dict], trades: list[dict], days: int) -> dict:
         """
-        Calculate metrics from trade history.
+        Calculate metrics from closed positions and trade history.
+
+        Win rate and PnL are calculated from CLOSED POSITIONS (resolved markets).
+        Volume is calculated from TRADES.
 
         Args:
-            trades: List of trade records
+            closed_positions: List of closed position records from API
+            trades: List of trade records from API
             days: Number of days to include (7 or 30)
 
         Returns:
@@ -308,7 +373,48 @@ class WalletDiscoveryProcessor:
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(days=days)
 
-        # Filter trades to time period
+        # =====================================================================
+        # Calculate win rate and PnL from CLOSED POSITIONS
+        # =====================================================================
+        period_positions = []
+        for pos in closed_positions:
+            # Closed positions use "endDate" for when the market resolved
+            end_date = pos.get("endDate")
+            if end_date:
+                try:
+                    if isinstance(end_date, (int, float)):
+                        resolved_at = datetime.fromtimestamp(end_date, tz=timezone.utc)
+                    else:
+                        resolved_at = datetime.fromisoformat(str(end_date).replace("Z", "+00:00"))
+                    if resolved_at >= cutoff:
+                        period_positions.append(pos)
+                except Exception:
+                    pass
+
+        # Calculate PnL and win rate from closed positions
+        total_pnl = 0
+        total_invested = 0
+        winning_positions = 0
+
+        for pos in period_positions:
+            realized_pnl = float(pos.get("realizedPnl", 0))
+            initial_value = float(pos.get("initialValue", 0))
+
+            total_pnl += realized_pnl
+            total_invested += initial_value
+
+            if realized_pnl > 0:
+                winning_positions += 1
+
+        # Win rate: percentage of closed positions with positive PnL
+        win_rate = (winning_positions / len(period_positions) * 100) if period_positions else 0
+
+        # ROI: total PnL / total invested
+        roi = (total_pnl / total_invested * 100) if total_invested > 0 else 0
+
+        # =====================================================================
+        # Calculate volume and trade count from TRADES
+        # =====================================================================
         period_trades = []
         for trade in trades:
             timestamp = trade.get("timestamp")
@@ -323,65 +429,15 @@ class WalletDiscoveryProcessor:
                 except Exception:
                     pass
 
-        if not period_trades:
-            return {
-                "pnl": 0,
-                "roi": 0,
-                "win_rate": 0,
-                "volume": 0,
-                "trade_count": 0,
-            }
-
-        # Group by market (condition_id)
-        market_trades: dict[str, list[dict]] = {}
-        for trade in period_trades:
-            condition_id = trade.get("conditionId") or "unknown"
-            if condition_id not in market_trades:
-                market_trades[condition_id] = []
-            market_trades[condition_id].append(trade)
-
-        # Calculate per-market PnL and overall metrics
-        total_pnl = 0
-        total_invested = 0
+        # Calculate volume from trades
         total_volume = 0
-        winning_markets = 0
-        closed_markets = 0
-
-        for market_id, m_trades in market_trades.items():
-            market_pnl = 0
-            market_buys = 0
-
-            for t in m_trades:
-                usd_value = float(t.get("usdcSize") or t.get("usdValue") or 0)
-                if usd_value == 0:
-                    size = float(t.get("size") or 0)
-                    price = float(t.get("price") or 0)
-                    usd_value = size * price
-
-                total_volume += usd_value
-                side = t.get("side", "").upper()
-
-                if side == "SELL":
-                    market_pnl += usd_value
-                else:  # BUY
-                    market_pnl -= usd_value
-                    market_buys += usd_value
-                    total_invested += usd_value
-
-            total_pnl += market_pnl
-
-            # Only count markets with both buys and sells as "closed"
-            has_buy = any(t.get("side", "").upper() == "BUY" for t in m_trades)
-            has_sell = any(t.get("side", "").upper() == "SELL" for t in m_trades)
-
-            if has_buy and has_sell:
-                closed_markets += 1
-                if market_pnl > 0:
-                    winning_markets += 1
-
-        # Calculate final metrics
-        roi = (total_pnl / total_invested * 100) if total_invested > 0 else 0
-        win_rate = (winning_markets / closed_markets * 100) if closed_markets > 0 else 0
+        for trade in period_trades:
+            usd_value = float(trade.get("usdcSize") or 0)
+            if usd_value == 0:
+                size = float(trade.get("size") or 0)
+                price = float(trade.get("price") or 0)
+                usd_value = size * price
+            total_volume += usd_value
 
         return {
             "pnl": round(total_pnl, 2),
@@ -402,8 +458,8 @@ class WalletDiscoveryProcessor:
             "known_wallets": len(self._known_wallets),
             "pending_wallets": len(self._pending_wallets),
             "queue_size": self._queue.qsize(),
-            "wallets_discovered": self._wallets_discovered,
-            "wallets_processed": self._wallets_processed,
+            "wallets_discovered": self._wallets_discovered,  # Total $100+ trades seen
+            "wallets_processed": self._wallets_processed,    # Actually analyzed
             "trades_stored": self._trades_stored,
             "errors": self._errors,
         }

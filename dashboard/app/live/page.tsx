@@ -8,6 +8,11 @@ import ContextSidebar from '@/components/ContextSidebar'
 import InsiderAlerts from '@/components/InsiderAlerts'
 import { TradeFilter, supabase } from '@/lib/supabase'
 
+interface DiscoveryStats {
+  totalWallets: number
+  tradesCount: number
+}
+
 export default function LiveTradePage() {
   const [activeTab, setActiveTab] = useState<TabId>('all')
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null)
@@ -15,8 +20,9 @@ export default function LiveTradePage() {
   const [filter, setFilter] = useState<TradeFilter>({})
   const [alertCount, setAlertCount] = useState(0)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
+  const [discoveryStats, setDiscoveryStats] = useState<DiscoveryStats>({ totalWallets: 0, tradesCount: 0 })
 
-  // Fetch unacknowledged alert count
+  // Fetch unacknowledged alert count and discovery stats
   useEffect(() => {
     async function fetchAlertCount() {
       const { count } = await supabase
@@ -26,10 +32,28 @@ export default function LiveTradePage() {
       setAlertCount(count || 0)
     }
 
+    async function fetchDiscoveryStats() {
+      // Get total wallets count
+      const { count: walletsCount } = await supabase
+        .from('wallets')
+        .select('*', { count: 'exact', head: true })
+
+      // Get total trades count (>= $100)
+      const { count: tradesCount } = await supabase
+        .from('live_trades')
+        .select('*', { count: 'exact', head: true })
+
+      setDiscoveryStats({
+        totalWallets: walletsCount || 0,
+        tradesCount: tradesCount || 0
+      })
+    }
+
     fetchAlertCount()
+    fetchDiscoveryStats()
 
     // Subscribe to alert changes
-    const subscription = supabase
+    const alertSubscription = supabase
       .channel('alert_count_channel')
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'trade_alerts' },
@@ -37,8 +61,18 @@ export default function LiveTradePage() {
       )
       .subscribe()
 
+    // Subscribe to wallet changes for discovery stats
+    const walletSubscription = supabase
+      .channel('wallet_stats_channel')
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'wallets' },
+        () => fetchDiscoveryStats()
+      )
+      .subscribe()
+
     return () => {
-      subscription.unsubscribe()
+      alertSubscription.unsubscribe()
+      walletSubscription.unsubscribe()
     }
   }, [])
 
@@ -77,6 +111,18 @@ export default function LiveTradePage() {
           </p>
         </div>
         <div className="flex items-center gap-4">
+          {/* Discovery Stats */}
+          <div className="hidden md:flex items-center gap-3 text-sm">
+            <div className="flex items-center gap-1.5 text-gray-400">
+              <span className="text-blue-400 font-medium">{discoveryStats.tradesCount.toLocaleString()}</span>
+              <span>trades ($100+)</span>
+            </div>
+            <span className="text-gray-600">|</span>
+            <div className="flex items-center gap-1.5 text-gray-400">
+              <span className="text-green-400 font-medium">{discoveryStats.totalWallets.toLocaleString()}</span>
+              <span>wallets analyzed</span>
+            </div>
+          </div>
           <div className="flex items-center gap-2 text-sm text-gray-400">
             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             Connected

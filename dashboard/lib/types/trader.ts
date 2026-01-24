@@ -90,6 +90,7 @@ export interface TraderProfileResponse {
   address: string
   username?: string
   profileImage?: string
+  accountCreatedAt?: string  // ISO timestamp of account creation
 
   // Positions
   positions: PolymarketPosition[]

@@ -14,6 +14,33 @@ import {
 } from './types/trader'
 
 const DATA_API_BASE = 'https://data-api.polymarket.com'
+const GAMMA_API_BASE = 'https://gamma-api.polymarket.com'
+
+export interface TraderProfile {
+  createdAt?: string
+  pseudonym?: string
+  name?: string
+  profileImage?: string
+  bio?: string
+  xUsername?: string
+  verifiedBadge?: boolean
+}
+
+/**
+ * Get a trader's public profile from Gamma API
+ */
+export async function getProfile(address: string): Promise<TraderProfile> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/public-profile?address=${address}`)
+    if (!response.ok) {
+      return {}
+    }
+    return await response.json()
+  } catch (error) {
+    console.error(`Error getting profile for ${address}:`, error)
+    return {}
+  }
+}
 
 /**
  * Get a trader's portfolio value
@@ -98,12 +125,14 @@ export async function getFullTraderData(address: string): Promise<{
   positions: RawPolymarketPosition[]
   closedPositions: RawPolymarketClosedPosition[]
   activity: unknown[]
+  profile: TraderProfile
 }> {
-  const [portfolioValue, positions, closedPositions, activity] = await Promise.all([
+  const [portfolioValue, positions, closedPositions, activity, profile] = await Promise.all([
     getPortfolioValue(address),
     getPositions(address),
     getClosedPositions(address),
     getActivity(address),
+    getProfile(address),
   ])
 
   return {
@@ -111,6 +140,7 @@ export async function getFullTraderData(address: string): Promise<{
     positions,
     closedPositions,
     activity,
+    profile,
   }
 }
 

@@ -74,6 +74,7 @@ export async function GET(
       address,
       username: dbTrader.username,
       profileImage: dbTrader.profile_image,
+      accountCreatedAt: dbTrader.account_created_at,
       positions: (dbPositions || []).map((p) => ({
         conditionId: p.condition_id,
         asset: p.asset_id || '',
@@ -146,15 +147,16 @@ export async function GET(
     )
 
     // 7. Cache to database (don't await, run in background)
-    cacheTraderData(address, metrics, positions, closedPositions)
+    cacheTraderData(address, metrics, positions, closedPositions, liveData.profile)
 
     // 8. Build response
     const response: TraderProfileResponse = {
       source: dbTrader ? 'mixed' : 'live',
       dataFreshness: 'fresh',
       address,
-      username: dbTrader?.username,
-      profileImage: dbTrader?.profile_image,
+      username: liveData.profile.pseudonym || liveData.profile.name || dbTrader?.username,
+      profileImage: liveData.profile.profileImage || dbTrader?.profile_image,
+      accountCreatedAt: liveData.profile.createdAt,
       positions,
       closedPositionsCount: closedPositions.length,
       trades: trades.slice(0, 25), // Return 25 most recent trades
@@ -199,6 +201,7 @@ export async function GET(
         address,
         username: dbTrader.username,
         profileImage: dbTrader.profile_image,
+        accountCreatedAt: dbTrader.account_created_at,
         positions: (dbPositions || []).map((p) => ({
           conditionId: p.condition_id,
           asset: p.asset_id || '',
@@ -273,12 +276,16 @@ async function cacheTraderData(
   address: string,
   metrics: TraderProfileResponse['metrics'],
   positions: TraderProfileResponse['positions'],
-  closedPositions: { conditionId: string; title?: string; outcome?: string; realizedPnl: number; isWin: boolean }[]
+  closedPositions: { conditionId: string; title?: string; outcome?: string; realizedPnl: number; isWin: boolean }[],
+  profile?: { pseudonym?: string; name?: string; profileImage?: string; createdAt?: string }
 ) {
   try {
     // Upsert trader metrics
     await supabase.from('traders').upsert({
       address,
+      username: profile?.pseudonym || profile?.name,
+      profile_image: profile?.profileImage,
+      account_created_at: profile?.createdAt,
       portfolio_value: metrics.portfolioValue,
       total_pnl: metrics.totalPnl,
       unrealized_pnl: metrics.unrealizedPnl,

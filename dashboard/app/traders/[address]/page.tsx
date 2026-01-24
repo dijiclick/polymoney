@@ -85,6 +85,21 @@ export default function TraderDetailPage() {
     return `${days}d ago`
   }
 
+  const formatAccountAge = (createdAt?: string) => {
+    if (!createdAt) return null
+    const created = new Date(createdAt)
+    const now = new Date()
+    const diffMs = now.getTime() - created.getTime()
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+    if (days < 30) return `${days} days`
+    const months = Math.floor(days / 30)
+    if (months < 12) return `${months} month${months !== 1 ? 's' : ''}`
+    const years = Math.floor(months / 12)
+    const remainingMonths = months % 12
+    if (remainingMonths === 0) return `${years} year${years !== 1 ? 's' : ''}`
+    return `${years}y ${remainingMonths}m`
+  }
+
   if (loading) {
     return <TraderProfileSkeleton />
   }
@@ -134,6 +149,11 @@ export default function TraderDetailPage() {
           </h1>
           <div className="flex items-center gap-3 text-sm">
             <span className="text-gray-500 font-mono">{address}</span>
+            {data.accountCreatedAt && (
+              <span className="text-gray-500">
+                Account age: {formatAccountAge(data.accountCreatedAt)}
+              </span>
+            )}
             <a
               href={`https://polymarket.com/profile/${address}`}
               target="_blank"
