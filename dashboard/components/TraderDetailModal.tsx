@@ -18,6 +18,18 @@ interface Position {
   marketSlug?: string
 }
 
+interface ClosedPosition {
+  conditionId: string
+  title?: string
+  outcome?: string
+  size: number
+  avgPrice: number
+  finalPrice: number
+  realizedPnl: number
+  resolvedAt?: string
+  isWin: boolean
+}
+
 interface TraderData {
   address: string
   username?: string
@@ -34,6 +46,7 @@ interface TraderData {
     metrics30d: { pnl: number; roi: number; winRate: number }
   }
   positions: Position[]
+  closedPositions?: ClosedPosition[]
   closedPositionsCount: number
 }
 
@@ -350,60 +363,54 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
 
                 {activeTab === 'closed' && (
                   <div className="space-y-3">
-                    {(() => {
-                      // Filter positions that are resolved (currentValue = 0 or endDate passed)
-                      const now = new Date()
-                      const resolvedPositions = data.positions?.filter(p => {
-                        const isResolved = p.currentValue === 0 || (p.endDate && new Date(p.endDate) < now)
-                        return isResolved
-                      }) || []
-
-                      if (resolvedPositions.length > 0) {
-                        return resolvedPositions.map((position, index) => (
-                          <div
-                            key={position.conditionId || index}
-                            className="bg-gray-800/50 rounded-xl p-4"
-                          >
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex-1 min-w-0">
-                                <h4 className="text-sm font-medium text-white truncate">
-                                  {position.title || 'Unknown Market'}
-                                </h4>
-                                <div className="flex items-center gap-2 mt-1">
-                                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                    position.cashPnl >= 0
-                                      ? 'bg-emerald-500/20 text-emerald-400'
-                                      : 'bg-red-500/20 text-red-400'
-                                  }`}>
-                                    {position.cashPnl >= 0 ? 'WIN' : 'LOSS'}
+                    {data.closedPositions && data.closedPositions.length > 0 ? (
+                      data.closedPositions.map((position, index) => (
+                        <div
+                          key={position.conditionId || index}
+                          className="bg-gray-800/50 rounded-xl p-4"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-medium text-white truncate">
+                                {position.title || 'Unknown Market'}
+                              </h4>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                  position.isWin
+                                    ? 'bg-emerald-500/20 text-emerald-400'
+                                    : 'bg-red-500/20 text-red-400'
+                                }`}>
+                                  {position.isWin ? 'WIN' : 'LOSS'}
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                  {position.outcome} @ {(position.avgPrice * 100)?.toFixed(1)}¢
+                                </span>
+                                {position.resolvedAt && (
+                                  <span className="text-xs text-gray-600">
+                                    {new Date(position.resolvedAt).toLocaleDateString()}
                                   </span>
-                                  <span className="text-xs text-gray-500">
-                                    {position.outcome} @ {(position.avgPrice * 100)?.toFixed(1)}¢
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <p className={`text-sm font-medium ${getPnlColor(position.cashPnl || 0)}`}>
-                                  {formatMoney(position.cashPnl || 0)}
-                                </p>
-                                <p className={`text-xs ${getPnlColor(position.percentPnl || 0)}`}>
-                                  {formatPercent(position.percentPnl || 0)}
-                                </p>
+                                )}
                               </div>
                             </div>
+                            <div className="text-right">
+                              <p className={`text-sm font-medium ${getPnlColor(position.realizedPnl || 0)}`}>
+                                {formatMoney(position.realizedPnl || 0)}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {position.size?.toFixed(2)} shares
+                              </p>
+                            </div>
                           </div>
-                        ))
-                      }
-
-                      return (
-                        <div className="text-center py-8">
-                          <p className="text-gray-500 mb-2">No resolved positions in current data</p>
-                          <p className="text-gray-600 text-sm">
-                            {data.closedPositionsCount || 0} total closed positions
-                          </p>
                         </div>
-                      )
-                    })()}
+                      ))
+                    ) : (
+                      <div className="text-center py-8">
+                        <p className="text-gray-500 mb-2">No closed positions available</p>
+                        <p className="text-gray-600 text-sm">
+                          {data.closedPositionsCount || 0} total closed positions recorded
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 

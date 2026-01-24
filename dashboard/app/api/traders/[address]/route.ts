@@ -4,7 +4,9 @@ import {
   getProfile,
   getPortfolioValue,
   getPositions,
+  getClosedPositions,
   parsePositions,
+  parseClosedPositions,
   isValidEthAddress,
 } from '@/lib/polymarket-api'
 import { getTraderMetrics as getGoldskyMetrics, GoldskyMetrics } from '@/lib/goldsky-api'
@@ -115,16 +117,21 @@ export async function GET(
   // 5. Fetch ALL metrics from Goldsky + basic info from Polymarket API
   try {
     // Goldsky: ALL metrics (volume, trades, PnL, win rate, ROI, positions)
-    // Polymarket API: Only profile info, portfolio value, and current positions for display
-    const [goldskyMetrics, profile, portfolioValue, rawPositions] = await Promise.all([
+    // Polymarket API: Profile info, portfolio value, open positions, and closed positions
+    const [goldskyMetrics, profile, portfolioValue, rawPositions, rawClosedPositions] = await Promise.all([
       getGoldskyMetrics(address, 30),
       getProfile(address).catch(() => ({} as { pseudonym?: string; name?: string; profileImage?: string; createdAt?: string })),
       getPortfolioValue(address).catch(() => 0),
       getPositions(address).catch(() => []),
+      getClosedPositions(address).catch(() => []),
     ])
 
-    // Parse positions for display
-    const positions = parsePositions(rawPositions)
+    // Parse all positions
+    const allPositions = parsePositions(rawPositions)
+    const closedPositions = parseClosedPositions(rawClosedPositions)
+
+    // Filter to only truly open positions (currentValue > 0 means still active)
+    const openPositions = allPositions.filter(p => p.currentValue > 0)
 
     // Build metrics from Goldsky data (includes ROI and drawdown for each period)
     const metrics7d: TimePeriodMetrics = {
@@ -147,7 +154,7 @@ export async function GET(
 
     // 6. Update wallets table with fresh Goldsky data (if wallet exists)
     if (dbWallet) {
-      updateWalletMetricsFromGoldsky(address, goldskyMetrics, portfolioValue, positions.length, profile)
+      updateWalletMetricsFromGoldsky(address, goldskyMetrics, portfolioValue, openPositions.length, profile)
     }
 
     // 7. Build response with Goldsky metrics
@@ -158,8 +165,9 @@ export async function GET(
       username: profile.name || profile.pseudonym || dbWallet?.username,
       profileImage: profile.profileImage,
       accountCreatedAt: profile.createdAt,
-      positions,
-      closedPositionsCount: goldskyMetrics.closedPositions,
+      positions: openPositions,
+      closedPositions: closedPositions,
+      closedPositionsCount: closedPositions.length || goldskyMetrics.closedPositions,
       trades: [], // No trades from Goldsky - would need separate query
       metrics: {
         portfolioValue,

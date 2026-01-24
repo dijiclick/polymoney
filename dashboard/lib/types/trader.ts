@@ -98,6 +98,7 @@ export interface TraderProfileResponse {
 
   // Positions
   positions: PolymarketPosition[]
+  closedPositions?: PolymarketClosedPosition[]
   closedPositionsCount: number
 
   // Recent trades
