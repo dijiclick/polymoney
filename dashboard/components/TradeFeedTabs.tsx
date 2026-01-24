@@ -1,6 +1,6 @@
 'use client'
 
-export type TabId = 'all' | 'insider' | 'alerts'
+export type TabId = 'all' | 'whales' | 'insider' | 'watchlist' | 'alerts'
 
 interface TradeFeedTabsProps {
   activeTab: TabId
@@ -15,7 +15,9 @@ export default function TradeFeedTabs({
 }: TradeFeedTabsProps) {
   const tabs: { id: TabId; label: string; badge?: number }[] = [
     { id: 'all', label: 'All Trades' },
-    { id: 'insider', label: 'Insider Focus' },
+    { id: 'whales', label: 'Whales ($10K+)' },
+    { id: 'insider', label: 'Insiders' },
+    { id: 'watchlist', label: 'Watchlist' },
     { id: 'alerts', label: 'Alerts', badge: alertCount }
   ]
 

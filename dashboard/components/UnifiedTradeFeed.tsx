@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase, LiveTrade, TradeFilter } from '@/lib/supabase'
 
 interface UnifiedTradeFeedProps {
-  mode: 'all' | 'insider'
+  mode: 'all' | 'whales' | 'insider' | 'watchlist'
   filter: TradeFilter
   onTraderSelect?: (address: string) => void
   selectedTraderAddress?: string | null
@@ -27,8 +27,10 @@ export default function UnifiedTradeFeed({
   const listRef = useRef<HTMLDivElement>(null)
 
   const filterTrade = useCallback((trade: LiveTrade): boolean => {
-    // In insider mode, only show insider suspects
+    // Mode-based filtering
     if (mode === 'insider' && !trade.is_insider_suspect) return false
+    if (mode === 'whales' && !trade.is_whale) return false
+    if (mode === 'watchlist' && !trade.is_watchlist) return false
 
     // Apply additional filters
     if (filter.minUsdValue && trade.usd_value < filter.minUsdValue) return false
@@ -56,6 +58,10 @@ export default function UnifiedTradeFeed({
     // Mode-based filter
     if (mode === 'insider') {
       query = query.eq('is_insider_suspect', true)
+    } else if (mode === 'whales') {
+      query = query.eq('is_whale', true)
+    } else if (mode === 'watchlist') {
+      query = query.eq('is_watchlist', true)
     }
 
     // Apply server-side filters
@@ -149,7 +155,10 @@ export default function UnifiedTradeFeed({
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold">
-              {mode === 'insider' ? 'Insider Trades' : 'Live Trades'}
+              {mode === 'insider' ? 'Insider Trades' :
+               mode === 'whales' ? 'Whale Trades ($10K+)' :
+               mode === 'watchlist' ? 'Watchlist Trades' :
+               'Live Trades'}
             </h2>
             <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
             {tradeCount > 0 && (
@@ -185,11 +194,18 @@ export default function UnifiedTradeFeed({
         {trades.length === 0 ? (
           <div className="p-8 text-center text-gray-500">
             <div className="text-4xl mb-3">
-              {mode === 'insider' ? 'No insider trades yet' : 'Waiting for trades...'}
+              {mode === 'insider' ? 'No insider trades yet' :
+               mode === 'whales' ? 'No whale trades yet' :
+               mode === 'watchlist' ? 'No watchlist trades yet' :
+               'Waiting for trades...'}
             </div>
             <div className="text-sm">
               {mode === 'insider'
                 ? 'Trades from suspected insiders will appear here'
+                : mode === 'whales'
+                ? 'Trades of $10K or more will appear here'
+                : mode === 'watchlist'
+                ? 'Trades from your watchlist addresses will appear here'
                 : 'Live trades will appear here as they happen'
               }
             </div>

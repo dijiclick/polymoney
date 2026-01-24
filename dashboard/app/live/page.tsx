@@ -120,7 +120,9 @@ export default function LiveTradePage() {
               <InsiderAlerts />
             ) : (
               <UnifiedTradeFeed
-                mode={activeTab === 'insider' ? 'insider' : 'all'}
+                mode={activeTab === 'insider' ? 'insider' :
+                      activeTab === 'whales' ? 'whales' :
+                      activeTab === 'watchlist' ? 'watchlist' : 'all'}
                 filter={getEffectiveFilter()}
                 onTraderSelect={setSelectedAddress}
                 selectedTraderAddress={selectedAddress}
