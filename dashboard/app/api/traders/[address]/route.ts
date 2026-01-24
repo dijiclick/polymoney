@@ -128,10 +128,36 @@ export async function GET(
 
     // Parse all positions
     const allPositions = parsePositions(rawPositions)
-    const closedPositions = parseClosedPositions(rawClosedPositions)
+    const redeemedWins = parseClosedPositions(rawClosedPositions)
 
-    // Filter to only truly open positions (currentValue > 0 means still active)
+    // Separate open positions (currentValue > 0) from resolved losses (currentValue = 0)
     const openPositions = allPositions.filter(p => p.currentValue > 0)
+
+    // Resolved losses are positions with currentValue = 0 that aren't in the redeemed wins
+    // These are bets that lost and the market resolved against the user
+    const redeemedConditionIds = new Set(redeemedWins.map(p => p.conditionId))
+    const resolvedLosses = allPositions
+      .filter(p => p.currentValue === 0 && !redeemedConditionIds.has(p.conditionId))
+      .map(p => ({
+        conditionId: p.conditionId,
+        title: p.title,
+        outcome: p.outcome,
+        size: p.size,
+        avgPrice: p.avgPrice,
+        finalPrice: 0,
+        realizedPnl: p.cashPnl, // This will be negative for losses
+        resolvedAt: p.endDate,
+        isWin: false,
+      }))
+
+    // Combine redeemed wins and resolved losses for the closed positions list
+    const closedPositions = [...redeemedWins, ...resolvedLosses]
+      .sort((a, b) => {
+        // Sort by resolved date if available, newest first
+        const dateA = a.resolvedAt ? new Date(a.resolvedAt).getTime() : 0
+        const dateB = b.resolvedAt ? new Date(b.resolvedAt).getTime() : 0
+        return dateB - dateA
+      })
 
     // Build metrics from Goldsky data (includes ROI and drawdown for each period)
     const metrics7d: TimePeriodMetrics = {
