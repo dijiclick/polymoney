@@ -1,10 +1,15 @@
 @echo off
-title Polymarket Live Feed Service
+title Polymarket Wallet Analytics Pipeline
 cd /d "%~dp0"
 
 echo ============================================================
-echo    POLYMARKET LIVE FEED SERVICE
+echo    WALLET ANALYTICS PIPELINE (LEADERBOARD)
 echo ============================================================
+echo.
+echo This script will:
+echo   1. Fetch top 1000 traders from all 10 leaderboard categories
+echo   2. Update portfolio values for all wallets
+echo   3. Fetch trade history for qualified wallets (portfolio $200+)
 echo.
 
 :: Check if venv exists
@@ -24,14 +29,10 @@ if not exist ".env" (
     exit /b 1
 )
 
-echo Starting live feed service...
-echo Press Ctrl+C to stop.
-echo.
-
 :: Set PYTHONPATH to include project root
 set PYTHONPATH=%~dp0
 
-:: Run the service
-venv\Scripts\python.exe -m src.realtime.service
+:: Run the combined collector
+venv\Scripts\python.exe scripts\run_collect.py
 
 pause

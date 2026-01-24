@@ -1,14 +1,13 @@
 @echo off
-title Polymarket Wallet Collector
+title Polymarket Goldsky Collector
 cd /d "%~dp0"
 
 echo ============================================================
-echo    POLYMARKET WALLET COLLECTOR
+echo    GOLDSKY WALLET COLLECTOR
 echo ============================================================
 echo.
-echo This script will:
-echo   1. Fetch top 1000 traders from all 10 leaderboard categories
-echo   2. Update portfolio values for all wallets
+echo This script extracts wallet addresses from blockchain data.
+echo Scans the last 30 days of Polymarket transactions.
 echo.
 
 :: Check if venv exists
@@ -31,7 +30,7 @@ if not exist ".env" (
 :: Set PYTHONPATH to include project root
 set PYTHONPATH=%~dp0
 
-:: Run the combined collector
-venv\Scripts\python.exe scripts\run_collect.py
+:: Run the Goldsky collector
+venv\Scripts\python.exe scripts\run_goldsky.py
 
 pause
