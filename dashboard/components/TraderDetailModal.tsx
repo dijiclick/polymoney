@@ -48,7 +48,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<TraderData | null>(null)
-  const [activeTab, setActiveTab] = useState<'open' | 'summary'>('open')
+  const [activeTab, setActiveTab] = useState<'open' | 'closed' | 'summary'>('open')
   const [mounted, setMounted] = useState(false)
 
   // Handle client-side mounting for portal
@@ -272,7 +272,17 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                       : 'bg-gray-800 text-gray-400 hover:text-white'
                   }`}
                 >
-                  Open Positions ({data.positions?.length || 0})
+                  Open ({data.positions?.length || 0})
+                </button>
+                <button
+                  onClick={() => setActiveTab('closed')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    activeTab === 'closed'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Closed ({data.closedPositionsCount || 0})
                 </button>
                 <button
                   onClick={() => setActiveTab('summary')}
@@ -335,6 +345,65 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                         No open positions
                       </div>
                     )}
+                  </div>
+                )}
+
+                {activeTab === 'closed' && (
+                  <div className="space-y-3">
+                    {(() => {
+                      // Filter positions that are resolved (currentValue = 0 or endDate passed)
+                      const now = new Date()
+                      const resolvedPositions = data.positions?.filter(p => {
+                        const isResolved = p.currentValue === 0 || (p.endDate && new Date(p.endDate) < now)
+                        return isResolved
+                      }) || []
+
+                      if (resolvedPositions.length > 0) {
+                        return resolvedPositions.map((position, index) => (
+                          <div
+                            key={position.conditionId || index}
+                            className="bg-gray-800/50 rounded-xl p-4"
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-sm font-medium text-white truncate">
+                                  {position.title || 'Unknown Market'}
+                                </h4>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                    position.cashPnl >= 0
+                                      ? 'bg-emerald-500/20 text-emerald-400'
+                                      : 'bg-red-500/20 text-red-400'
+                                  }`}>
+                                    {position.cashPnl >= 0 ? 'WIN' : 'LOSS'}
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    {position.outcome} @ {(position.avgPrice * 100)?.toFixed(1)}¢
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className={`text-sm font-medium ${getPnlColor(position.cashPnl || 0)}`}>
+                                  {formatMoney(position.cashPnl || 0)}
+                                </p>
+                                <p className={`text-xs ${getPnlColor(position.percentPnl || 0)}`}>
+                                  {formatPercent(position.percentPnl || 0)}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      }
+
+                      return (
+                        <div className="text-center py-8">
+                          <p className="text-gray-500 mb-2">No resolved positions in current data</p>
+                          <p className="text-gray-600 text-sm">
+                            {data.closedPositionsCount || 0} total closed positions
+                          </p>
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
 
