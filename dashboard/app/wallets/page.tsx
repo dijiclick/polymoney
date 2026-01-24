@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Wallet, WalletFilter, WalletMetrics, TimePeriod } from '@/lib/supabase'
+import { Wallet, WalletFilter, TimePeriod } from '@/lib/supabase'
 import StatCard from '@/components/StatCard'
 import TimePeriodSelector from '@/components/TimePeriodSelector'
 import WalletFilters from '@/components/WalletFilters'
@@ -10,8 +10,7 @@ import WalletTable from '@/components/WalletTable'
 interface WalletStats {
   total: number
   goldsky: number
-  leaderboard: number
-  both: number
+  live: number
   qualified200: number
   totalBalance: number
   avgBalance: number
@@ -19,17 +18,16 @@ interface WalletStats {
 
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<Wallet[]>([])
-  const [metrics, setMetrics] = useState<Map<string, WalletMetrics>>(new Map())
   const [stats, setStats] = useState<WalletStats | null>(null)
   const [loading, setLoading] = useState(true)
-  const [metricsLoading, setMetricsLoading] = useState(false)
   const [filter, setFilter] = useState<WalletFilter>({
     timePeriod: '7d',
-    minBalance: 0
+    minBalance: 0,
+    minWinRate: 0
   })
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
-  const [sortBy, setSortBy] = useState('balance')
+  const [sortBy, setSortBy] = useState('win_rate_7d')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   // Fetch wallet stats
@@ -49,22 +47,20 @@ export default function WalletsPage() {
     }
   }, [])
 
-  // Fetch wallets
+  // Fetch wallets - now includes metrics from DB
   const fetchWallets = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams({
         source: filter.source || 'all',
         minBalance: String(filter.minBalance || 0),
+        minWinRate: String(filter.minWinRate || 0),
+        period: filter.timePeriod,
         page: String(page),
         limit: '50',
         sortBy,
         sortDir
       })
-
-      if (filter.category) {
-        params.set('category', filter.category)
-      }
 
       const res = await fetch(`/api/wallets?${params}`)
       const data = await res.json()
@@ -78,38 +74,7 @@ export default function WalletsPage() {
     } finally {
       setLoading(false)
     }
-  }, [filter.source, filter.category, filter.minBalance, page, sortBy, sortDir])
-
-  // Fetch metrics for displayed wallets
-  const fetchMetrics = useCallback(async () => {
-    if (wallets.length === 0) return
-
-    setMetricsLoading(true)
-    const newMetrics = new Map<string, WalletMetrics>()
-
-    // Fetch metrics in parallel with concurrency limit
-    const batchSize = 10
-    for (let i = 0; i < wallets.length; i += batchSize) {
-      const batch = wallets.slice(i, i + batchSize)
-      const promises = batch.map(async (wallet) => {
-        try {
-          const res = await fetch(
-            `/api/wallets/${wallet.address}/metrics?period=${filter.timePeriod}`
-          )
-          const data = await res.json()
-          if (data.metrics) {
-            newMetrics.set(wallet.address, data.metrics)
-          }
-        } catch (error) {
-          console.error(`Error fetching metrics for ${wallet.address}:`, error)
-        }
-      })
-      await Promise.all(promises)
-    }
-
-    setMetrics(newMetrics)
-    setMetricsLoading(false)
-  }, [wallets, filter.timePeriod])
+  }, [filter.source, filter.minBalance, filter.minWinRate, filter.timePeriod, page, sortBy, sortDir])
 
   // Initial load
   useEffect(() => {
@@ -121,12 +86,7 @@ export default function WalletsPage() {
     fetchWallets()
   }, [fetchWallets])
 
-  // Fetch metrics when wallets or time period changes
-  useEffect(() => {
-    fetchMetrics()
-  }, [fetchMetrics])
-
-  // Handle sort
+  // Handle sort - update sort column based on time period
   const handleSort = (column: string) => {
     if (sortBy === column) {
       setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
@@ -140,6 +100,14 @@ export default function WalletsPage() {
   const handleFilterChange = (newFilter: WalletFilter) => {
     setFilter(newFilter)
     setPage(1)
+    // Update sort column if time period changes
+    if (newFilter.timePeriod !== filter.timePeriod) {
+      const newSuffix = newFilter.timePeriod === '30d' ? '_30d' : '_7d'
+      const oldSuffix = filter.timePeriod === '30d' ? '_30d' : '_7d'
+      if (sortBy.endsWith(oldSuffix)) {
+        setSortBy(sortBy.replace(oldSuffix, newSuffix))
+      }
+    }
   }
 
   return (
@@ -148,7 +116,7 @@ export default function WalletsPage() {
       <div>
         <h1 className="text-3xl font-bold mb-2">Wallet Analytics</h1>
         <p className="text-gray-400">
-          Analyze wallet performance across time periods. Data from Goldsky blockchain and Polymarket leaderboard.
+          Analyze wallet performance across time periods. Sort by win rate to find the best traders.
         </p>
       </div>
 
@@ -172,8 +140,8 @@ export default function WalletsPage() {
             color="blue"
           />
           <StatCard
-            title="Leaderboard"
-            value={stats.leaderboard}
+            title="Live Discovery"
+            value={stats.live}
             color="green"
           />
           <StatCard
@@ -187,17 +155,9 @@ export default function WalletsPage() {
       {/* Filters */}
       <WalletFilters filter={filter} onChange={handleFilterChange} />
 
-      {/* Loading indicator for metrics */}
-      {metricsLoading && (
-        <div className="bg-blue-900/30 border border-blue-500/30 rounded-lg p-3 text-blue-300 text-sm">
-          Loading metrics for {wallets.length} wallets...
-        </div>
-      )}
-
-      {/* Wallet Table */}
+      {/* Wallet Table - metrics are now in wallet objects */}
       <WalletTable
         wallets={wallets}
-        metrics={metrics}
         loading={loading}
         timePeriod={filter.timePeriod}
         onSort={handleSort}

@@ -1,13 +1,15 @@
 @echo off
-title Polymarket Goldsky Collector
+title Polymarket Wallet Update
 cd /d "%~dp0"
 
 echo ============================================================
-echo    GOLDSKY WALLET COLLECTOR
+echo    WALLET UPDATE (Balance + Trades + Metrics)
 echo ============================================================
 echo.
-echo This script extracts wallet addresses from blockchain data.
-echo Scans the last 30 days of Polymarket transactions.
+echo This script will:
+echo   1. Update portfolio values for all wallets
+echo   2. Fetch trade history for qualified wallets (portfolio $200+)
+echo   3. Recalculate 7d/30d metrics for all wallets
 echo.
 
 :: Check if venv exists
@@ -30,7 +32,7 @@ if not exist ".env" (
 :: Set PYTHONPATH to include project root
 set PYTHONPATH=%~dp0
 
-:: Run the Goldsky collector
-venv\Scripts\python.exe scripts\run_goldsky.py
+:: Run the update pipeline
+venv\Scripts\python.exe scripts\run_collect.py
 
 pause

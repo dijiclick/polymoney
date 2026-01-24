@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import InsiderDetails from './InsiderDetails'
-import SuspectList from './SuspectList'
 
 interface ContextSidebarProps {
   selectedAddress: string | null
@@ -14,8 +13,6 @@ interface ContextSidebarProps {
 export default function ContextSidebar({
   selectedAddress,
   onSelectTrader,
-  activeAddresses = new Set(),
-  showCompactSuspectList = true
 }: ContextSidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
 
@@ -57,18 +54,11 @@ export default function ContextSidebar({
             address={selectedAddress}
             onClose={() => onSelectTrader(null)}
           />
-        ) : showCompactSuspectList ? (
-          <SuspectList
-            onSelectTrader={onSelectTrader}
-            selectedAddress={selectedAddress}
-            activeAddresses={activeAddresses}
-            compact={true}
-          />
         ) : (
           <div className="p-6 text-center text-gray-500">
-            <div className="text-4xl mb-3">Select a trader</div>
+            <div className="text-4xl mb-3">👤</div>
             <div className="text-sm">
-              Click on a trade or suspect to view details
+              Click on a trade to view trader details
             </div>
           </div>
         )}

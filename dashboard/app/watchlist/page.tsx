@@ -18,7 +18,7 @@ export default function WatchlistPage() {
 
     let query = supabase
       .from('watchlist')
-      .select('*, traders(*)')
+      .select('*')
       .order('added_at', { ascending: false })
 
     if (filter !== 'all') {
@@ -50,12 +50,6 @@ export default function WatchlistPage() {
 
   const formatAddress = (address: string) => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`
-  }
-
-  const formatMoney = (value: number) => {
-    if (value >= 1000000) return `$${(value / 1000000).toFixed(2)}M`
-    if (value >= 1000) return `$${(value / 1000).toFixed(1)}K`
-    return `$${value.toFixed(0)}`
   }
 
   const formatDate = (dateStr: string) => {
@@ -101,10 +95,10 @@ export default function WatchlistPage() {
       ) : entries.length === 0 ? (
         <div className="bg-gray-800 rounded-lg p-8 text-center">
           <p className="text-gray-400 mb-4">
-            Your watchlist is empty. Add traders from the Traders page.
+            Your watchlist is empty. Add traders from the Live Feed.
           </p>
-          <Link href="/traders" className="text-blue-400 hover:underline">
-            Browse Traders
+          <Link href="/live" className="text-blue-400 hover:underline">
+            Go to Live Feed
           </Link>
         </div>
       ) : (
@@ -112,60 +106,57 @@ export default function WatchlistPage() {
           <table className="w-full">
             <thead className="bg-gray-700">
               <tr>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Trader</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Address</th>
                 <th className="px-4 py-3 text-center text-sm font-medium text-gray-300">List</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-300">Portfolio</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-300">Win Rate</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-300">PnL</th>
+                <th className="px-4 py-3 text-center text-sm font-medium text-gray-300">Alerts</th>
+                <th className="px-4 py-3 text-right text-sm font-medium text-gray-300">Threshold</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Notes</th>
                 <th className="px-4 py-3 text-right text-sm font-medium text-gray-300">Added</th>
                 <th className="px-4 py-3 text-center text-sm font-medium text-gray-300">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => {
-                const trader = entry.traders
-                return (
-                  <tr key={entry.id} className="border-t border-gray-700 hover:bg-gray-750">
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/traders/${entry.address}`}
-                        className="text-blue-400 hover:underline"
-                      >
-                        {trader?.username || formatAddress(entry.address)}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`${typeStyles[entry.list_type]} px-2 py-1 rounded text-xs font-medium`}>
-                        {entry.list_type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {trader ? formatMoney(trader.portfolio_value) : 'N/A'}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {trader ? `${trader.win_rate_30d.toFixed(1)}%` : 'N/A'}
-                    </td>
-                    <td className={`px-4 py-3 text-right ${trader && trader.total_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {trader ? formatMoney(trader.total_pnl) : 'N/A'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-400 text-sm max-w-xs truncate">
-                      {entry.notes || '-'}
-                    </td>
-                    <td className="px-4 py-3 text-right text-sm text-gray-400">
-                      {formatDate(entry.added_at)}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={() => removeFromWatchlist(entry.id)}
-                        className="text-red-400 hover:text-red-300 text-sm"
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
+              {entries.map((entry) => (
+                <tr key={entry.id} className="border-t border-gray-700 hover:bg-gray-750">
+                  <td className="px-4 py-3">
+                    <Link
+                      href={`/traders/${entry.address}`}
+                      className="text-blue-400 hover:underline font-mono"
+                    >
+                      {formatAddress(entry.address)}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <span className={`${typeStyles[entry.list_type]} px-2 py-1 rounded text-xs font-medium`}>
+                      {entry.list_type}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {entry.alert_on_new_trade ? (
+                      <span className="text-green-400">On</span>
+                    ) : (
+                      <span className="text-gray-500">Off</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right text-gray-400">
+                    ${entry.alert_threshold_usd}
+                  </td>
+                  <td className="px-4 py-3 text-gray-400 text-sm max-w-xs truncate">
+                    {entry.notes || '-'}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm text-gray-400">
+                    {formatDate(entry.added_at)}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      onClick={() => removeFromWatchlist(entry.id)}
+                      className="text-red-400 hover:text-red-300 text-sm"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

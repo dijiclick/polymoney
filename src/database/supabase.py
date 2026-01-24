@@ -219,18 +219,19 @@ class SupabaseClient:
         return result.data or []
 
     def get_wallets_by_source(self, source: str) -> list[dict]:
-        """Get wallets by source (goldsky, leaderboard, both)."""
-        if source == "both":
-            result = self._client.table("wallets").select("*").eq("source", source).execute()
-        else:
-            # Include 'both' when filtering by specific source
-            result = (
-                self._client.table("wallets")
-                .select("*")
-                .or_(f"source.eq.{source},source.eq.both")
-                .execute()
-            )
+        """Get wallets by source (goldsky, live)."""
+        result = self._client.table("wallets").select("*").eq("source", source).execute()
         return result.data or []
+
+    def wallet_exists(self, address: str) -> bool:
+        """Check if wallet exists (for fast lookup)."""
+        result = self._client.table("wallets").select("address").eq("address", address.lower()).limit(1).execute()
+        return bool(result.data)
+
+    def get_all_wallet_addresses(self) -> set[str]:
+        """Get all wallet addresses as a set for cache."""
+        result = self._client.table("wallets").select("address").execute()
+        return {w["address"] for w in result.data} if result.data else set()
 
     def get_qualified_wallets(self, min_balance: float = 200) -> list[dict]:
         """Get wallets with balance >= min_balance."""
@@ -246,12 +247,7 @@ class SupabaseClient:
     def get_qualified_wallets_by_source(self, source: str, min_balance: float = 200) -> list[dict]:
         """Get qualified wallets filtered by source."""
         query = self._client.table("wallets").select("*").gte("balance", min_balance)
-
-        if source == "both":
-            query = query.eq("source", source)
-        else:
-            query = query.or_(f"source.eq.{source},source.eq.both")
-
+        query = query.eq("source", source)
         result = query.order("balance", desc=True).execute()
         return result.data or []
 
@@ -286,46 +282,6 @@ class SupabaseClient:
             .execute()
         )
         return result.data[0] if result.data else {}
-
-    # =========================================================================
-    # Wallet Leaderboard Rankings
-    # =========================================================================
-
-    def upsert_leaderboard_ranking(self, ranking_data: dict) -> dict:
-        """Insert or update a leaderboard ranking record (one per wallet/category/day)."""
-        ranking_data["address"] = ranking_data["address"].lower()
-        # Add fetched_date if not present (for upsert conflict resolution)
-        if "fetched_date" not in ranking_data:
-            from datetime import date
-            ranking_data["fetched_date"] = date.today().isoformat()
-        result = self._client.table("wallet_leaderboard_rankings").upsert(
-            ranking_data,
-            on_conflict="address,category,fetched_date"
-        ).execute()
-        return result.data[0] if result.data else {}
-
-    def get_wallet_rankings(self, address: str) -> list[dict]:
-        """Get all leaderboard rankings for a wallet."""
-        result = (
-            self._client.table("wallet_leaderboard_rankings")
-            .select("*")
-            .eq("address", address.lower())
-            .order("fetched_at", desc=True)
-            .execute()
-        )
-        return result.data or []
-
-    def get_rankings_by_category(self, category: str, limit: int = 50) -> list[dict]:
-        """Get top rankings for a category."""
-        result = (
-            self._client.table("wallet_leaderboard_rankings")
-            .select("*, wallets(*)")
-            .eq("category", category)
-            .order("rank", desc=False)
-            .limit(limit)
-            .execute()
-        )
-        return result.data or []
 
     # =========================================================================
     # Wallet Trades

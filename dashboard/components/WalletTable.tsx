@@ -1,11 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { Wallet, WalletMetrics, TimePeriod } from '@/lib/supabase'
+import { Wallet, TimePeriod } from '@/lib/supabase'
 
 interface Props {
   wallets: Wallet[]
-  metrics: Map<string, WalletMetrics>
   loading: boolean
   timePeriod: TimePeriod
   onSort?: (column: string) => void
@@ -15,7 +14,6 @@ interface Props {
 
 export default function WalletTable({
   wallets,
-  metrics,
   loading,
   timePeriod,
   onSort,
@@ -39,13 +37,18 @@ export default function WalletTable({
 
   const sourceStyles: Record<string, string> = {
     goldsky: 'bg-blue-600',
-    leaderboard: 'bg-green-600',
-    both: 'bg-purple-600'
+    live: 'bg-green-600'
   }
 
   const getPnlColor = (value: number | undefined) => {
     if (value === undefined) return 'text-gray-400'
     return value >= 0 ? 'text-green-400' : 'text-red-400'
+  }
+
+  // Get metrics based on time period
+  const getMetric = (wallet: Wallet, metric: string): number => {
+    const suffix = timePeriod === '30d' ? '_30d' : '_7d'
+    return (wallet as any)[metric + suffix] || 0
   }
 
   const SortHeader = ({ column, label }: { column: string; label: string }) => (
@@ -61,6 +64,11 @@ export default function WalletTable({
       )}
     </th>
   )
+
+  // Dynamic column name based on time period
+  const getColumnName = (base: string) => {
+    return timePeriod === '30d' ? `${base}_30d` : `${base}_7d`
+  }
 
   if (loading) {
     return (
@@ -88,18 +96,21 @@ export default function WalletTable({
               <th className="px-4 py-3 text-left">Address</th>
               <th className="px-4 py-3 text-center">Source</th>
               <SortHeader column="balance" label="Portfolio" />
-              <th className="px-4 py-3 text-right">PnL ({timePeriod})</th>
-              <th className="px-4 py-3 text-right">ROI ({timePeriod})</th>
-              <th className="px-4 py-3 text-right">Volume ({timePeriod})</th>
-              <th className="px-4 py-3 text-right">Trades</th>
-              <th className="px-4 py-3 text-right">Win Rate</th>
-              <th className="px-4 py-3 text-right">Drawdown</th>
-              <th className="px-4 py-3 text-left">Category</th>
+              <SortHeader column={getColumnName('win_rate')} label={`Win Rate (${timePeriod})`} />
+              <SortHeader column={getColumnName('pnl')} label={`PnL (${timePeriod})`} />
+              <SortHeader column={getColumnName('roi')} label={`ROI (${timePeriod})`} />
+              <SortHeader column={getColumnName('volume')} label={`Volume (${timePeriod})`} />
+              <SortHeader column={getColumnName('trade_count')} label="Trades" />
             </tr>
           </thead>
           <tbody>
             {wallets.map((wallet) => {
-              const m = metrics.get(wallet.address)
+              const pnl = getMetric(wallet, 'pnl')
+              const roi = getMetric(wallet, 'roi')
+              const winRate = getMetric(wallet, 'win_rate')
+              const volume = getMetric(wallet, 'volume')
+              const tradeCount = getMetric(wallet, 'trade_count')
+
               return (
                 <tr
                   key={wallet.address}
@@ -114,51 +125,27 @@ export default function WalletTable({
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <span className={`${sourceStyles[wallet.source]} px-2 py-1 rounded text-xs font-medium`}>
+                    <span className={`${sourceStyles[wallet.source] || 'bg-gray-600'} px-2 py-1 rounded text-xs font-medium`}>
                       {wallet.source}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right font-medium">
                     {formatMoney(wallet.balance)}
                   </td>
-                  <td className={`px-4 py-3 text-right ${getPnlColor(m?.pnl)}`}>
-                    {m ? formatMoney(m.pnl) : '-'}
+                  <td className="px-4 py-3 text-right font-medium text-yellow-400">
+                    {formatPercent(winRate)}
                   </td>
-                  <td className={`px-4 py-3 text-right ${getPnlColor(m?.roi)}`}>
-                    {m ? formatPercent(m.roi) : '-'}
+                  <td className={`px-4 py-3 text-right ${getPnlColor(pnl)}`}>
+                    {formatMoney(pnl)}
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-300">
-                    {m ? formatMoney(m.volume) : '-'}
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-300">
-                    {m?.tradeCount ?? '-'}
+                  <td className={`px-4 py-3 text-right ${getPnlColor(roi)}`}>
+                    {formatPercent(roi)}
                   </td>
                   <td className="px-4 py-3 text-right text-gray-300">
-                    {m ? formatPercent(m.winRate) : '-'}
+                    {formatMoney(volume)}
                   </td>
-                  <td className="px-4 py-3 text-right text-orange-400">
-                    {m && m.maxDrawdown > 0 ? formatPercent(m.maxDrawdown) : '-'}
-                  </td>
-                  <td className="px-4 py-3">
-                    {wallet.categories && wallet.categories.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {wallet.categories.slice(0, 2).map((cat) => (
-                          <span
-                            key={cat}
-                            className="bg-gray-700 px-2 py-0.5 rounded text-xs text-gray-300"
-                          >
-                            {cat}
-                          </span>
-                        ))}
-                        {wallet.categories.length > 2 && (
-                          <span className="text-gray-500 text-xs">
-                            +{wallet.categories.length - 2}
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-gray-500">-</span>
-                    )}
+                  <td className="px-4 py-3 text-right text-gray-300">
+                    {tradeCount}
                   </td>
                 </tr>
               )

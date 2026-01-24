@@ -10,6 +10,7 @@ from typing import Optional
 from supabase import create_client, Client
 
 from .rtds_client import RTDSMessage
+from .wallet_discovery import WalletDiscoveryProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,10 @@ class TradeProcessor:
         # Background tasks
         self._batch_task: Optional[asyncio.Task] = None
         self._cache_task: Optional[asyncio.Task] = None
+        self._discovery_task: Optional[asyncio.Task] = None
+
+        # Wallet discovery processor
+        self._discovery_processor: Optional[WalletDiscoveryProcessor] = None
 
         # Stats
         self._trades_processed = 0
@@ -79,6 +84,11 @@ class TradeProcessor:
             f"{len(self._watchlist_cache)} watchlist, "
             f"{len(self._alert_rules)} alert rules"
         )
+
+        # Initialize wallet discovery processor
+        self._discovery_processor = WalletDiscoveryProcessor(self.supabase)
+        await self._discovery_processor.initialize()
+        logger.info("Wallet discovery processor initialized")
 
     async def _load_trader_cache(self) -> None:
         """Load known wallets into cache."""
@@ -234,6 +244,14 @@ class TradeProcessor:
         Heavy processing is done asynchronously via the queue.
         """
         self._trades_processed += 1
+
+        # Check for new wallet discovery (non-blocking, for trades >= $100)
+        MIN_TRADE_VALUE_USD = 100
+        if trade.usd_value >= MIN_TRADE_VALUE_USD and self._discovery_processor:
+            await self._discovery_processor.check_and_queue(
+                trade.trader_address,
+                trade.usd_value
+            )
 
         # Enrich trade with cached data
         trade_record = self._enrich_trade(trade)
@@ -457,7 +475,7 @@ class TradeProcessor:
 
             # Also clean up old acknowledged alerts (keep unacknowledged indefinitely)
             alert_result = self.supabase.table("trade_alerts").delete().lt(
-                "created_at", cutoff_date
+                "created_at", important_cutoff
             ).eq("acknowledged", True).execute()
 
             deleted_alerts = len(alert_result.data) if alert_result.data else 0
@@ -599,6 +617,13 @@ class TradeProcessor:
         self._batch_task = asyncio.create_task(self.batch_processor())
         self._cache_task = asyncio.create_task(self.refresh_caches())
 
+        # Start wallet discovery processor
+        if self._discovery_processor:
+            self._discovery_task = asyncio.create_task(
+                self._discovery_processor.process_queue()
+            )
+            logger.info("Wallet discovery background task started")
+
     async def stop_background_tasks(self) -> None:
         """Stop background tasks gracefully."""
         if self._batch_task:
@@ -615,10 +640,21 @@ class TradeProcessor:
             except asyncio.CancelledError:
                 pass
 
+        if self._discovery_task:
+            self._discovery_task.cancel()
+            try:
+                await self._discovery_task
+            except asyncio.CancelledError:
+                pass
+
+        # Cleanup discovery processor
+        if self._discovery_processor:
+            await self._discovery_processor.shutdown()
+
     @property
     def stats(self) -> dict:
         """Get processor statistics."""
-        return {
+        stats = {
             "trades_processed": self._trades_processed,
             "trades_stored": self._trades_stored,
             "alerts_triggered": self._alerts_triggered,
@@ -629,3 +665,10 @@ class TradeProcessor:
             "watchlist_size": len(self._watchlist_cache),
             "alert_rules": len(self._alert_rules),
         }
+
+        # Add discovery stats
+        if self._discovery_processor:
+            discovery_stats = self._discovery_processor.stats
+            stats["discovery"] = discovery_stats
+
+        return stats

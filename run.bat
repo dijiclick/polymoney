@@ -1,10 +1,16 @@
 @echo off
-title Polymarket Live Feed Service
+title Polymarket Wallet Discovery System
 cd /d "%~dp0"
 
 echo ============================================================
-echo    POLYMARKET LIVE FEED SERVICE
+echo    POLYMARKET WALLET DISCOVERY SYSTEM
 echo ============================================================
+echo.
+echo This system will:
+echo   - Monitor live trades via WebSocket
+echo   - Discover new wallets from trades >= $100
+echo   - Fetch 30-day trade history for new wallets
+echo   - Calculate metrics (PnL, ROI, Win Rate) automatically
 echo.
 
 :: Check if venv exists
@@ -24,14 +30,14 @@ if not exist ".env" (
     exit /b 1
 )
 
-echo Starting live feed service...
+echo Starting live wallet discovery service...
 echo Press Ctrl+C to stop.
 echo.
 
 :: Set PYTHONPATH to include project root
 set PYTHONPATH=%~dp0
 
-:: Run the service
+:: Run the live service (includes wallet discovery)
 venv\Scripts\python.exe -m src.realtime.service
 
 pause

@@ -6,83 +6,6 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 // Types for our database tables
-export interface PipelineRun {
-  id: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
-  current_step: number
-  current_step_name: string
-  progress_percent: number
-  started_at: string
-  completed_at?: string
-  total_addresses_found: number
-  final_qualified: number
-  copytrade_found: number
-  bot_found: number
-  api_calls_made: number
-  errors_count: number
-  last_error?: string
-  days_to_scan: number
-}
-
-export interface StepProgress {
-  id: number
-  run_id: string
-  step_number: number
-  step_name: string
-  status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed'
-  total_items: number
-  processed_items: number
-  passed_items: number
-  failed_items: number
-  items_per_second: number
-  estimated_remaining_seconds?: number
-  started_at?: string
-  completed_at?: string
-}
-
-export interface LogEntry {
-  id: number
-  run_id: string
-  timestamp: string
-  level: 'debug' | 'info' | 'success' | 'warning' | 'error'
-  step_number?: number
-  message: string
-  address?: string
-  details?: Record<string, unknown>
-}
-
-export interface Trader {
-  address: string
-  username?: string
-  profile_image?: string
-  portfolio_value: number
-  win_rate_30d: number
-  win_rate_alltime: number
-  roi_percent: number
-  max_drawdown: number
-  trade_count_30d: number
-  trade_count_alltime: number
-  unique_markets_30d: number
-  account_age_days: number
-  position_concentration: number
-  max_position_size: number
-  copytrade_score: number
-  bot_score: number
-  insider_score: number
-  insider_level?: 'very_high' | 'high' | 'moderate' | 'low' | 'minimal'
-  insider_red_flags?: string[]
-  avg_entry_probability?: number
-  pnl_concentration?: number
-  primary_classification: 'copytrade' | 'bot' | 'insider' | 'none' | null
-  total_pnl: number
-  pipeline_step: number
-  eliminated_at_step?: number
-  elimination_reason?: string
-  trade_frequency: number
-  night_trade_ratio: number
-  last_trade_at?: string
-  last_updated_at?: string
-}
 
 export interface WatchlistEntry {
   id: number
@@ -93,7 +16,6 @@ export interface WatchlistEntry {
   alert_on_new_trade: boolean
   alert_threshold_usd: number
   added_at: string
-  traders?: Trader
 }
 
 // Live Trade Monitoring Types
@@ -161,26 +83,6 @@ export interface TradeFilter {
   traderAddress?: string
 }
 
-// Insider-specific types
-export interface InsiderSuspect {
-  address: string
-  username?: string
-  portfolio_value: number
-  total_pnl: number
-  roi_percent: number
-  win_rate_30d: number
-  account_age_days: number
-  unique_markets_30d: number
-  position_concentration: number
-  max_position_size: number
-  avg_entry_probability?: number
-  insider_score: number
-  insider_level: 'very_high' | 'high' | 'moderate' | 'low' | 'minimal'
-  insider_red_flags: string[]
-  last_trade_at?: string
-  last_updated_at?: string
-}
-
 export interface TradeStats {
   total_trades: number
   total_volume: number
@@ -197,7 +99,7 @@ export interface TradeStats {
 // Wallet Analytics Types
 // ============================================
 
-export type WalletSource = 'goldsky' | 'leaderboard' | 'both'
+export type WalletSource = 'goldsky' | 'live'
 export type TimePeriod = '7d' | '30d'
 
 export interface Wallet {
@@ -205,22 +107,20 @@ export interface Wallet {
   source: WalletSource
   balance: number
   balance_updated_at?: string
+  // Pre-calculated metrics stored in DB
+  pnl_7d: number
+  pnl_30d: number
+  roi_7d: number
+  roi_30d: number
+  win_rate_7d: number
+  win_rate_30d: number
+  volume_7d: number
+  volume_30d: number
+  trade_count_7d: number
+  trade_count_30d: number
+  metrics_updated_at?: string
   created_at: string
   updated_at: string
-  // Joined from rankings
-  categories?: string[]
-  best_rank?: number
-  wallet_leaderboard_rankings?: WalletLeaderboardRanking[]
-}
-
-export interface WalletLeaderboardRanking {
-  id: number
-  address: string
-  category: string
-  rank: number
-  pnl?: number
-  volume?: number
-  fetched_at: string
 }
 
 export interface WalletTrade {
@@ -258,8 +158,8 @@ export interface WalletMetrics {
 
 export interface WalletFilter {
   source?: WalletSource | 'all'
-  category?: string
   minBalance?: number
+  minWinRate?: number
   timePeriod: TimePeriod
 }
 

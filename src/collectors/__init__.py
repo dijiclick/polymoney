@@ -1,13 +1,11 @@
 """Wallet collectors module."""
 
-from .goldsky_collector import GoldskyWalletCollector
-from .leaderboard_collector import LeaderboardWalletCollector
 from .balance_updater import BalanceUpdater
 from .trade_history_collector import TradeHistoryCollector
+from .metrics_calculator import MetricsCalculator
 
 __all__ = [
-    "GoldskyWalletCollector",
-    "LeaderboardWalletCollector",
     "BalanceUpdater",
     "TradeHistoryCollector",
+    "MetricsCalculator",
 ]

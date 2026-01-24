@@ -1,12 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, Wallet, WalletSource } from '@/lib/supabase'
 
+// Valid columns for sorting
+const VALID_SORT_COLUMNS = [
+  'balance',
+  'win_rate_7d',
+  'win_rate_30d',
+  'pnl_7d',
+  'pnl_30d',
+  'roi_7d',
+  'roi_30d',
+  'volume_7d',
+  'volume_30d',
+  'trade_count_7d',
+  'trade_count_30d',
+  'created_at',
+  'updated_at'
+]
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const source = searchParams.get('source') as WalletSource | 'all' | null
-    const category = searchParams.get('category')
     const minBalance = parseFloat(searchParams.get('minBalance') || '0')
+    const minWinRate = parseFloat(searchParams.get('minWinRate') || '0')
+    const period = searchParams.get('period') || '7d'
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
     const sortBy = searchParams.get('sortBy') || 'balance'
@@ -14,28 +32,32 @@ export async function GET(request: NextRequest) {
 
     const offset = (page - 1) * limit
 
-    // Build query
+    // Validate sort column
+    const safeSortBy = VALID_SORT_COLUMNS.includes(sortBy) ? sortBy : 'balance'
+
+    // Build query - no more leaderboard join
     let query = supabase
       .from('wallets')
-      .select('*, wallet_leaderboard_rankings(*)', { count: 'exact' })
+      .select('*', { count: 'exact' })
 
     // Filter by minimum balance
     if (minBalance > 0) {
       query = query.gte('balance', minBalance)
     }
 
+    // Filter by minimum win rate (based on selected period)
+    if (minWinRate > 0) {
+      const winRateColumn = period === '30d' ? 'win_rate_30d' : 'win_rate_7d'
+      query = query.gte(winRateColumn, minWinRate)
+    }
+
     // Filter by source
     if (source && source !== 'all') {
-      if (source === 'both') {
-        query = query.eq('source', 'both')
-      } else {
-        // Include 'both' when filtering by specific source
-        query = query.or(`source.eq.${source},source.eq.both`)
-      }
+      query = query.eq('source', source)
     }
 
     // Sort
-    query = query.order(sortBy, { ascending: sortDir })
+    query = query.order(safeSortBy, { ascending: sortDir })
 
     // Paginate
     query = query.range(offset, offset + limit - 1)
@@ -47,31 +69,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    // Process wallets to add computed fields
-    const wallets: Wallet[] = (data || []).map((wallet: any) => {
-      const rankings = wallet.wallet_leaderboard_rankings || []
-      const categories = [...new Set(rankings.map((r: any) => r.category))]
-      const bestRank = rankings.length > 0
-        ? Math.min(...rankings.map((r: any) => r.rank))
-        : null
-
-      return {
-        ...wallet,
-        categories: categories.length > 0 ? categories : undefined,
-        best_rank: bestRank
-      }
-    })
-
-    // Filter by category if specified
-    let filteredWallets = wallets
-    if (category) {
-      filteredWallets = wallets.filter(w =>
-        w.categories?.includes(category)
-      )
-    }
+    // Simple mapping - no more categories/best_rank processing
+    const wallets: Wallet[] = (data || []).map((wallet: any) => ({
+      ...wallet,
+      // Ensure numeric fields have defaults
+      pnl_7d: wallet.pnl_7d || 0,
+      pnl_30d: wallet.pnl_30d || 0,
+      roi_7d: wallet.roi_7d || 0,
+      roi_30d: wallet.roi_30d || 0,
+      win_rate_7d: wallet.win_rate_7d || 0,
+      win_rate_30d: wallet.win_rate_30d || 0,
+      volume_7d: wallet.volume_7d || 0,
+      volume_30d: wallet.volume_30d || 0,
+      trade_count_7d: wallet.trade_count_7d || 0,
+      trade_count_30d: wallet.trade_count_30d || 0,
+    }))
 
     return NextResponse.json({
-      wallets: filteredWallets,
+      wallets,
       total: count || 0,
       page,
       limit,
@@ -104,9 +119,8 @@ export async function POST(request: NextRequest) {
 
       const stats = {
         total: wallets?.length || 0,
-        goldsky: wallets?.filter(w => w.source === 'goldsky' || w.source === 'both').length || 0,
-        leaderboard: wallets?.filter(w => w.source === 'leaderboard' || w.source === 'both').length || 0,
-        both: wallets?.filter(w => w.source === 'both').length || 0,
+        goldsky: wallets?.filter(w => w.source === 'goldsky').length || 0,
+        live: wallets?.filter(w => w.source === 'live').length || 0,
         qualified200: wallets?.filter(w => w.balance >= 200).length || 0,
         totalBalance: wallets?.reduce((sum, w) => sum + (w.balance || 0), 0) || 0,
         avgBalance: wallets?.length ? wallets.reduce((sum, w) => sum + (w.balance || 0), 0) / wallets.length : 0

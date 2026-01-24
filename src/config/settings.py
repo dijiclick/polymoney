@@ -29,13 +29,6 @@ class PipelineConfig(BaseModel):
     api_rate_limit: int = 60
 
 
-class GoldskyApiConfig(BaseModel):
-    """Goldsky API configuration."""
-    endpoint: str = "https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn"
-    batch_size: int = 1000
-    rate_limit: int = 10
-
-
 class PolymarketApiConfig(BaseModel):
     """Polymarket Data API configuration."""
     base_url: str = "https://data-api.polymarket.com"
@@ -44,7 +37,6 @@ class PolymarketApiConfig(BaseModel):
 
 class ApiConfig(BaseModel):
     """API configuration."""
-    goldsky: GoldskyApiConfig = Field(default_factory=GoldskyApiConfig)
     polymarket: PolymarketApiConfig = Field(default_factory=PolymarketApiConfig)
 
 
@@ -89,7 +81,6 @@ class Settings(BaseModel):
         # Load API config from yaml
         api_data = config_data.get("api", {})
         api_config = ApiConfig(
-            goldsky=GoldskyApiConfig(**api_data.get("goldsky", {})),
             polymarket=PolymarketApiConfig(**api_data.get("polymarket", {})),
         )
 

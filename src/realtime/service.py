@@ -157,7 +157,7 @@ class TradeMonitorService:
         logger.info(
             f"[STATS] "
             f"Trades: {processor_stats['trades_processed']:,} seen, "
-            f"{processor_stats['trades_stored']:,} saved (whale/insider/watchlist) | "
+            f"{processor_stats['trades_stored']:,} saved (>=$100) | "
             f"Alerts: {processor_stats['alerts_triggered']} | "
             f"Queue: {processor_stats['queue_size']} | "
             f"Errors: {processor_stats['errors']} | "
