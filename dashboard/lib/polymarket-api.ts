@@ -168,19 +168,48 @@ export function parsePositions(rawPositions: RawPolymarketPosition[]): Polymarke
 
 /**
  * Parse raw closed positions into typed closed positions
+ * Handles both old (cashPnl, size) and new (realizedPnl, totalBought) API formats
  */
 export function parseClosedPositions(rawPositions: RawPolymarketClosedPosition[]): PolymarketClosedPosition[] {
   return rawPositions.map((pos) => {
-    const pnl = parseFloat(pos.cashPnl || '0')
+    // Handle both field name formats from API
+    const pnl = pos.realizedPnl !== undefined
+      ? (typeof pos.realizedPnl === 'number' ? pos.realizedPnl : parseFloat(pos.realizedPnl))
+      : parseFloat(pos.cashPnl || '0')
+
+    const avgPrice = typeof pos.avgPrice === 'number'
+      ? pos.avgPrice
+      : parseFloat(String(pos.avgPrice || '0'))
+
+    // Size can come from 'size' or be calculated from 'totalBought'
+    let size = 0
+    if (pos.size) {
+      size = parseFloat(pos.size)
+    } else if (pos.totalBought !== undefined) {
+      const totalBought = typeof pos.totalBought === 'number'
+        ? pos.totalBought
+        : parseFloat(pos.totalBought)
+      // size = totalBought / avgPrice (since totalBought = size * avgPrice)
+      size = avgPrice > 0 ? totalBought / avgPrice : 0
+    }
+
+    // Resolve date from either resolvedAt, endDate, or timestamp
+    let resolvedAt = pos.resolvedAt
+    if (!resolvedAt && pos.timestamp) {
+      resolvedAt = new Date(pos.timestamp * 1000).toISOString()
+    } else if (!resolvedAt && pos.endDate) {
+      resolvedAt = pos.endDate
+    }
+
     return {
       conditionId: pos.conditionId,
       title: pos.title,
       outcome: pos.outcome,
-      size: parseFloat(pos.size || '0'),
-      avgPrice: parseFloat(pos.avgPrice || '0'),
-      finalPrice: 0, // Not always available in raw data
-      realizedPnl: pnl,
-      resolvedAt: pos.resolvedAt,
+      size: Math.round(size * 100) / 100,
+      avgPrice: Math.round(avgPrice * 10000) / 10000,
+      finalPrice: 0, // Not available from API
+      realizedPnl: Math.round(pnl * 100) / 100,
+      resolvedAt,
       isWin: pnl > 0,
     }
   })

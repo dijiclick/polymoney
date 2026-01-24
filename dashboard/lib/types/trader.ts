@@ -146,12 +146,18 @@ export interface RawPolymarketClosedPosition {
   conditionId: string
   title?: string
   outcome?: string
-  size: string
-  avgPrice: string
-  cashPnl: string
-  percentPnl: string
+  // API can return either size OR totalBought
+  size?: string
+  totalBought?: number | string
+  avgPrice?: number | string
+  // API can return either cashPnl OR realizedPnl
+  cashPnl?: string
+  realizedPnl?: number | string
+  percentPnl?: string
   resolvedAt?: string
   resolvedOutcome?: string
+  timestamp?: number  // Unix timestamp of resolution
+  endDate?: string
 }
 
 export interface RawPolymarketActivity {

@@ -122,18 +122,22 @@ export async function GET(
       getClosedPositions(address).catch(() => []),
     ])
 
-    // Parse all positions
+    // Parse all positions from APIs
     const allPositions = parsePositions(rawPositions)
-    const redeemedWins = parseClosedPositions(rawClosedPositions)
+    // /closed-positions returns ALL resolved positions (both wins and losses)
+    const apiClosedPositions = parseClosedPositions(rawClosedPositions)
 
-    // Separate open positions (currentValue > 0) from resolved losses (currentValue = 0)
+    console.log(`[${address}] Raw positions: ${rawPositions.length}, Raw closed: ${rawClosedPositions.length}`)
+    console.log(`[${address}] Parsed positions: ${allPositions.length}, API closed: ${apiClosedPositions.length}`)
+
+    // Separate open positions (currentValue > 0) from resolved positions (currentValue = 0)
     const openPositions = allPositions.filter(p => p.currentValue > 0)
 
-    // Resolved losses are positions with currentValue = 0 that aren't in the redeemed wins
-    // These are bets that lost and the market resolved against the user
-    const redeemedConditionIds = new Set(redeemedWins.map(p => p.conditionId))
-    const resolvedLosses = allPositions
-      .filter(p => p.currentValue === 0 && !redeemedConditionIds.has(p.conditionId))
+    // Find resolved positions from /positions that aren't in /closed-positions
+    // This can happen if there's a delay in the API or for edge cases
+    const apiClosedConditionIds = new Set(apiClosedPositions.map(p => p.conditionId))
+    const additionalResolved = allPositions
+      .filter(p => p.currentValue === 0 && !apiClosedConditionIds.has(p.conditionId))
       .map(p => ({
         conditionId: p.conditionId,
         title: p.title,
@@ -141,19 +145,21 @@ export async function GET(
         size: p.size,
         avgPrice: p.avgPrice,
         finalPrice: 0,
-        realizedPnl: p.cashPnl, // This will be negative for losses
+        realizedPnl: p.cashPnl,
         resolvedAt: p.endDate,
-        isWin: false,
+        isWin: p.cashPnl > 0,
       }))
 
-    // Combine redeemed wins and resolved losses for the closed positions list
-    const closedPositions = [...redeemedWins, ...resolvedLosses]
+    // Combine API closed positions with any additional resolved ones
+    const closedPositions = [...apiClosedPositions, ...additionalResolved]
       .sort((a, b) => {
         // Sort by resolved date if available, newest first
         const dateA = a.resolvedAt ? new Date(a.resolvedAt).getTime() : 0
         const dateB = b.resolvedAt ? new Date(b.resolvedAt).getTime() : 0
         return dateB - dateA
       })
+
+    console.log(`[${address}] Open: ${openPositions.length}, Closed: ${closedPositions.length}`)
 
     // Calculate ROI from Polymarket closed positions data (matches Polymarket's calculation)
     // ROI = realizedPnl / totalBought * 100
