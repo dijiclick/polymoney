@@ -1,6 +1,12 @@
 'use client'
 
+import { useState, useRef, useEffect } from 'react'
 import { Wallet, TimePeriod } from '@/lib/supabase'
+
+interface ColumnFilter {
+  min?: number
+  max?: number
+}
 
 interface Props {
   wallets: Wallet[]
@@ -9,6 +15,110 @@ interface Props {
   onSort?: (column: string) => void
   sortBy?: string
   sortDir?: 'asc' | 'desc'
+  columnFilters?: Record<string, ColumnFilter>
+  onColumnFilterChange?: (column: string, filter: ColumnFilter) => void
+}
+
+function FilterPopover({
+  column,
+  label,
+  filter,
+  onChange,
+  onClose,
+  type = 'number'
+}: {
+  column: string
+  label: string
+  filter?: ColumnFilter
+  onChange: (filter: ColumnFilter) => void
+  onClose: () => void
+  type?: 'number' | 'percent' | 'money'
+}) {
+  const [min, setMin] = useState(filter?.min?.toString() || '')
+  const [max, setMax] = useState(filter?.max?.toString() || '')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [onClose])
+
+  const handleApply = () => {
+    onChange({
+      min: min ? parseFloat(min) : undefined,
+      max: max ? parseFloat(max) : undefined
+    })
+    onClose()
+  }
+
+  const handleClear = () => {
+    setMin('')
+    setMax('')
+    onChange({})
+    onClose()
+  }
+
+  const prefix = type === 'money' ? '$' : ''
+  const suffix = type === 'percent' ? '%' : ''
+
+  return (
+    <div
+      ref={ref}
+      className="absolute top-full left-0 mt-2 z-50 bg-gray-800 border border-gray-700 rounded-xl shadow-xl p-4 min-w-[200px]"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="text-xs font-medium text-gray-400 mb-3 uppercase tracking-wider">{label} Filter</div>
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">Min</label>
+          <div className="relative">
+            {prefix && <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{prefix}</span>}
+            <input
+              type="number"
+              value={min}
+              onChange={(e) => setMin(e.target.value)}
+              placeholder="No min"
+              className={`w-full bg-gray-700/50 border border-gray-600 rounded-lg py-2 text-sm text-white focus:border-blue-500 focus:outline-none ${prefix ? 'pl-6' : 'pl-3'} ${suffix ? 'pr-6' : 'pr-3'}`}
+            />
+            {suffix && <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{suffix}</span>}
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">Max</label>
+          <div className="relative">
+            {prefix && <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{prefix}</span>}
+            <input
+              type="number"
+              value={max}
+              onChange={(e) => setMax(e.target.value)}
+              placeholder="No max"
+              className={`w-full bg-gray-700/50 border border-gray-600 rounded-lg py-2 text-sm text-white focus:border-blue-500 focus:outline-none ${prefix ? 'pl-6' : 'pl-3'} ${suffix ? 'pr-6' : 'pr-3'}`}
+            />
+            {suffix && <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{suffix}</span>}
+          </div>
+        </div>
+        <div className="flex gap-2 pt-2">
+          <button
+            onClick={handleClear}
+            className="flex-1 px-3 py-1.5 text-xs text-gray-400 hover:text-white border border-gray-600 rounded-lg hover:bg-gray-700 transition-colors"
+          >
+            Clear
+          </button>
+          <button
+            onClick={handleApply}
+            className="flex-1 px-3 py-1.5 text-xs text-white bg-blue-600 rounded-lg hover:bg-blue-500 transition-colors"
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function WalletTable({
@@ -17,8 +127,12 @@ export default function WalletTable({
   timePeriod,
   onSort,
   sortBy,
-  sortDir
+  sortDir,
+  columnFilters = {},
+  onColumnFilterChange
 }: Props) {
+  const [openFilter, setOpenFilter] = useState<string | null>(null)
+
   const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
   const formatMoney = (value: number | undefined | null) => {
@@ -64,28 +178,69 @@ export default function WalletTable({
     return (wallet as any)[metric + suffix] || 0
   }
 
-  const SortHeader = ({ column, label, align = 'right' }: { column: string; label: string; align?: 'left' | 'right' | 'center' }) => {
-    const isActive = sortBy === column
-    return (
-      <th
-        className={`px-4 py-4 font-medium cursor-pointer select-none group transition-colors
-          ${align === 'left' ? 'text-left' : align === 'center' ? 'text-center' : 'text-right'}
-          ${isActive ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}
-        onClick={() => onSort?.(column)}
-      >
-        <span className="inline-flex items-center gap-1">
-          {label}
-          <span className={`transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-50'}`}>
-            {sortDir === 'asc' ? '↑' : '↓'}
-          </span>
-        </span>
-      </th>
-    )
-  }
-
   // Dynamic column name based on time period
   const getColumnName = (base: string) => {
     return timePeriod === '30d' ? `${base}_30d` : `${base}_7d`
+  }
+
+  const hasFilter = (column: string) => {
+    const f = columnFilters[column]
+    return f && (f.min !== undefined || f.max !== undefined)
+  }
+
+  const SortHeader = ({
+    column,
+    label,
+    align = 'right',
+    filterType = 'number'
+  }: {
+    column: string
+    label: string
+    align?: 'left' | 'right' | 'center'
+    filterType?: 'number' | 'percent' | 'money'
+  }) => {
+    const isActive = sortBy === column
+    const isFilterOpen = openFilter === column
+    const hasActiveFilter = hasFilter(column)
+
+    return (
+      <th
+        className={`px-3 py-3 font-medium relative
+          ${align === 'left' ? 'text-left' : align === 'center' ? 'text-center' : 'text-right'}
+          ${isActive ? 'text-blue-400' : 'text-gray-500'}`}
+      >
+        <div className="flex items-center justify-end gap-1">
+          <button
+            onClick={() => setOpenFilter(isFilterOpen ? null : column)}
+            className={`p-1 rounded hover:bg-gray-700 transition-colors ${hasActiveFilter ? 'text-blue-400' : 'text-gray-600 hover:text-gray-400'}`}
+            title="Filter"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+            </svg>
+          </button>
+          <button
+            onClick={() => onSort?.(column)}
+            className="cursor-pointer select-none hover:text-gray-300 transition-colors flex items-center gap-1"
+          >
+            {label}
+            <span className={`transition-opacity ${isActive ? 'opacity-100' : 'opacity-0'}`}>
+              {sortDir === 'asc' ? '↑' : '↓'}
+            </span>
+          </button>
+        </div>
+        {isFilterOpen && onColumnFilterChange && (
+          <FilterPopover
+            column={column}
+            label={label}
+            filter={columnFilters[column]}
+            onChange={(f) => onColumnFilterChange(column, f)}
+            onClose={() => setOpenFilter(null)}
+            type={filterType}
+          />
+        )}
+      </th>
+    )
   }
 
   if (loading) {
@@ -121,16 +276,16 @@ export default function WalletTable({
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-gray-800/50">
-              <th className="px-4 py-4 text-left text-gray-500 font-medium">Trader</th>
-              <SortHeader column={getColumnName('trade_count')} label="Trades" />
-              <SortHeader column={getColumnName('win_rate')} label="Win Rate" />
-              <SortHeader column="balance" label="Portfolio" />
-              <SortHeader column={getColumnName('roi')} label="ROI" />
-              <SortHeader column={getColumnName('pnl')} label="PnL" />
-              <SortHeader column="active_positions" label="Active" align="center" />
-              <SortHeader column="total_positions" label="Total Pos" align="center" />
-              <SortHeader column={getColumnName('drawdown')} label="Drawdown" />
+            <tr className="border-b border-gray-800/50 text-sm">
+              <th className="px-3 py-3 text-left text-gray-500 font-medium">Trader</th>
+              <SortHeader column={getColumnName('trade_count')} label="Trades" filterType="number" />
+              <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" />
+              <SortHeader column="balance" label="Portfolio" filterType="money" />
+              <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" />
+              <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" />
+              <SortHeader column="active_positions" label="Active" align="center" filterType="number" />
+              <SortHeader column="total_positions" label="Positions" align="center" filterType="number" />
+              <SortHeader column={getColumnName('drawdown')} label="Drawdown" filterType="percent" />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800/30">
@@ -146,58 +301,58 @@ export default function WalletTable({
                   key={wallet.address}
                   className="group hover:bg-gray-800/30 transition-colors"
                 >
-                  <td className="px-4 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center text-xs font-medium text-gray-400">
+                  <td className="px-3 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center text-xs font-medium text-gray-400">
                         {index + 1}
                       </div>
                       <a
                         href={`https://polymarket.com/profile/${wallet.address}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="font-mono text-sm text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1.5"
+                        className="font-mono text-sm text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1"
                       >
                         {formatAddress(wallet.address)}
-                        <svg className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                         </svg>
                       </a>
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-right">
-                    <span className="text-gray-300 font-medium">{tradeCount.toLocaleString()}</span>
+                  <td className="px-3 py-3 text-right">
+                    <span className="text-gray-300 text-sm">{tradeCount.toLocaleString()}</span>
                   </td>
-                  <td className="px-4 py-4 text-right">
-                    <span className={`font-medium ${getWinRateColor(winRate)}`}>
+                  <td className="px-3 py-3 text-right">
+                    <span className={`text-sm font-medium ${getWinRateColor(winRate)}`}>
                       {formatPercentPlain(winRate)}
                     </span>
                   </td>
-                  <td className="px-4 py-4 text-right">
-                    <span className="text-gray-300 font-medium">{formatMoney(wallet.balance)}</span>
+                  <td className="px-3 py-3 text-right">
+                    <span className="text-gray-300 text-sm">{formatMoney(wallet.balance)}</span>
                   </td>
-                  <td className="px-4 py-4 text-right">
-                    <span className={`font-semibold ${getPnlColor(roi)}`}>
+                  <td className="px-3 py-3 text-right">
+                    <span className={`text-sm font-semibold ${getPnlColor(roi)}`}>
                       {formatPercent(roi)}
                     </span>
                   </td>
-                  <td className="px-4 py-4 text-right">
-                    <span className={`font-medium ${getPnlColor(pnl)}`}>
+                  <td className="px-3 py-3 text-right">
+                    <span className={`text-sm font-medium ${getPnlColor(pnl)}`}>
                       {formatMoney(pnl)}
                     </span>
                   </td>
-                  <td className="px-4 py-4 text-center">
-                    <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400">
+                  <td className="px-3 py-3 text-center">
+                    <span className="inline-flex items-center justify-center min-w-[1.75rem] px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400">
                       {wallet.active_positions || 0}
                     </span>
                   </td>
-                  <td className="px-4 py-4 text-center">
+                  <td className="px-3 py-3 text-center">
                     <span className="text-gray-400 text-sm">
                       {wallet.total_positions || 0}
                     </span>
                   </td>
-                  <td className="px-4 py-4 text-right">
-                    <span className={`font-medium ${getDrawdownColor(drawdown)}`}>
-                      {drawdown > 0 ? `-${formatPercentPlain(drawdown)}` : '0%'}
+                  <td className="px-3 py-3 text-right">
+                    <span className={`text-sm font-medium ${getDrawdownColor(drawdown)}`}>
+                      {drawdown > 0 ? `${formatPercentPlain(drawdown)}` : '0%'}
                     </span>
                   </td>
                 </tr>

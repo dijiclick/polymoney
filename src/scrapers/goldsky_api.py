@@ -324,8 +324,9 @@ class GoldskyAPI:
             if drawdown > max_drawdown:
                 max_drawdown = drawdown
 
-        # Drawdown as percentage of peak (if peak > 0)
+        # Drawdown as percentage of peak (if peak > 0), capped at 100%
         drawdown_pct = (max_drawdown / peak * 100) if peak > 0 else 0
+        drawdown_pct = min(drawdown_pct, 100)  # Cap at 100%
 
         return {
             "roi": round(roi, 2),
