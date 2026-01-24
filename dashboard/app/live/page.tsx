@@ -4,87 +4,46 @@ import { useState, useCallback, useEffect } from 'react'
 import TradeFeedTabs, { TabId } from '@/components/TradeFeedTabs'
 import UnifiedTradeFeed from '@/components/UnifiedTradeFeed'
 import TradeFilters from '@/components/TradeFilters'
-import ContextSidebar from '@/components/ContextSidebar'
-import InsiderAlerts from '@/components/InsiderAlerts'
 import { TradeFilter, supabase } from '@/lib/supabase'
 
-interface DiscoveryStats {
-  totalWallets: number
-  tradesCount: number
+interface TradeStats {
+  totalTrades: number
+  activeTrades: number
 }
 
 export default function LiveTradePage() {
   const [activeTab, setActiveTab] = useState<TabId>('all')
-  const [selectedAddress, setSelectedAddress] = useState<string | null>(null)
-  const [activeAddresses, setActiveAddresses] = useState<Set<string>>(new Set())
   const [filter, setFilter] = useState<TradeFilter>({})
-  const [alertCount, setAlertCount] = useState(0)
-  const [showMobileSidebar, setShowMobileSidebar] = useState(false)
-  const [discoveryStats, setDiscoveryStats] = useState<DiscoveryStats>({ totalWallets: 0, tradesCount: 0 })
+  const [tradeStats, setTradeStats] = useState<TradeStats>({ totalTrades: 0, activeTrades: 0 })
   const [isConnected, setIsConnected] = useState(true)
 
   useEffect(() => {
-    async function fetchAlertCount() {
-      const { count } = await supabase
-        .from('trade_alerts')
-        .select('*', { count: 'exact', head: true })
-        .eq('acknowledged', false)
-      setAlertCount(count || 0)
-    }
-
-    async function fetchDiscoveryStats() {
-      const { count: walletsCount } = await supabase
+    async function fetchTradeStats() {
+      // Get aggregated stats from wallets table
+      const { data } = await supabase
         .from('wallets')
-        .select('*', { count: 'exact', head: true })
+        .select('total_trades, active_positions')
 
-      const { count: tradesCount } = await supabase
-        .from('live_trades')
-        .select('*', { count: 'exact', head: true })
-
-      setDiscoveryStats({
-        totalWallets: walletsCount || 0,
-        tradesCount: tradesCount || 0
-      })
+      if (data) {
+        const totalTrades = data.reduce((sum, w) => sum + (w.total_trades || 0), 0)
+        const activeTrades = data.reduce((sum, w) => sum + (w.active_positions || 0), 0)
+        setTradeStats({ totalTrades, activeTrades })
+      }
     }
 
-    fetchAlertCount()
-    fetchDiscoveryStats()
-
-    const alertSubscription = supabase
-      .channel('alert_count_channel')
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'trade_alerts' },
-        () => fetchAlertCount()
-      )
-      .subscribe()
+    fetchTradeStats()
 
     const walletSubscription = supabase
       .channel('wallet_stats_channel')
       .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'wallets' },
-        () => fetchDiscoveryStats()
+        { event: '*', schema: 'public', table: 'wallets' },
+        () => fetchTradeStats()
       )
       .subscribe()
 
     return () => {
-      alertSubscription.unsubscribe()
       walletSubscription.unsubscribe()
     }
-  }, [])
-
-  const handleTradeReceived = useCallback((address: string) => {
-    setActiveAddresses(prev => {
-      const next = new Set(prev)
-      next.add(address)
-      setTimeout(() => {
-        setActiveAddresses(current => {
-          const updated = new Set(current)
-          updated.delete(address)
-          return updated
-        })
-      }, 30000)
-      return next
-    })
   }, [])
 
   const getEffectiveFilter = useCallback((): TradeFilter => {
@@ -120,8 +79,8 @@ export default function LiveTradePage() {
                     </svg>
                   </div>
                   <div>
-                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Trades</p>
-                    <p className="text-base font-bold text-white">{discoveryStats.tradesCount.toLocaleString()}</p>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total Trades</p>
+                    <p className="text-base font-bold text-white">{tradeStats.totalTrades.toLocaleString()}</p>
                   </div>
                 </div>
               </div>
@@ -130,12 +89,12 @@ export default function LiveTradePage() {
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
                     <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Wallets</p>
-                    <p className="text-base font-bold text-white">{discoveryStats.totalWallets.toLocaleString()}</p>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Active Trades</p>
+                    <p className="text-base font-bold text-white">{tradeStats.activeTrades.toLocaleString()}</p>
                   </div>
                 </div>
               </div>
@@ -154,78 +113,25 @@ export default function LiveTradePage() {
       {/* Tabs */}
       <TradeFeedTabs
         activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab)
-          if (tab === 'alerts') {
-            setFilter({})
-          }
-        }}
-        alertCount={alertCount}
+        onTabChange={setActiveTab}
       />
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 mt-4">
-        {/* Left: Feed + Filters */}
-        <div className="flex-1 lg:w-[65%] flex flex-col min-h-0">
-          {activeTab !== 'alerts' && (
-            <TradeFilters
-              filter={filter}
-              onChange={setFilter}
-            />
-          )}
+      {/* Main Content - Full Width */}
+      <div className="flex-1 flex flex-col min-h-0 mt-4">
+        <TradeFilters
+          filter={filter}
+          onChange={setFilter}
+        />
 
-          <div className="flex-1 min-h-0">
-            {activeTab === 'alerts' ? (
-              <InsiderAlerts />
-            ) : (
-              <UnifiedTradeFeed
-                mode={activeTab === 'insider' ? 'insider' :
-                      activeTab === 'whales' ? 'whales' :
-                      activeTab === 'watchlist' ? 'watchlist' : 'all'}
-                filter={getEffectiveFilter()}
-                onTraderSelect={setSelectedAddress}
-                selectedTraderAddress={selectedAddress}
-                onTradeReceived={handleTradeReceived}
-                onConnectionChange={setIsConnected}
-              />
-            )}
-          </div>
-        </div>
-
-        {/* Right: Context Sidebar */}
-        <div className={`
-          lg:w-[35%] min-h-0
-          ${showMobileSidebar ? 'block' : 'hidden lg:block'}
-          ${showMobileSidebar ? 'fixed inset-0 z-50 bg-gray-900/95 p-4 lg:relative lg:p-0 lg:bg-transparent' : ''}
-        `}>
-          {showMobileSidebar && (
-            <button
-              onClick={() => setShowMobileSidebar(false)}
-              className="lg:hidden absolute top-4 right-4 text-gray-400 hover:text-white"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <ContextSidebar
-            selectedAddress={selectedAddress}
-            onSelectTrader={setSelectedAddress}
-            activeAddresses={activeAddresses}
-            showCompactSuspectList={activeTab !== 'alerts'}
+        <div className="flex-1 min-h-0">
+          <UnifiedTradeFeed
+            mode={activeTab === 'insider' ? 'insider' :
+                  activeTab === 'whales' ? 'whales' : 'all'}
+            filter={getEffectiveFilter()}
+            onConnectionChange={setIsConnected}
           />
         </div>
       </div>
-
-      {/* Mobile Sidebar Toggle */}
-      <button
-        onClick={() => setShowMobileSidebar(!showMobileSidebar)}
-        className="lg:hidden fixed bottom-4 right-4 z-40 w-12 h-12 rounded-full bg-blue-600 text-white shadow-lg shadow-blue-500/25 flex items-center justify-center hover:bg-blue-500 transition-colors"
-      >
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-        </svg>
-      </button>
     </div>
   )
 }
