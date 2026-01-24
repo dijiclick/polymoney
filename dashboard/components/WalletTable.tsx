@@ -278,23 +278,31 @@ export default function WalletTable({
           <thead>
             <tr className="border-b border-gray-800/50 text-sm">
               <th className="px-3 py-3 text-left text-gray-500 font-medium">Trader</th>
-              <SortHeader column={getColumnName('trade_count')} label="Trades" filterType="number" />
+              <SortHeader column="balance" label="Active Positions Value" filterType="money" />
               <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" />
-              <SortHeader column="balance" label="Portfolio" filterType="money" />
               <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" />
               <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" />
               <SortHeader column="active_positions" label="Active" align="center" filterType="number" />
               <SortHeader column="total_positions" label="Positions" align="center" filterType="number" />
               <SortHeader column={getColumnName('drawdown')} label="Drawdown" filterType="percent" />
+              <SortHeader column="account_created_at" label="Created" filterType="number" />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800/30">
             {wallets.map((wallet, index) => {
               const pnl = getMetric(wallet, 'pnl')
               const roi = getMetric(wallet, 'roi')
-              const tradeCount = getMetric(wallet, 'trade_count')
               const drawdown = getMetric(wallet, 'drawdown')
               const winRate = getMetric(wallet, 'win_rate')
+
+              // Format account created date as MM/YYYY
+              const formatCreatedDate = (dateStr: string | undefined) => {
+                if (!dateStr) return '-'
+                const date = new Date(dateStr)
+                const month = (date.getMonth() + 1).toString().padStart(2, '0')
+                const year = date.getFullYear()
+                return `${month}/${year}`
+              }
 
               return (
                 <tr
@@ -310,9 +318,9 @@ export default function WalletTable({
                         href={`https://polymarket.com/profile/${wallet.address}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="font-mono text-sm text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1"
+                        className="text-sm text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1"
                       >
-                        {formatAddress(wallet.address)}
+                        {wallet.username || formatAddress(wallet.address)}
                         <svg className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                         </svg>
@@ -320,15 +328,12 @@ export default function WalletTable({
                     </div>
                   </td>
                   <td className="px-3 py-3 text-right">
-                    <span className="text-gray-300 text-sm">{tradeCount.toLocaleString()}</span>
+                    <span className="text-gray-300 text-sm">{formatMoney(wallet.balance)}</span>
                   </td>
                   <td className="px-3 py-3 text-right">
                     <span className={`text-sm font-medium ${getWinRateColor(winRate)}`}>
                       {formatPercentPlain(winRate)}
                     </span>
-                  </td>
-                  <td className="px-3 py-3 text-right">
-                    <span className="text-gray-300 text-sm">{formatMoney(wallet.balance)}</span>
                   </td>
                   <td className="px-3 py-3 text-right">
                     <span className={`text-sm font-semibold ${getPnlColor(roi)}`}>
@@ -353,6 +358,11 @@ export default function WalletTable({
                   <td className="px-3 py-3 text-right">
                     <span className={`text-sm font-medium ${getDrawdownColor(drawdown)}`}>
                       {drawdown > 0 ? `${formatPercentPlain(drawdown)}` : '0%'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <span className="text-gray-400 text-sm">
+                      {formatCreatedDate(wallet.account_created_at)}
                     </span>
                   </td>
                 </tr>

@@ -29,6 +29,7 @@ const VALID_SORT_COLUMNS = [
   'total_trades',
   'total_wins',
   'total_losses',
+  'account_created_at',
   'created_at',
   'updated_at'
 ]

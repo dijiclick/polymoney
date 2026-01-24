@@ -21,24 +21,35 @@ export default function UnifiedTradeFeed({
   const [isPaused, setIsPaused] = useState(false)
   const [tradeCount, setTradeCount] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
+  const filterRef = useRef(filter)
+  const isPausedRef = useRef(isPaused)
 
-  const filterTrade = useCallback((trade: LiveTrade): boolean => {
-    if (mode === 'insider' && !trade.is_insider_suspect) return false
-    if (mode === 'whales' && !trade.is_whale) return false
+  // Keep refs in sync
+  useEffect(() => {
+    filterRef.current = filter
+  }, [filter])
 
-    if (filter.minUsdValue && trade.usd_value < filter.minUsdValue) return false
-    if (filter.maxUsdValue && trade.usd_value > filter.maxUsdValue) return false
-    if (filter.whalesOnly && !trade.is_whale) return false
-    if (filter.knownTradersOnly && !trade.is_known_trader) return false
-    if (filter.insidersOnly && !trade.is_insider_suspect) return false
-    if (filter.minInsiderScore && (trade.trader_insider_score || 0) < filter.minInsiderScore) return false
-    if (filter.sides && !filter.sides.includes(trade.side)) return false
-    if (filter.categories && trade.category && !filter.categories.includes(trade.category)) return false
-    if (filter.marketSlug && trade.market_slug !== filter.marketSlug) return false
-    if (filter.traderAddress && trade.trader_address.toLowerCase() !== filter.traderAddress.toLowerCase()) return false
+  useEffect(() => {
+    isPausedRef.current = isPaused
+  }, [isPaused])
+
+  const filterTrade = useCallback((trade: LiveTrade, currentFilter: TradeFilter, currentMode: string): boolean => {
+    if (currentMode === 'insider' && !trade.is_insider_suspect) return false
+    if (currentMode === 'whales' && !trade.is_whale) return false
+
+    if (currentFilter.minUsdValue && trade.usd_value < currentFilter.minUsdValue) return false
+    if (currentFilter.maxUsdValue && trade.usd_value > currentFilter.maxUsdValue) return false
+    if (currentFilter.whalesOnly && !trade.is_whale) return false
+    if (currentFilter.knownTradersOnly && !trade.is_known_trader) return false
+    if (currentFilter.insidersOnly && !trade.is_insider_suspect) return false
+    if (currentFilter.minInsiderScore && (trade.trader_insider_score || 0) < currentFilter.minInsiderScore) return false
+    if (currentFilter.sides && !currentFilter.sides.includes(trade.side)) return false
+    if (currentFilter.categories && trade.category && !currentFilter.categories.includes(trade.category)) return false
+    if (currentFilter.marketSlug && trade.market_slug !== currentFilter.marketSlug) return false
+    if (currentFilter.traderAddress && trade.trader_address.toLowerCase() !== currentFilter.traderAddress.toLowerCase()) return false
 
     return true
-  }, [mode, filter])
+  }, [])
 
   const fetchRecentTrades = useCallback(async () => {
     let query = supabase
@@ -66,20 +77,25 @@ export default function UnifiedTradeFeed({
     setTrades(data || [])
   }, [mode, filter, maxTrades])
 
+  // Fetch trades when mode or filter changes
   useEffect(() => {
     fetchRecentTrades()
+  }, [fetchRecentTrades])
 
+  // Subscription only depends on mode - uses refs for filter/pause state
+  useEffect(() => {
     const channelName = `unified_trades_feed_${mode}`
-    const subscription = supabase
-      .channel(channelName)
+    const channel = supabase.channel(channelName)
+
+    channel
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'live_trades' },
         (payload) => {
-          if (!isPaused) {
+          if (!isPausedRef.current) {
             const newTrade = payload.new as LiveTrade
             setTradeCount(c => c + 1)
 
-            if (filterTrade(newTrade)) {
+            if (filterTrade(newTrade, filterRef.current, mode)) {
               setTrades(prev => [newTrade, ...prev.slice(0, maxTrades - 1)])
             }
           }
@@ -92,13 +108,9 @@ export default function UnifiedTradeFeed({
       })
 
     return () => {
-      subscription.unsubscribe()
+      supabase.removeChannel(channel)
     }
-  }, [mode, filter, isPaused, maxTrades, filterTrade, fetchRecentTrades, onConnectionChange])
-
-  useEffect(() => {
-    fetchRecentTrades()
-  }, [fetchRecentTrades])
+  }, [mode, maxTrades, filterTrade, onConnectionChange])
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp)
