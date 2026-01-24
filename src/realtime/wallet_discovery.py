@@ -27,11 +27,13 @@ class WalletDiscoveryProcessor:
     4. Store wallet with metrics and trades in database
     """
 
-    # Rate limiting: 60 requests/minute, but we use 2 per wallet
-    RATE_LIMIT_PER_MINUTE = 60
-    REQUEST_INTERVAL = 1.0  # seconds between wallet processing
+    # Processing settings
+    # Each wallet needs 4 API calls, rate limit is 60/min
+    # With 3 workers processing 1 wallet every 0.8s each = ~15 wallets/min = ~60 API calls/min
+    NUM_WORKERS = 3
+    REQUEST_INTERVAL = 0.8  # seconds between wallet processing per worker
 
-    MAX_QUEUE_SIZE = 100
+    MAX_QUEUE_SIZE = 500  # Larger queue to handle bursts
     HISTORY_DAYS = 30
     REANALYSIS_COOLDOWN_DAYS = 3  # Don't re-analyze wallets within this period
 
@@ -50,11 +52,11 @@ class WalletDiscoveryProcessor:
         self._wallet_last_analyzed: dict[str, datetime] = {}  # addr -> last analysis time
         self._pending_wallets: set[str] = set()
 
-        # Processing queue
+        # Processing queue (priority queue would be nice but asyncio doesn't have one)
         self._queue: asyncio.Queue[tuple[str, float]] = asyncio.Queue(maxsize=self.MAX_QUEUE_SIZE)
 
-        # Rate limiting
-        self._last_request_time: datetime = datetime.now(timezone.utc)
+        # Per-worker rate limiting
+        self._worker_last_request: dict[int, datetime] = {}
 
         # Stats
         self._wallets_discovered = 0  # New wallets seen (>= $100 trades)
@@ -155,9 +157,14 @@ class WalletDiscoveryProcessor:
                 logger.warning(f"Queue full, but high-value trade (${usd_value:,.0f}) - wallet will be processed later")
             return False
 
-    async def process_queue(self) -> None:
-        """Background task to process discovery queue."""
-        logger.info("Starting wallet discovery processor")
+    async def process_queue(self, worker_id: int = 0) -> None:
+        """Background task to process discovery queue.
+
+        Args:
+            worker_id: Unique ID for this worker (for rate limiting)
+        """
+        logger.info(f"Starting wallet discovery worker {worker_id}")
+        self._worker_last_request[worker_id] = datetime.now(timezone.utc)
 
         while True:
             try:
@@ -165,8 +172,8 @@ class WalletDiscoveryProcessor:
                 addr, usd_value = await self._queue.get()
 
                 try:
-                    # Rate limit - wait between requests
-                    await self._rate_limit_wait()
+                    # Rate limit - wait between requests for this worker
+                    await self._rate_limit_wait(worker_id)
 
                     # Process the wallet
                     await self._process_wallet(addr)
@@ -180,24 +187,25 @@ class WalletDiscoveryProcessor:
                     self._queue.task_done()
 
             except asyncio.CancelledError:
-                logger.info("Wallet discovery processor stopped")
+                logger.info(f"Wallet discovery worker {worker_id} stopped")
                 break
 
             except Exception as e:
-                logger.error(f"Unexpected error in discovery processor: {e}")
+                logger.error(f"Unexpected error in discovery worker {worker_id}: {e}")
                 self._errors += 1
                 await asyncio.sleep(1)
 
-    async def _rate_limit_wait(self) -> None:
-        """Wait to respect rate limits."""
+    async def _rate_limit_wait(self, worker_id: int) -> None:
+        """Wait to respect rate limits for a specific worker."""
         now = datetime.now(timezone.utc)
-        elapsed = (now - self._last_request_time).total_seconds()
+        last_request = self._worker_last_request.get(worker_id, now)
+        elapsed = (now - last_request).total_seconds()
 
         if elapsed < self.REQUEST_INTERVAL:
             wait_time = self.REQUEST_INTERVAL - elapsed
             await asyncio.sleep(wait_time)
 
-        self._last_request_time = datetime.now(timezone.utc)
+        self._worker_last_request[worker_id] = datetime.now(timezone.utc)
 
     async def _process_wallet(self, address: str) -> None:
         """
