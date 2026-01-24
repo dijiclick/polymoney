@@ -33,18 +33,6 @@ interface ClosedPosition {
 interface TraderData {
   address: string
   username?: string
-  metrics: {
-    portfolioValue: number
-    totalPnl: number
-    realizedPnl: number
-    unrealizedPnl: number
-    winRate30d: number
-    winRateAllTime: number
-    roiPercent: number
-    tradeCount30d: number
-    metrics7d: { pnl: number; roi: number; winRate: number }
-    metrics30d: { pnl: number; roi: number; winRate: number }
-  }
   positions: Position[]
   closedPositions?: ClosedPosition[]
   closedPositionsCount: number
@@ -61,7 +49,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<TraderData | null>(null)
-  const [activeTab, setActiveTab] = useState<'open' | 'closed' | 'summary'>('open')
+  const [activeTab, setActiveTab] = useState<'open' | 'closed'>('open')
   const [mounted, setMounted] = useState(false)
 
   // Handle client-side mounting for portal
@@ -144,7 +132,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
       />
 
       {/* Modal */}
-      <div className="relative bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden mx-4">
+      <div className="relative bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden mx-4">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
           <div className="flex items-center gap-3">
@@ -186,7 +174,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                 <div className="absolute inset-0 rounded-full border-2 border-blue-500/20"></div>
                 <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-blue-500 animate-spin"></div>
               </div>
-              <p className="text-gray-500 mt-4">Loading trader data...</p>
+              <p className="text-gray-500 mt-4">Loading positions...</p>
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-16">
@@ -205,78 +193,8 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
             </div>
           ) : data ? (
             <>
-              {/* Stats Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6 border-b border-gray-800">
-                <div className="bg-gray-800/50 rounded-xl p-4">
-                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Portfolio Value</p>
-                  <p className="text-xl font-bold text-white">{formatMoney(data.metrics.portfolioValue)}</p>
-                </div>
-                <div className="bg-gray-800/50 rounded-xl p-4">
-                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total PnL</p>
-                  <p className={`text-xl font-bold ${getPnlColor(data.metrics.totalPnl)}`}>
-                    {formatMoney(data.metrics.totalPnl)}
-                  </p>
-                </div>
-                <div className="bg-gray-800/50 rounded-xl p-4">
-                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Win Rate (All)</p>
-                  <p className="text-xl font-bold text-white">{data.metrics.winRateAllTime?.toFixed(1)}%</p>
-                </div>
-                <div className="bg-gray-800/50 rounded-xl p-4">
-                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">ROI</p>
-                  <p className={`text-xl font-bold ${getPnlColor(data.metrics.roiPercent)}`}>
-                    {formatPercent(data.metrics.roiPercent)}
-                  </p>
-                </div>
-              </div>
-
-              {/* Period Comparison */}
-              <div className="grid grid-cols-2 gap-4 px-6 py-4 border-b border-gray-800">
-                <div className="bg-gray-800/30 rounded-xl p-4">
-                  <h4 className="text-sm font-medium text-gray-400 mb-3">7-Day Performance</h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">PnL</span>
-                      <span className={getPnlColor(data.metrics.metrics7d?.pnl || 0)}>
-                        {formatMoney(data.metrics.metrics7d?.pnl || 0)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">ROI</span>
-                      <span className={getPnlColor(data.metrics.metrics7d?.roi || 0)}>
-                        {formatPercent(data.metrics.metrics7d?.roi || 0)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Win Rate</span>
-                      <span className="text-white">{(data.metrics.metrics7d?.winRate || 0).toFixed(1)}%</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="bg-gray-800/30 rounded-xl p-4">
-                  <h4 className="text-sm font-medium text-gray-400 mb-3">30-Day Performance</h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">PnL</span>
-                      <span className={getPnlColor(data.metrics.metrics30d?.pnl || 0)}>
-                        {formatMoney(data.metrics.metrics30d?.pnl || 0)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">ROI</span>
-                      <span className={getPnlColor(data.metrics.metrics30d?.roi || 0)}>
-                        {formatPercent(data.metrics.metrics30d?.roi || 0)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Win Rate</span>
-                      <span className="text-white">{(data.metrics.metrics30d?.winRate || 0).toFixed(1)}%</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               {/* Tabs */}
-              <div className="flex gap-1 px-6 pt-4">
+              <div className="flex gap-1 px-6 pt-4 border-b border-gray-800 pb-4">
                 <button
                   onClick={() => setActiveTab('open')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -295,17 +213,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                       : 'bg-gray-800 text-gray-400 hover:text-white'
                   }`}
                 >
-                  Closed ({data.closedPositionsCount || 0})
-                </button>
-                <button
-                  onClick={() => setActiveTab('summary')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    activeTab === 'summary'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-800 text-gray-400 hover:text-white'
-                  }`}
-                >
-                  Summary
+                  Closed ({data.closedPositions?.length || data.closedPositionsCount || 0})
                 </button>
               </div>
 
@@ -335,11 +243,6 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                                 <span className="text-xs text-gray-500">
                                   {position.size?.toFixed(2)} shares @ {(position.avgPrice * 100)?.toFixed(1)}¢
                                 </span>
-                                {position.endDate && (
-                                  <span className="text-xs text-gray-600">
-                                    Ends {new Date(position.endDate).toLocaleDateString()}
-                                  </span>
-                                )}
                               </div>
                             </div>
                             <div className="text-right">
@@ -404,48 +307,10 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                         </div>
                       ))
                     ) : (
-                      <div className="text-center py-8">
-                        <p className="text-gray-500 mb-2">No closed positions available</p>
-                        <p className="text-gray-600 text-sm">
-                          {data.closedPositionsCount || 0} total closed positions recorded
-                        </p>
+                      <div className="text-center py-8 text-gray-500">
+                        No closed positions
                       </div>
                     )}
-                  </div>
-                )}
-
-                {activeTab === 'summary' && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-gray-800/50 rounded-xl p-4">
-                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Realized PnL</p>
-                        <p className={`text-lg font-bold ${getPnlColor(data.metrics.realizedPnl)}`}>
-                          {formatMoney(data.metrics.realizedPnl)}
-                        </p>
-                      </div>
-                      <div className="bg-gray-800/50 rounded-xl p-4">
-                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Unrealized PnL</p>
-                        <p className={`text-lg font-bold ${getPnlColor(data.metrics.unrealizedPnl)}`}>
-                          {formatMoney(data.metrics.unrealizedPnl)}
-                        </p>
-                      </div>
-                      <div className="bg-gray-800/50 rounded-xl p-4">
-                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Open Positions</p>
-                        <p className="text-lg font-bold text-white">{data.positions?.length || 0}</p>
-                      </div>
-                      <div className="bg-gray-800/50 rounded-xl p-4">
-                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Closed Positions</p>
-                        <p className="text-lg font-bold text-white">{data.closedPositionsCount || 0}</p>
-                      </div>
-                      <div className="bg-gray-800/50 rounded-xl p-4">
-                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Trades (30d)</p>
-                        <p className="text-lg font-bold text-white">{data.metrics.tradeCount30d || 0}</p>
-                      </div>
-                      <div className="bg-gray-800/50 rounded-xl p-4">
-                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Win Rate (30d)</p>
-                        <p className="text-lg font-bold text-white">{(data.metrics.winRate30d || 0).toFixed(1)}%</p>
-                      </div>
-                    </div>
                   </div>
                 )}
               </div>

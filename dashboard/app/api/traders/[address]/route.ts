@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import {
-  getProfile,
-  getPortfolioValue,
   getPositions,
   getClosedPositions,
   parsePositions,
@@ -114,14 +112,12 @@ export async function GET(
     return NextResponse.json(response)
   }
 
-  // 5. Fetch ALL metrics from Goldsky + basic info from Polymarket API
+  // 5. Fetch live data: Goldsky for trade metrics, Polymarket for positions only
   try {
-    // Goldsky: ALL metrics (volume, trades, PnL, win rate, ROI, positions)
-    // Polymarket API: Profile info, portfolio value, open positions, and closed positions
-    const [goldskyMetrics, profile, portfolioValue, rawPositions, rawClosedPositions] = await Promise.all([
+    // Goldsky: Trade metrics (volume, trades, PnL, win rate, drawdown)
+    // Polymarket API: Only positions (open and closed)
+    const [goldskyMetrics, rawPositions, rawClosedPositions] = await Promise.all([
       getGoldskyMetrics(address, 30),
-      getProfile(address).catch(() => ({} as { pseudonym?: string; name?: string; profileImage?: string; createdAt?: string })),
-      getPortfolioValue(address).catch(() => 0),
       getPositions(address).catch(() => []),
       getClosedPositions(address).catch(() => []),
     ])
@@ -159,6 +155,10 @@ export async function GET(
         return dateB - dateA
       })
 
+    // Calculate ROI from Polymarket closed positions data (matches Polymarket's calculation)
+    // ROI = realizedPnl / totalBought * 100
+    const polymarketMetrics = calculatePolymarketMetrics(closedPositions, allPositions)
+
     // Build metrics from Goldsky data (includes ROI and drawdown for each period)
     const metrics7d: TimePeriodMetrics = {
       pnl: goldskyMetrics.pnl7d,
@@ -178,35 +178,37 @@ export async function GET(
       drawdown: goldskyMetrics.drawdown30d,
     }
 
-    // 6. Update wallets table with fresh Goldsky data (if wallet exists)
+    // 6. Update wallets table with fresh data (if wallet exists)
     if (dbWallet) {
-      updateWalletMetricsFromGoldsky(address, goldskyMetrics, portfolioValue, openPositions.length, profile)
+      updateWalletMetrics(address, goldskyMetrics, polymarketMetrics, openPositions.length, closedPositions.length)
     }
 
-    // 7. Build response with Goldsky metrics
+    // 7. Build response - positions from Polymarket, metrics from Goldsky/calculated
     const response: TraderProfileResponse = {
       source: dbWallet ? 'mixed' : 'live',
       dataFreshness: 'fresh',
       address,
-      username: profile.name || profile.pseudonym || dbWallet?.username,
-      profileImage: profile.profileImage,
-      accountCreatedAt: profile.createdAt,
+      username: dbWallet?.username,
+      profileImage: undefined,
+      accountCreatedAt: dbWallet?.account_created_at,
       positions: openPositions,
       closedPositions: closedPositions,
-      closedPositionsCount: closedPositions.length || goldskyMetrics.closedPositions,
-      trades: [], // No trades from Goldsky - would need separate query
+      closedPositionsCount: closedPositions.length,
+      trades: [],
       metrics: {
-        portfolioValue,
-        totalPnl: goldskyMetrics.totalPnl,
-        unrealizedPnl: goldskyMetrics.unrealizedPnl,
-        realizedPnl: goldskyMetrics.realizedPnl,
+        portfolioValue: dbWallet?.balance || 0,
+        // Use Polymarket calculated PnL (matches their UI)
+        totalPnl: polymarketMetrics.totalPnl,
+        unrealizedPnl: polymarketMetrics.unrealizedPnl,
+        realizedPnl: polymarketMetrics.realizedPnl,
         metrics7d,
         metrics30d,
         avgTradeIntervalHours: 0,
-        activePositions: goldskyMetrics.openPositions,
+        activePositions: openPositions.length, // Use Polymarket API count, not Goldsky
         winRate30d: goldskyMetrics.winRate30d,
-        winRateAllTime: goldskyMetrics.winRateAll,
-        roiPercent: goldskyMetrics.roiAll,
+        // Use Polymarket calculated win rate and ROI (matches their UI)
+        winRateAllTime: polymarketMetrics.winRateAll,
+        roiPercent: polymarketMetrics.roiAll,
         tradeCount30d: goldskyMetrics.tradeCount30d,
         tradeCountAllTime: goldskyMetrics.tradeCount30d, // Use 30d as proxy
         uniqueMarkets30d: goldskyMetrics.uniqueMarkets,
@@ -214,7 +216,7 @@ export async function GET(
         positionConcentration: 0,
         maxPositionSize: 0,
         avgPositionSize: 0,
-        totalPositions: goldskyMetrics.totalPositions,
+        totalPositions: closedPositions.length + openPositions.length, // Use actual counts
         maxDrawdown: goldskyMetrics.drawdown30d,
         tradeFrequency: goldskyMetrics.tradeCount30d / 30,
         nightTradeRatio: 0,
@@ -305,46 +307,113 @@ export async function GET(
 }
 
 /**
- * Update wallet metrics in Supabase from Goldsky data
+ * Calculate metrics from Polymarket positions data (matches Polymarket's ROI calculation)
+ * ROI = realizedPnl / totalBought * 100
  */
-async function updateWalletMetricsFromGoldsky(
+function calculatePolymarketMetrics(
+  closedPositions: { size: number; avgPrice: number; realizedPnl: number; isWin: boolean }[],
+  allPositions: { size: number; avgPrice: number; cashPnl: number; currentValue: number }[]
+): {
+  realizedPnl: number
+  unrealizedPnl: number
+  totalPnl: number
+  totalBought: number
+  roiAll: number
+  winRateAll: number
+  winCount: number
+  lossCount: number
+} {
+  // Calculate total realized PnL and total bought from closed positions
+  let realizedPnl = 0
+  let totalBoughtClosed = 0
+  let winCount = 0
+  let lossCount = 0
+
+  for (const pos of closedPositions) {
+    realizedPnl += pos.realizedPnl
+    totalBoughtClosed += pos.size * pos.avgPrice // Initial investment
+    if (pos.isWin) {
+      winCount++
+    } else {
+      lossCount++
+    }
+  }
+
+  // Calculate unrealized PnL from open positions
+  let unrealizedPnl = 0
+  for (const pos of allPositions) {
+    if (pos.currentValue > 0) {
+      unrealizedPnl += pos.cashPnl
+    }
+  }
+
+  const totalPnl = realizedPnl + unrealizedPnl
+
+  // Calculate ROI: realizedPnl / totalBought * 100 (matches Polymarket's calculation)
+  const roiAll = totalBoughtClosed > 0 ? (realizedPnl / totalBoughtClosed) * 100 : 0
+
+  // Win rate from closed positions
+  const totalClosed = winCount + lossCount
+  const winRateAll = totalClosed > 0 ? (winCount / totalClosed) * 100 : 0
+
+  return {
+    realizedPnl: Math.round(realizedPnl * 100) / 100,
+    unrealizedPnl: Math.round(unrealizedPnl * 100) / 100,
+    totalPnl: Math.round(totalPnl * 100) / 100,
+    totalBought: Math.round(totalBoughtClosed * 100) / 100,
+    roiAll: Math.round(roiAll * 100) / 100,
+    winRateAll: Math.round(winRateAll * 100) / 100,
+    winCount,
+    lossCount,
+  }
+}
+
+/**
+ * Update wallet metrics in Supabase from Goldsky + calculated data
+ */
+async function updateWalletMetrics(
   address: string,
-  metrics: GoldskyMetrics,
-  portfolioValue: number,
+  goldskyMetrics: GoldskyMetrics,
+  polymarketMetrics: {
+    realizedPnl: number
+    unrealizedPnl: number
+    totalPnl: number
+    roiAll: number
+    winRateAll: number
+    winCount: number
+    lossCount: number
+  },
   activePositionCount: number,
-  profile?: { pseudonym?: string; name?: string; profileImage?: string; createdAt?: string }
+  closedPositionCount: number
 ) {
   try {
     await supabase.from('wallets').update({
-      username: profile?.name || profile?.pseudonym,
-      account_created_at: profile?.createdAt,
-      balance: portfolioValue,
-      // 7-day metrics (from Goldsky)
-      pnl_7d: metrics.pnl7d,
-      roi_7d: metrics.roi7d,
-      win_rate_7d: metrics.winRate7d,
-      volume_7d: metrics.volume7d,
-      trade_count_7d: metrics.tradeCount7d,
-      drawdown_7d: metrics.drawdown7d,
-      // 30-day metrics (from Goldsky)
-      pnl_30d: metrics.pnl30d,
-      roi_30d: metrics.roi30d,
-      win_rate_30d: metrics.winRate30d,
-      volume_30d: metrics.volume30d,
-      trade_count_30d: metrics.tradeCount30d,
-      drawdown_30d: metrics.drawdown30d,
-      // Overall metrics (from Goldsky)
-      total_positions: metrics.closedPositions,
+      // 7-day metrics (from Goldsky - volume, trades, drawdown)
+      pnl_7d: goldskyMetrics.pnl7d,
+      roi_7d: goldskyMetrics.roi7d,
+      win_rate_7d: goldskyMetrics.winRate7d,
+      volume_7d: goldskyMetrics.volume7d,
+      trade_count_7d: goldskyMetrics.tradeCount7d,
+      drawdown_7d: goldskyMetrics.drawdown7d,
+      // 30-day metrics (from Goldsky - volume, trades, drawdown)
+      pnl_30d: goldskyMetrics.pnl30d,
+      roi_30d: goldskyMetrics.roi30d,
+      win_rate_30d: goldskyMetrics.winRate30d,
+      volume_30d: goldskyMetrics.volume30d,
+      trade_count_30d: goldskyMetrics.tradeCount30d,
+      drawdown_30d: goldskyMetrics.drawdown30d,
+      // Overall metrics - use Polymarket calculations (matches their UI)
+      total_positions: closedPositionCount,
       active_positions: activePositionCount,
-      total_wins: metrics.winningPositions,
-      total_losses: metrics.losingPositions,
-      realized_pnl: metrics.realizedPnl,
-      unrealized_pnl: metrics.unrealizedPnl,
-      overall_pnl: metrics.totalPnl,
-      overall_roi: metrics.roiAll,
-      overall_win_rate: metrics.winRateAll,
-      total_volume: metrics.volume30d,
-      total_trades: metrics.tradeCount30d,
+      total_wins: polymarketMetrics.winCount,
+      total_losses: polymarketMetrics.lossCount,
+      realized_pnl: polymarketMetrics.realizedPnl,
+      unrealized_pnl: polymarketMetrics.unrealizedPnl,
+      overall_pnl: polymarketMetrics.totalPnl,
+      overall_roi: polymarketMetrics.roiAll,
+      overall_win_rate: polymarketMetrics.winRateAll,
+      total_volume: goldskyMetrics.volume30d,
+      total_trades: goldskyMetrics.tradeCount30d,
       metrics_updated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('address', address)
