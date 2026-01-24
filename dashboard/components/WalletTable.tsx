@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Wallet, TimePeriod } from '@/lib/supabase'
+import TraderDetailModal from './TraderDetailModal'
 
 interface ColumnFilter {
   min?: number
@@ -132,6 +133,7 @@ export default function WalletTable({
   onColumnFilterChange
 }: Props) {
   const [openFilter, setOpenFilter] = useState<string | null>(null)
+  const [selectedTrader, setSelectedTrader] = useState<{ address: string; username?: string } | null>(null)
 
   const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
@@ -397,9 +399,13 @@ export default function WalletTable({
                 >
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center text-xs font-medium text-gray-400">
+                      <button
+                        onClick={() => setSelectedTrader({ address: wallet.address, username: wallet.username })}
+                        className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 hover:from-blue-500/40 hover:to-purple-500/40 flex items-center justify-center text-xs font-medium text-gray-400 hover:text-white transition-all cursor-pointer"
+                        title="View trader details"
+                      >
                         {index + 1}
-                      </div>
+                      </button>
                       <a
                         href={`https://polymarket.com/profile/${wallet.address}`}
                         target="_blank"
@@ -457,6 +463,14 @@ export default function WalletTable({
           </tbody>
         </table>
       </div>
+
+      {/* Trader Detail Modal */}
+      <TraderDetailModal
+        address={selectedTrader?.address || ''}
+        username={selectedTrader?.username}
+        isOpen={!!selectedTrader}
+        onClose={() => setSelectedTrader(null)}
+      />
     </div>
   )
 }

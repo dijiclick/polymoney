@@ -1,0 +1,354 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+
+interface Position {
+  conditionId: string
+  title: string
+  outcome: string
+  size: number
+  avgPrice: number
+  currentPrice: number
+  initialValue: number
+  currentValue: number
+  cashPnl: number
+  percentPnl: number
+  endDate?: string
+  marketSlug?: string
+}
+
+interface TraderData {
+  address: string
+  username?: string
+  metrics: {
+    portfolioValue: number
+    totalPnl: number
+    realizedPnl: number
+    unrealizedPnl: number
+    winRate30d: number
+    winRateAllTime: number
+    roiPercent: number
+    tradeCount30d: number
+    metrics7d: { pnl: number; roi: number; winRate: number }
+    metrics30d: { pnl: number; roi: number; winRate: number }
+  }
+  positions: Position[]
+  closedPositionsCount: number
+}
+
+interface Props {
+  address: string
+  username?: string
+  isOpen: boolean
+  onClose: () => void
+}
+
+export default function TraderDetailModal({ address, username, isOpen, onClose }: Props) {
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [data, setData] = useState<TraderData | null>(null)
+  const [activeTab, setActiveTab] = useState<'open' | 'summary'>('open')
+
+  useEffect(() => {
+    if (isOpen && address) {
+      fetchTraderData()
+    }
+  }, [isOpen, address])
+
+  const fetchTraderData = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/traders/${address}?refresh=true`)
+      if (!res.ok) throw new Error('Failed to fetch trader data')
+      const result = await res.json()
+      setData(result)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!isOpen) return null
+
+  const formatMoney = (value: number) => {
+    if (value === undefined || value === null) return '-'
+    const absValue = Math.abs(value)
+    if (absValue >= 1000000) return `$${(value / 1000000).toFixed(2)}M`
+    if (absValue >= 1000) return `$${(value / 1000).toFixed(2)}K`
+    return `$${value.toFixed(2)}`
+  }
+
+  const formatPercent = (value: number) => {
+    if (value === undefined || value === null) return '-'
+    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+  }
+
+  const getPnlColor = (value: number) => {
+    if (value === 0) return 'text-gray-400'
+    return value > 0 ? 'text-emerald-400' : 'text-red-400'
+  }
+
+  const displayName = username && !username.startsWith('0x')
+    ? username
+    : `${address.slice(0, 6)}...${address.slice(-4)}`
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        onClick={onClose}
+      />
+
+      {/* Modal */}
+      <div className="relative bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden mx-4">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
+              <span className="text-white font-bold text-sm">
+                {displayName.slice(0, 2).toUpperCase()}
+              </span>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white">{displayName}</h2>
+              <a
+                href={`https://polymarket.com/profile/${address}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+              >
+                View on Polymarket
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="overflow-y-auto max-h-[calc(85vh-80px)]">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16">
+              <div className="relative w-12 h-12">
+                <div className="absolute inset-0 rounded-full border-2 border-blue-500/20"></div>
+                <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-blue-500 animate-spin"></div>
+              </div>
+              <p className="text-gray-500 mt-4">Loading trader data...</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-16">
+              <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <p className="text-red-400">{error}</p>
+              <button
+                onClick={fetchTraderData}
+                className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm text-white transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          ) : data ? (
+            <>
+              {/* Stats Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6 border-b border-gray-800">
+                <div className="bg-gray-800/50 rounded-xl p-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Portfolio Value</p>
+                  <p className="text-xl font-bold text-white">{formatMoney(data.metrics.portfolioValue)}</p>
+                </div>
+                <div className="bg-gray-800/50 rounded-xl p-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total PnL</p>
+                  <p className={`text-xl font-bold ${getPnlColor(data.metrics.totalPnl)}`}>
+                    {formatMoney(data.metrics.totalPnl)}
+                  </p>
+                </div>
+                <div className="bg-gray-800/50 rounded-xl p-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Win Rate (All)</p>
+                  <p className="text-xl font-bold text-white">{data.metrics.winRateAllTime?.toFixed(1)}%</p>
+                </div>
+                <div className="bg-gray-800/50 rounded-xl p-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">ROI</p>
+                  <p className={`text-xl font-bold ${getPnlColor(data.metrics.roiPercent)}`}>
+                    {formatPercent(data.metrics.roiPercent)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Period Comparison */}
+              <div className="grid grid-cols-2 gap-4 px-6 py-4 border-b border-gray-800">
+                <div className="bg-gray-800/30 rounded-xl p-4">
+                  <h4 className="text-sm font-medium text-gray-400 mb-3">7-Day Performance</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">PnL</span>
+                      <span className={getPnlColor(data.metrics.metrics7d?.pnl || 0)}>
+                        {formatMoney(data.metrics.metrics7d?.pnl || 0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">ROI</span>
+                      <span className={getPnlColor(data.metrics.metrics7d?.roi || 0)}>
+                        {formatPercent(data.metrics.metrics7d?.roi || 0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Win Rate</span>
+                      <span className="text-white">{(data.metrics.metrics7d?.winRate || 0).toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-gray-800/30 rounded-xl p-4">
+                  <h4 className="text-sm font-medium text-gray-400 mb-3">30-Day Performance</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">PnL</span>
+                      <span className={getPnlColor(data.metrics.metrics30d?.pnl || 0)}>
+                        {formatMoney(data.metrics.metrics30d?.pnl || 0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">ROI</span>
+                      <span className={getPnlColor(data.metrics.metrics30d?.roi || 0)}>
+                        {formatPercent(data.metrics.metrics30d?.roi || 0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Win Rate</span>
+                      <span className="text-white">{(data.metrics.metrics30d?.winRate || 0).toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex gap-1 px-6 pt-4">
+                <button
+                  onClick={() => setActiveTab('open')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    activeTab === 'open'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Open Positions ({data.positions?.length || 0})
+                </button>
+                <button
+                  onClick={() => setActiveTab('summary')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    activeTab === 'summary'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Summary
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              <div className="p-6">
+                {activeTab === 'open' && (
+                  <div className="space-y-3">
+                    {data.positions && data.positions.length > 0 ? (
+                      data.positions.map((position, index) => (
+                        <div
+                          key={position.conditionId || index}
+                          className="bg-gray-800/50 rounded-xl p-4 hover:bg-gray-800/70 transition-colors"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-medium text-white truncate">
+                                {position.title || 'Unknown Market'}
+                              </h4>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                  position.outcome === 'Yes'
+                                    ? 'bg-emerald-500/20 text-emerald-400'
+                                    : 'bg-red-500/20 text-red-400'
+                                }`}>
+                                  {position.outcome}
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                  {position.size?.toFixed(2)} shares @ {(position.avgPrice * 100)?.toFixed(1)}¢
+                                </span>
+                                {position.endDate && (
+                                  <span className="text-xs text-gray-600">
+                                    Ends {new Date(position.endDate).toLocaleDateString()}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-medium text-white">
+                                {formatMoney(position.currentValue || 0)}
+                              </p>
+                              <p className={`text-xs ${getPnlColor(position.cashPnl || 0)}`}>
+                                {formatMoney(position.cashPnl || 0)} ({formatPercent(position.percentPnl || 0)})
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        No open positions
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeTab === 'summary' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-gray-800/50 rounded-xl p-4">
+                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Realized PnL</p>
+                        <p className={`text-lg font-bold ${getPnlColor(data.metrics.realizedPnl)}`}>
+                          {formatMoney(data.metrics.realizedPnl)}
+                        </p>
+                      </div>
+                      <div className="bg-gray-800/50 rounded-xl p-4">
+                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Unrealized PnL</p>
+                        <p className={`text-lg font-bold ${getPnlColor(data.metrics.unrealizedPnl)}`}>
+                          {formatMoney(data.metrics.unrealizedPnl)}
+                        </p>
+                      </div>
+                      <div className="bg-gray-800/50 rounded-xl p-4">
+                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Open Positions</p>
+                        <p className="text-lg font-bold text-white">{data.positions?.length || 0}</p>
+                      </div>
+                      <div className="bg-gray-800/50 rounded-xl p-4">
+                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Closed Positions</p>
+                        <p className="text-lg font-bold text-white">{data.closedPositionsCount || 0}</p>
+                      </div>
+                      <div className="bg-gray-800/50 rounded-xl p-4">
+                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Trades (30d)</p>
+                        <p className="text-lg font-bold text-white">{data.metrics.tradeCount30d || 0}</p>
+                      </div>
+                      <div className="bg-gray-800/50 rounded-xl p-4">
+                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Win Rate (30d)</p>
+                        <p className="text-lg font-bold text-white">{(data.metrics.winRate30d || 0).toFixed(1)}%</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
