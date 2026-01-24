@@ -6,8 +6,8 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Polymarket Profile Finder',
-  description: 'Find and track skilled traders on Polymarket',
+  title: 'Polymarket Wallet Analytics',
+  description: 'Analyze wallet performance on Polymarket',
 }
 
 export default function RootLayout({
@@ -23,46 +23,16 @@ export default function RootLayout({
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16">
               <div className="flex items-center">
-                <Link href="/" className="text-xl font-bold text-white">
-                  Polymarket Profile Finder
+                <Link href="/wallets" className="text-xl font-bold text-white">
+                  Polymarket Wallet Analytics
                 </Link>
                 <div className="hidden md:block ml-10">
                   <div className="flex items-baseline space-x-4">
                     <Link
-                      href="/"
+                      href="/wallets"
                       className="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
                     >
-                      Dashboard
-                    </Link>
-                    <Link
-                      href="/traders"
-                      className="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
-                    >
-                      Traders
-                    </Link>
-                    <Link
-                      href="/traders/copytrade"
-                      className="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
-                    >
-                      Copy Trade
-                    </Link>
-                    <Link
-                      href="/traders/bots"
-                      className="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
-                    >
-                      Bots
-                    </Link>
-                    <Link
-                      href="/pipeline"
-                      className="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
-                    >
-                      Pipeline History
-                    </Link>
-                    <Link
-                      href="/watchlist"
-                      className="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
-                    >
-                      Watchlist
+                      Wallets
                     </Link>
                     <Link
                       href="/live"
@@ -70,6 +40,12 @@ export default function RootLayout({
                     >
                       <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
                       Live Feed
+                    </Link>
+                    <Link
+                      href="/watchlist"
+                      className="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
+                    >
+                      Watchlist
                     </Link>
                   </div>
                 </div>

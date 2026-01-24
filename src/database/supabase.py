@@ -205,6 +205,172 @@ class SupabaseClient:
         return result.data or []
 
     # =========================================================================
+    # Wallet Operations
+    # =========================================================================
+
+    def get_wallet(self, address: str) -> Optional[dict]:
+        """Get a wallet by address."""
+        result = self._client.table("wallets").select("*").eq("address", address.lower()).execute()
+        return result.data[0] if result.data else None
+
+    def get_all_wallets(self, limit: int = 10000) -> list[dict]:
+        """Get all wallets."""
+        result = self._client.table("wallets").select("*").limit(limit).execute()
+        return result.data or []
+
+    def get_wallets_by_source(self, source: str) -> list[dict]:
+        """Get wallets by source (goldsky, leaderboard, both)."""
+        if source == "both":
+            result = self._client.table("wallets").select("*").eq("source", source).execute()
+        else:
+            # Include 'both' when filtering by specific source
+            result = (
+                self._client.table("wallets")
+                .select("*")
+                .or_(f"source.eq.{source},source.eq.both")
+                .execute()
+            )
+        return result.data or []
+
+    def get_qualified_wallets(self, min_balance: float = 200) -> list[dict]:
+        """Get wallets with balance >= min_balance."""
+        result = (
+            self._client.table("wallets")
+            .select("*")
+            .gte("balance", min_balance)
+            .order("balance", desc=True)
+            .execute()
+        )
+        return result.data or []
+
+    def get_qualified_wallets_by_source(self, source: str, min_balance: float = 200) -> list[dict]:
+        """Get qualified wallets filtered by source."""
+        query = self._client.table("wallets").select("*").gte("balance", min_balance)
+
+        if source == "both":
+            query = query.eq("source", source)
+        else:
+            query = query.or_(f"source.eq.{source},source.eq.both")
+
+        result = query.order("balance", desc=True).execute()
+        return result.data or []
+
+    def get_stale_wallets(self, hours: int = 24) -> list[dict]:
+        """Get wallets not updated in the last N hours."""
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+
+        result = (
+            self._client.table("wallets")
+            .select("*")
+            .or_(f"balance_updated_at.is.null,balance_updated_at.lt.{cutoff}")
+            .execute()
+        )
+        return result.data or []
+
+    def upsert_wallet(self, wallet_data: dict) -> dict:
+        """Insert or update a wallet record."""
+        wallet_data["address"] = wallet_data["address"].lower()
+        result = self._client.table("wallets").upsert(
+            wallet_data,
+            on_conflict="address"
+        ).execute()
+        return result.data[0] if result.data else {}
+
+    def update_wallet(self, address: str, data: dict) -> dict:
+        """Update a wallet record."""
+        result = (
+            self._client.table("wallets")
+            .update(data)
+            .eq("address", address.lower())
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+
+    # =========================================================================
+    # Wallet Leaderboard Rankings
+    # =========================================================================
+
+    def upsert_leaderboard_ranking(self, ranking_data: dict) -> dict:
+        """Insert a leaderboard ranking record."""
+        ranking_data["address"] = ranking_data["address"].lower()
+        result = self._client.table("wallet_leaderboard_rankings").insert(ranking_data).execute()
+        return result.data[0] if result.data else {}
+
+    def get_wallet_rankings(self, address: str) -> list[dict]:
+        """Get all leaderboard rankings for a wallet."""
+        result = (
+            self._client.table("wallet_leaderboard_rankings")
+            .select("*")
+            .eq("address", address.lower())
+            .order("fetched_at", desc=True)
+            .execute()
+        )
+        return result.data or []
+
+    def get_rankings_by_category(self, category: str, limit: int = 50) -> list[dict]:
+        """Get top rankings for a category."""
+        result = (
+            self._client.table("wallet_leaderboard_rankings")
+            .select("*, wallets(*)")
+            .eq("category", category)
+            .order("rank", desc=False)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+
+    # =========================================================================
+    # Wallet Trades
+    # =========================================================================
+
+    def upsert_wallet_trade(self, trade_data: dict) -> dict:
+        """Insert or update a wallet trade record."""
+        trade_data["address"] = trade_data["address"].lower()
+        result = self._client.table("wallet_trades").upsert(
+            trade_data,
+            on_conflict="address,trade_id"
+        ).execute()
+        return result.data[0] if result.data else {}
+
+    def get_wallet_trades(self, address: str, days: Optional[int] = None) -> list[dict]:
+        """Get trades for a wallet, optionally filtered by days."""
+        query = (
+            self._client.table("wallet_trades")
+            .select("*")
+            .eq("address", address.lower())
+        )
+
+        if days:
+            from datetime import datetime, timedelta
+            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+            query = query.gte("executed_at", cutoff)
+
+        result = query.order("executed_at", desc=True).execute()
+        return result.data or []
+
+    def delete_wallet_trades(self, address: str) -> bool:
+        """Delete all trades for a wallet."""
+        try:
+            self._client.table("wallet_trades").delete().eq("address", address.lower()).execute()
+            return True
+        except Exception:
+            return False
+
+    def get_wallet_trade_stats(self) -> dict:
+        """Get aggregate statistics about wallet trades."""
+        result = self._client.table("wallet_trades").select("address", count="exact").execute()
+        total_trades = result.count or 0
+
+        result = self._client.table("wallet_trades").select("address").execute()
+        unique_wallets = len(set(t["address"] for t in result.data)) if result.data else 0
+
+        return {
+            "total_trades": total_trades,
+            "unique_wallets_with_trades": unique_wallets
+        }
+
+    # =========================================================================
     # Raw Query Operations
     # =========================================================================
 

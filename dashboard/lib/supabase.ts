@@ -192,3 +192,97 @@ export interface TradeStats {
   whale_volume: number
   avg_latency_ms: number
 }
+
+// ============================================
+// Wallet Analytics Types
+// ============================================
+
+export type WalletSource = 'goldsky' | 'leaderboard' | 'both'
+export type TimePeriod = '7d' | '14d' | '30d' | '90d' | 'all'
+
+export interface Wallet {
+  address: string
+  source: WalletSource
+  balance: number
+  balance_updated_at?: string
+  created_at: string
+  updated_at: string
+  // Joined from rankings
+  categories?: string[]
+  best_rank?: number
+  wallet_leaderboard_rankings?: WalletLeaderboardRanking[]
+}
+
+export interface WalletLeaderboardRanking {
+  id: number
+  address: string
+  category: string
+  rank: number
+  pnl?: number
+  volume?: number
+  fetched_at: string
+}
+
+export interface WalletTrade {
+  id: number
+  address: string
+  trade_id?: string
+  condition_id?: string
+  market_slug?: string
+  market_title?: string
+  event_slug?: string
+  category?: string
+  side: 'BUY' | 'SELL'
+  outcome?: string
+  outcome_index?: number
+  size: number
+  price: number
+  usd_value: number
+  executed_at: string
+  tx_hash?: string
+  created_at: string
+}
+
+export interface WalletMetrics {
+  pnl: number
+  roi: number
+  volume: number
+  tradeCount: number
+  winRate: number
+  maxDrawdown: number
+  buyCount: number
+  sellCount: number
+  avgTradeSize: number
+  uniqueMarkets: number
+}
+
+export interface WalletFilter {
+  source?: WalletSource | 'all'
+  category?: string
+  minBalance?: number
+  timePeriod: TimePeriod
+}
+
+export interface WalletWithMetrics extends Wallet {
+  metrics?: WalletMetrics
+}
+
+// Helper to get days from time period
+export function getTimePeriodDays(period: TimePeriod): number {
+  switch (period) {
+    case '7d': return 7
+    case '14d': return 14
+    case '30d': return 30
+    case '90d': return 90
+    case 'all': return 0 // 0 means no limit
+  }
+}
+
+// Helper to get start date from time period
+export function getTimePeriodStartDate(period: TimePeriod): Date | null {
+  const days = getTimePeriodDays(period)
+  if (days === 0) return null
+  const date = new Date()
+  date.setDate(date.getDate() - days)
+  return date
+}
