@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 
 interface Position {
   conditionId: string
@@ -48,12 +49,36 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<TraderData | null>(null)
   const [activeTab, setActiveTab] = useState<'open' | 'summary'>('open')
+  const [mounted, setMounted] = useState(false)
+
+  // Handle client-side mounting for portal
+  useEffect(() => {
+    setMounted(true)
+    return () => setMounted(false)
+  }, [])
 
   useEffect(() => {
     if (isOpen && address) {
       fetchTraderData()
     }
   }, [isOpen, address])
+
+  // Handle escape key and body scroll lock
+  useEffect(() => {
+    if (!isOpen) return
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+
+    document.addEventListener('keydown', handleEscape)
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape)
+      document.body.style.overflow = ''
+    }
+  }, [isOpen, onClose])
 
   const fetchTraderData = async () => {
     setLoading(true)
@@ -94,8 +119,11 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
     ? username
     : `${address.slice(0, 6)}...${address.slice(-4)}`
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+  // Don't render on server or if not mounted
+  if (!mounted) return null
+
+  const modalContent = (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -351,4 +379,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
       </div>
     </div>
   )
+
+  // Use portal to render modal at document body level
+  return createPortal(modalContent, document.body)
 }
