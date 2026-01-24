@@ -135,6 +135,20 @@ export default function WalletTable({
 
   const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
+  // Check if username looks like an address (starts with 0x and is long)
+  const isAddressLikeUsername = (username: string | undefined | null) => {
+    if (!username) return false
+    return username.startsWith('0x') && username.length > 20
+  }
+
+  // Get display name - use formatted address if username looks like an address
+  const getDisplayName = (wallet: Wallet) => {
+    if (!wallet.username || isAddressLikeUsername(wallet.username)) {
+      return formatAddress(wallet.address)
+    }
+    return wallet.username
+  }
+
   const formatMoney = (value: number | undefined | null) => {
     if (value === undefined || value === null) return '-'
     const absValue = Math.abs(value)
@@ -392,7 +406,7 @@ export default function WalletTable({
                         rel="noopener noreferrer"
                         className="text-sm text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1"
                       >
-                        {wallet.username || formatAddress(wallet.address)}
+                        {getDisplayName(wallet)}
                         <svg className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                         </svg>
