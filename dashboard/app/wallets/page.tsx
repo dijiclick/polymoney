@@ -30,6 +30,7 @@ export default function WalletsPage() {
   const [sortBy, setSortBy] = useState('pnl_30d')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [columnFilters, setColumnFilters] = useState<Record<string, ColumnFilter>>({})
+  const [searchQuery, setSearchQuery] = useState('')
 
   // Fetch wallet stats
   const fetchStats = useCallback(async () => {
@@ -132,34 +133,49 @@ export default function WalletsPage() {
     setPage(1)
   }
 
-  // Apply client-side column filters
+  // Apply client-side column filters and text search
   const filteredWallets = useMemo(() => {
-    if (Object.keys(columnFilters).length === 0) return wallets
+    let result = wallets
 
-    return wallets.filter(wallet => {
-      for (const [column, filter] of Object.entries(columnFilters)) {
-        let value: number | undefined
+    // Apply text search filter (name or address)
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim()
+      result = result.filter(wallet => {
+        const matchesAddress = wallet.address.toLowerCase().includes(query)
+        const matchesUsername = wallet.username?.toLowerCase().includes(query)
+        return matchesAddress || matchesUsername
+      })
+    }
 
-        // Get the value based on column name
-        if (column === 'balance') {
-          value = wallet.balance
-        } else if (column === 'active_positions') {
-          value = wallet.active_positions
-        } else if (column === 'total_positions') {
-          value = wallet.total_positions
-        } else {
-          // Period-based metrics
-          value = (wallet as any)[column] || 0
+    // Apply column filters
+    if (Object.keys(columnFilters).length > 0) {
+      result = result.filter(wallet => {
+        for (const [column, filter] of Object.entries(columnFilters)) {
+          let value: number | undefined
+
+          // Get the value based on column name
+          if (column === 'balance') {
+            value = wallet.balance
+          } else if (column === 'active_positions') {
+            value = wallet.active_positions
+          } else if (column === 'total_positions') {
+            value = wallet.total_positions
+          } else {
+            // Period-based metrics
+            value = (wallet as any)[column] || 0
+          }
+
+          if (value === undefined) continue
+
+          if (filter.min !== undefined && value < filter.min) return false
+          if (filter.max !== undefined && value > filter.max) return false
         }
+        return true
+      })
+    }
 
-        if (value === undefined) continue
-
-        if (filter.min !== undefined && value < filter.min) return false
-        if (filter.max !== undefined && value > filter.max) return false
-      }
-      return true
-    })
-  }, [wallets, columnFilters])
+    return result
+  }, [wallets, columnFilters, searchQuery])
 
   // Count active filters
   const activeFilterCount = Object.keys(columnFilters).length
@@ -253,22 +269,50 @@ export default function WalletsPage() {
             value={timePeriod}
             onChange={handleTimePeriodChange}
           />
+
+          {/* Search Input */}
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search name or address..."
+              className="w-64 pl-9 pr-8 py-2 bg-gray-800/50 border border-gray-700/50 rounded-xl text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+
           <div className="text-sm text-gray-500">
             <span className="text-gray-400 font-medium">{filteredWallets.length.toLocaleString()}</span>
-            {activeFilterCount > 0 && <span className="text-gray-600"> of {totalWallets.toLocaleString()}</span>}
+            {(activeFilterCount > 0 || searchQuery) && <span className="text-gray-600"> of {totalWallets.toLocaleString()}</span>}
             {' '}traders
           </div>
         </div>
 
-        {activeFilterCount > 0 && (
+        {(activeFilterCount > 0 || searchQuery) && (
           <button
-            onClick={() => setColumnFilters({})}
+            onClick={() => {
+              setColumnFilters({})
+              setSearchQuery('')
+            }}
             className="text-sm text-gray-400 hover:text-white flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-            Clear {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''}
+            Clear filters
           </button>
         )}
       </div>
