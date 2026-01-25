@@ -28,10 +28,9 @@ class WalletDiscoveryProcessor:
     4. Store wallet with metrics in database
     """
 
-    # Processing settings - MAXIMUM SPEED
-    # Tested: 50 concurrent requests = no rate limiting
-    NUM_WORKERS = 20  # Process 20 wallets concurrently
-    REQUEST_INTERVAL = 0.05  # 50ms between requests per worker (20 req/s per worker)
+    # Processing settings - SAFE (avoids Cloudflare rate limits)
+    NUM_WORKERS = 5  # Process 5 wallets concurrently
+    REQUEST_INTERVAL = 0.5  # 500ms between requests per worker (2 req/s per worker)
 
     MAX_QUEUE_SIZE = 2000
     HISTORY_DAYS = 30

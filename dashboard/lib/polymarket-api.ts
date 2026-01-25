@@ -16,9 +16,8 @@ import {
 const DATA_API_BASE = 'https://data-api.polymarket.com'
 const GAMMA_API_BASE = 'https://gamma-api.polymarket.com'
 
-// Concurrency limit for parallel API requests - MAXIMUM SPEED
-// Tested: 50 concurrent requests = no rate limiting from API
-const PARALLEL_BATCH_SIZE = 25  // Fetch 25 pages at once (1250 items per batch)
+// Concurrency limit for parallel API requests - SAFE (avoids Cloudflare rate limits)
+const PARALLEL_BATCH_SIZE = 10  // Fetch 10 pages at once (500 items per batch)
 
 export interface TraderProfile {
   createdAt?: string
