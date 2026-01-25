@@ -28,12 +28,12 @@ class WalletDiscoveryProcessor:
     4. Store wallet with metrics in database
     """
 
-    # Processing settings - optimized for speed
-    # Polymarket API allows ~15 req/s per endpoint
-    NUM_WORKERS = 10  # Process 10 wallets concurrently
-    REQUEST_INTERVAL = 0.2  # 200ms between requests per worker
+    # Processing settings - MAXIMUM SPEED
+    # Tested: 50 concurrent requests = no rate limiting
+    NUM_WORKERS = 20  # Process 20 wallets concurrently
+    REQUEST_INTERVAL = 0.05  # 50ms between requests per worker (20 req/s per worker)
 
-    MAX_QUEUE_SIZE = 1000
+    MAX_QUEUE_SIZE = 2000
     HISTORY_DAYS = 30
     REANALYSIS_COOLDOWN_DAYS = 3
 

@@ -12,9 +12,10 @@ from ..config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Parallel fetching settings - optimized for speed
+# Parallel fetching settings - MAXIMUM SPEED
+# Tested: 50 concurrent requests = no rate limiting from API
 PAGE_SIZE = 50
-PARALLEL_BATCH_SIZE = 15  # Fetch 15 pages at once (750 items per batch)
+PARALLEL_BATCH_SIZE = 25  # Fetch 25 pages at once (1250 items per batch)
 
 
 class PolymarketDataAPI:
