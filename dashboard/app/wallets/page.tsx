@@ -7,6 +7,7 @@ import WalletTable from '@/components/WalletTable'
 
 interface WalletStats {
   total: number
+  analyzed: number
   goldsky: number
   live: number
   qualified200: number
@@ -196,11 +197,11 @@ export default function WalletsPage() {
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
                 <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
               </div>
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wider">Total Traders</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Discovered</p>
                 <p className="text-2xl font-bold text-white">{stats.total.toLocaleString()}</p>
               </div>
             </div>
@@ -214,8 +215,13 @@ export default function WalletsPage() {
                 </svg>
               </div>
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wider">Qualified ($200+)</p>
-                <p className="text-2xl font-bold text-white">{stats.qualified200.toLocaleString()}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Analyzed</p>
+                <p className="text-2xl font-bold text-white">
+                  {stats.analyzed.toLocaleString()}
+                  <span className="text-sm font-normal text-gray-500 ml-1">
+                    ({stats.total > 0 ? Math.round(stats.analyzed / stats.total * 100) : 0}%)
+                  </span>
+                </p>
               </div>
             </div>
           </div>

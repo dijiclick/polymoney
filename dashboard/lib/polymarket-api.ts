@@ -16,6 +16,9 @@ import {
 const DATA_API_BASE = 'https://data-api.polymarket.com'
 const GAMMA_API_BASE = 'https://gamma-api.polymarket.com'
 
+// Concurrency limit for parallel API requests (API allows ~15 req/s per endpoint)
+const PARALLEL_BATCH_SIZE = 10
+
 export interface TraderProfile {
   createdAt?: string
   pseudonym?: string
@@ -64,175 +67,276 @@ export async function getPortfolioValue(address: string): Promise<number> {
 }
 
 /**
- * Get a trader's open positions with pagination
- * API has a hard cap of 50 per request, so we paginate through all results
+ * Fetch a single page of data from an API endpoint
  */
-export async function getPositions(address: string, maxPositions: number = 10000): Promise<RawPolymarketPosition[]> {
-  const PAGE_SIZE = 50 // API hard cap
-  const allPositions: RawPolymarketPosition[] = []
-  let offset = 0
-
+async function fetchPage<T>(url: string): Promise<{ data: T[]; ok: boolean }> {
   try {
-    while (offset < maxPositions) {
-      const response = await fetch(
-        `${DATA_API_BASE}/positions?user=${address}&limit=${PAGE_SIZE}&offset=${offset}`
-      )
-      if (!response.ok) {
-        if (response.status === 404) return allPositions
-        throw new Error(`API error: ${response.status}`)
-      }
-      const data = await response.json()
-      const positions = Array.isArray(data) ? data : []
-
-      if (positions.length === 0) break
-
-      allPositions.push(...positions)
-
-      // If we got less than PAGE_SIZE, we've reached the end
-      if (positions.length < PAGE_SIZE) break
-
-      offset += PAGE_SIZE
+    const response = await fetch(url)
+    if (!response.ok) {
+      if (response.status === 404) return { data: [], ok: true }
+      return { data: [], ok: false }
     }
-
-    return allPositions
-  } catch (error) {
-    console.error(`Error getting positions for ${address}:`, error)
-    return allPositions // Return what we have so far
+    const data = await response.json()
+    return { data: Array.isArray(data) ? data : [], ok: true }
+  } catch {
+    return { data: [], ok: false }
   }
 }
 
 /**
- * Get a trader's closed/resolved positions with pagination
- * API has a hard cap of 50 per request, so we paginate through all results
+ * Get a trader's open positions with parallel pagination
+ * Fetches multiple pages concurrently for faster data retrieval
+ */
+export async function getPositions(address: string, maxPositions: number = 10000): Promise<RawPolymarketPosition[]> {
+  const PAGE_SIZE = 50 // API hard cap
+  const allPositions: RawPolymarketPosition[] = []
+
+  try {
+    // First, fetch page 0 to check if there's data
+    const firstUrl = `${DATA_API_BASE}/positions?user=${address}&limit=${PAGE_SIZE}&offset=0`
+    const firstPage = await fetchPage<RawPolymarketPosition>(firstUrl)
+
+    if (!firstPage.ok || firstPage.data.length === 0) {
+      return allPositions
+    }
+
+    allPositions.push(...firstPage.data)
+
+    // If first page is not full, we're done
+    if (firstPage.data.length < PAGE_SIZE) {
+      return allPositions
+    }
+
+    // Fetch remaining pages in parallel batches
+    let offset = PAGE_SIZE
+    while (offset < maxPositions) {
+      // Create batch of page requests
+      const batchUrls: string[] = []
+      for (let i = 0; i < PARALLEL_BATCH_SIZE && offset < maxPositions; i++) {
+        batchUrls.push(`${DATA_API_BASE}/positions?user=${address}&limit=${PAGE_SIZE}&offset=${offset}`)
+        offset += PAGE_SIZE
+      }
+
+      // Fetch batch in parallel
+      const results = await Promise.all(batchUrls.map(url => fetchPage<RawPolymarketPosition>(url)))
+
+      // Process results in order
+      let hasMore = true
+      for (const result of results) {
+        if (!result.ok || result.data.length === 0) {
+          hasMore = false
+          break
+        }
+        allPositions.push(...result.data)
+        if (result.data.length < PAGE_SIZE) {
+          hasMore = false
+          break
+        }
+      }
+
+      if (!hasMore) break
+    }
+
+    return allPositions.slice(0, maxPositions)
+  } catch (error) {
+    console.error(`Error getting positions for ${address}:`, error)
+    return allPositions
+  }
+}
+
+/**
+ * Get a trader's closed/resolved positions with parallel pagination
+ * Fetches multiple pages concurrently for faster data retrieval
  * @param address - Wallet address
  * @param maxPositions - Maximum positions to fetch (default 10000)
- * @param days - Only include positions from last N days (default 30)
+ * @param days - Only include positions from last N days (0 = all history, default 0)
  */
 export async function getClosedPositions(
   address: string,
   maxPositions: number = 10000,
-  days: number = 30
+  days: number = 0
 ): Promise<RawPolymarketClosedPosition[]> {
   const PAGE_SIZE = 50 // API hard cap
   const allPositions: RawPolymarketClosedPosition[] = []
-  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000
-  let offset = 0
-  let reachedOldData = false
+  const baseUrl = `${DATA_API_BASE}/closed-positions?user=${address}&limit=${PAGE_SIZE}&sortBy=TIMESTAMP&sortDirection=DESC`
 
   try {
-    while (offset < maxPositions && !reachedOldData) {
-      const response = await fetch(
-        `${DATA_API_BASE}/closed-positions?user=${address}&limit=${PAGE_SIZE}&offset=${offset}`
-      )
-      if (!response.ok) {
-        if (response.status === 404) return allPositions
-        throw new Error(`API error: ${response.status}`)
+    // First, fetch page 0 to check if there's data
+    const firstPage = await fetchPage<RawPolymarketClosedPosition>(`${baseUrl}&offset=0`)
+
+    if (!firstPage.ok || firstPage.data.length === 0) {
+      return allPositions
+    }
+
+    // For date filtering, use sequential fetching (early termination needed)
+    if (days > 0) {
+      const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000
+      let offset = 0
+
+      while (offset < maxPositions) {
+        const page = offset === 0 ? firstPage : await fetchPage<RawPolymarketClosedPosition>(`${baseUrl}&offset=${offset}`)
+
+        if (!page.ok || page.data.length === 0) break
+
+        let reachedOldData = false
+        for (const pos of page.data) {
+          let posTime = 0
+          if (pos.timestamp) {
+            posTime = typeof pos.timestamp === 'number' ? pos.timestamp * 1000 : new Date(pos.timestamp).getTime()
+          } else if (pos.resolvedAt) {
+            posTime = new Date(pos.resolvedAt).getTime()
+          } else if (pos.endDate) {
+            posTime = new Date(pos.endDate).getTime()
+          }
+
+          if (posTime >= cutoffMs || posTime === 0) {
+            allPositions.push(pos)
+          } else if (posTime > 0 && posTime < cutoffMs) {
+            reachedOldData = true
+            break
+          }
+        }
+
+        if (reachedOldData || page.data.length < PAGE_SIZE) break
+        offset += PAGE_SIZE
       }
-      const data = await response.json()
-      const positions = Array.isArray(data) ? data : []
 
-      if (positions.length === 0) break
+      return allPositions.slice(0, maxPositions)
+    }
 
-      // Filter positions by date and check if we've gone past the cutoff
-      for (const pos of positions) {
-        // Get timestamp from various possible fields
-        let posTime = 0
-        if (pos.timestamp) {
-          posTime = typeof pos.timestamp === 'number' ? pos.timestamp * 1000 : new Date(pos.timestamp).getTime()
-        } else if (pos.resolvedAt) {
-          posTime = new Date(pos.resolvedAt).getTime()
-        } else if (pos.endDate) {
-          posTime = new Date(pos.endDate).getTime()
+    // No date filter - use parallel fetching for all history
+    allPositions.push(...firstPage.data)
+
+    if (firstPage.data.length < PAGE_SIZE) {
+      return allPositions
+    }
+
+    // Fetch remaining pages in parallel batches
+    let offset = PAGE_SIZE
+    while (offset < maxPositions) {
+      const batchUrls: string[] = []
+      for (let i = 0; i < PARALLEL_BATCH_SIZE && offset < maxPositions; i++) {
+        batchUrls.push(`${baseUrl}&offset=${offset}`)
+        offset += PAGE_SIZE
+      }
+
+      const results = await Promise.all(batchUrls.map(url => fetchPage<RawPolymarketClosedPosition>(url)))
+
+      let hasMore = true
+      for (const result of results) {
+        if (!result.ok || result.data.length === 0) {
+          hasMore = false
+          break
         }
-
-        // If position is within date range, include it
-        if (posTime >= cutoffMs || posTime === 0) {
-          allPositions.push(pos)
-        }
-
-        // Check if we've reached data older than cutoff (API returns sorted by date desc)
-        if (posTime > 0 && posTime < cutoffMs) {
-          reachedOldData = true
+        allPositions.push(...result.data)
+        if (result.data.length < PAGE_SIZE) {
+          hasMore = false
+          break
         }
       }
 
-      // If we got less than PAGE_SIZE, we've reached the end
-      if (positions.length < PAGE_SIZE) break
-
-      offset += PAGE_SIZE
-
-      // Safety check: stop if we have enough positions
-      if (allPositions.length >= maxPositions) break
+      if (!hasMore) break
     }
 
     return allPositions.slice(0, maxPositions)
   } catch (error) {
     console.error(`Error getting closed positions for ${address}:`, error)
-    return allPositions // Return what we have so far
+    return allPositions
   }
 }
 
 /**
- * Get a trader's activity history with pagination
- * API has a hard cap of 50 per request, so we paginate through all results
+ * Get a trader's activity history with parallel pagination
+ * Fetches multiple pages concurrently for faster data retrieval
  * @param address - Wallet address
  * @param maxActivities - Maximum activities to fetch (default 10000)
- * @param days - Only include activities from last N days (default 30)
+ * @param days - Only include activities from last N days (0 = all history, default 0)
  */
 export async function getActivity(
   address: string,
   maxActivities: number = 10000,
-  days: number = 30
+  days: number = 0
 ): Promise<unknown[]> {
   const PAGE_SIZE = 50 // API hard cap
   const allActivities: unknown[] = []
-  const cutoffTimestamp = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000) // In seconds
-  let offset = 0
-  let reachedOldData = false
+  const baseUrl = `${DATA_API_BASE}/activity?user=${address}&limit=${PAGE_SIZE}`
 
   try {
-    while (offset < maxActivities && !reachedOldData) {
-      const response = await fetch(
-        `${DATA_API_BASE}/activity?user=${address}&limit=${PAGE_SIZE}&offset=${offset}`
-      )
-      if (!response.ok) {
-        if (response.status === 404) return allActivities
-        throw new Error(`API error: ${response.status}`)
-      }
-      const data = await response.json()
-      const activities = Array.isArray(data) ? data : []
+    // First, fetch page 0 to check if there's data
+    const firstPage = await fetchPage<unknown>(`${baseUrl}&offset=0`)
 
-      if (activities.length === 0) break
+    if (!firstPage.ok || firstPage.data.length === 0) {
+      return allActivities
+    }
 
-      // Filter activities by date (timestamp is in seconds)
-      for (const activity of activities) {
-        const activityData = activity as { timestamp?: number }
-        const activityTime = activityData.timestamp || 0
+    // For date filtering, use sequential fetching (early termination needed)
+    if (days > 0) {
+      const cutoffTimestamp = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000)
+      let offset = 0
 
-        // If activity is within date range, include it
-        if (activityTime >= cutoffTimestamp || activityTime === 0) {
-          allActivities.push(activity)
+      while (offset < maxActivities) {
+        const page = offset === 0 ? firstPage : await fetchPage<unknown>(`${baseUrl}&offset=${offset}`)
+
+        if (!page.ok || page.data.length === 0) break
+
+        let reachedOldData = false
+        for (const activity of page.data) {
+          const activityData = activity as { timestamp?: number }
+          const activityTime = activityData.timestamp || 0
+
+          if (activityTime >= cutoffTimestamp || activityTime === 0) {
+            allActivities.push(activity)
+          } else if (activityTime > 0 && activityTime < cutoffTimestamp) {
+            reachedOldData = true
+            break
+          }
         }
 
-        // Check if we've reached data older than cutoff (API returns sorted by date desc)
-        if (activityTime > 0 && activityTime < cutoffTimestamp) {
-          reachedOldData = true
+        if (reachedOldData || page.data.length < PAGE_SIZE) break
+        offset += PAGE_SIZE
+      }
+
+      return allActivities.slice(0, maxActivities)
+    }
+
+    // No date filter - use parallel fetching for all history
+    allActivities.push(...firstPage.data)
+
+    if (firstPage.data.length < PAGE_SIZE) {
+      return allActivities
+    }
+
+    // Fetch remaining pages in parallel batches
+    let offset = PAGE_SIZE
+    while (offset < maxActivities) {
+      const batchUrls: string[] = []
+      for (let i = 0; i < PARALLEL_BATCH_SIZE && offset < maxActivities; i++) {
+        batchUrls.push(`${baseUrl}&offset=${offset}`)
+        offset += PAGE_SIZE
+      }
+
+      const results = await Promise.all(batchUrls.map(url => fetchPage<unknown>(url)))
+
+      let hasMore = true
+      for (const result of results) {
+        if (!result.ok || result.data.length === 0) {
+          hasMore = false
+          break
+        }
+        allActivities.push(...result.data)
+        if (result.data.length < PAGE_SIZE) {
+          hasMore = false
+          break
         }
       }
 
-      // If we got less than PAGE_SIZE, we've reached the end
-      if (activities.length < PAGE_SIZE) break
-
-      offset += PAGE_SIZE
-
-      // Safety check: stop if we have enough activities
-      if (allActivities.length >= maxActivities) break
+      if (!hasMore) break
     }
 
     return allActivities.slice(0, maxActivities)
   } catch (error) {
     console.error(`Error getting activity for ${address}:`, error)
-    return allActivities // Return what we have so far
+    return allActivities
   }
 }
 
