@@ -12,6 +12,8 @@
  */
 
 const DATA_API_BASE = 'https://data-api.polymarket.com'
+const PAGE_SIZE = 50
+const PARALLEL_BATCH_SIZE = 10
 
 interface RawPosition {
   conditionId: string
@@ -39,14 +41,100 @@ interface Trade {
   resolvedAt?: string
 }
 
+async function fetchPage<T>(url: string): Promise<{ data: T[]; ok: boolean }> {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) {
+      if (response.status === 404) return { data: [], ok: true }
+      return { data: [], ok: false }
+    }
+    const data = await response.json()
+    return { data: Array.isArray(data) ? data : [], ok: true }
+  } catch {
+    return { data: [], ok: false }
+  }
+}
+
 async function fetchPositions(address: string): Promise<RawPosition[]> {
-  const response = await fetch(`${DATA_API_BASE}/positions?user=${address}&limit=50`)
-  return response.json()
+  const allPositions: RawPosition[] = []
+  const baseUrl = `${DATA_API_BASE}/positions?user=${address}&limit=${PAGE_SIZE}`
+
+  // Fetch first page
+  const firstPage = await fetchPage<RawPosition>(`${baseUrl}&offset=0`)
+  if (!firstPage.ok || firstPage.data.length === 0) return allPositions
+
+  allPositions.push(...firstPage.data)
+  if (firstPage.data.length < PAGE_SIZE) return allPositions
+
+  // Fetch remaining pages in parallel batches
+  let offset = PAGE_SIZE
+  while (offset < 10000) {
+    const batchUrls: string[] = []
+    for (let i = 0; i < PARALLEL_BATCH_SIZE && offset < 10000; i++) {
+      batchUrls.push(`${baseUrl}&offset=${offset}`)
+      offset += PAGE_SIZE
+    }
+
+    const results = await Promise.all(batchUrls.map(url => fetchPage<RawPosition>(url)))
+
+    let hasMore = true
+    for (const result of results) {
+      if (!result.ok || result.data.length === 0) {
+        hasMore = false
+        break
+      }
+      allPositions.push(...result.data)
+      if (result.data.length < PAGE_SIZE) {
+        hasMore = false
+        break
+      }
+    }
+
+    if (!hasMore) break
+  }
+
+  return allPositions
 }
 
 async function fetchClosedPositions(address: string): Promise<RawPosition[]> {
-  const response = await fetch(`${DATA_API_BASE}/closed-positions?user=${address}&limit=100`)
-  return response.json()
+  const allPositions: RawPosition[] = []
+  const baseUrl = `${DATA_API_BASE}/closed-positions?user=${address}&limit=${PAGE_SIZE}&sortBy=TIMESTAMP&sortDirection=DESC`
+
+  // Fetch first page
+  const firstPage = await fetchPage<RawPosition>(`${baseUrl}&offset=0`)
+  if (!firstPage.ok || firstPage.data.length === 0) return allPositions
+
+  allPositions.push(...firstPage.data)
+  if (firstPage.data.length < PAGE_SIZE) return allPositions
+
+  // Fetch remaining pages in parallel batches
+  let offset = PAGE_SIZE
+  while (offset < 10000) {
+    const batchUrls: string[] = []
+    for (let i = 0; i < PARALLEL_BATCH_SIZE && offset < 10000; i++) {
+      batchUrls.push(`${baseUrl}&offset=${offset}`)
+      offset += PAGE_SIZE
+    }
+
+    const results = await Promise.all(batchUrls.map(url => fetchPage<RawPosition>(url)))
+
+    let hasMore = true
+    for (const result of results) {
+      if (!result.ok || result.data.length === 0) {
+        hasMore = false
+        break
+      }
+      allPositions.push(...result.data)
+      if (result.data.length < PAGE_SIZE) {
+        hasMore = false
+        break
+      }
+    }
+
+    if (!hasMore) break
+  }
+
+  return allPositions
 }
 
 /**

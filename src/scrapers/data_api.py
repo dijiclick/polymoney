@@ -12,6 +12,10 @@ from ..config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
+# Parallel fetching settings
+PAGE_SIZE = 50
+PARALLEL_BATCH_SIZE = 10
+
 
 class PolymarketDataAPI:
     """Client for Polymarket Data API."""
@@ -70,6 +74,67 @@ class PolymarketDataAPI:
 
             return await response.json()
 
+    async def _fetch_page(self, endpoint: str, params: dict) -> tuple[list, bool]:
+        """
+        Fetch a single page of data.
+        Returns (data, ok) tuple.
+        """
+        try:
+            result = await self._get(endpoint, params)
+            if isinstance(result, list):
+                return result, True
+            return [], True
+        except Exception as e:
+            logger.debug(f"Page fetch failed: {e}")
+            return [], False
+
+    async def _fetch_all_pages(
+        self,
+        endpoint: str,
+        base_params: dict,
+        page_size: int = PAGE_SIZE
+    ) -> list[dict]:
+        """
+        Fetch all pages of data using parallel batch fetching.
+
+        Strategy:
+        1. Fetch first batch of pages in parallel
+        2. If any page returns data, fetch more batches
+        3. Stop when a batch returns all empty pages
+        """
+        all_data = []
+        offset = 0
+
+        while True:
+            # Create batch of page requests
+            batch_tasks = []
+            for i in range(PARALLEL_BATCH_SIZE):
+                params = {**base_params, "limit": page_size, "offset": offset + (i * page_size)}
+                batch_tasks.append(self._fetch_page(endpoint, params))
+
+            # Execute batch in parallel
+            results = await asyncio.gather(*batch_tasks)
+
+            # Process results
+            batch_has_data = False
+            for data, ok in results:
+                if ok and data:
+                    all_data.extend(data)
+                    batch_has_data = True
+
+            # If no pages in batch had data, we're done
+            if not batch_has_data:
+                break
+
+            offset += PARALLEL_BATCH_SIZE * page_size
+
+            # Safety limit: max 100 batches (50,000 items)
+            if offset >= 50000:
+                logger.warning(f"Hit safety limit for {endpoint}")
+                break
+
+        return all_data
+
     # =========================================================================
     # Profile Endpoint (Gamma API)
     # =========================================================================
@@ -107,34 +172,33 @@ class PolymarketDataAPI:
             return 0
 
     async def get_positions(self, address: str) -> list[dict]:
-        """Get a trader's open positions."""
+        """Get a trader's open positions with full pagination."""
         try:
-            result = await self._get("positions", {"user": address})
-            if isinstance(result, list):
-                return result
-            return []
+            return await self._fetch_all_pages("positions", {"user": address})
         except Exception as e:
             logger.error(f"Error getting positions for {address}: {e}")
             return []
 
-    async def get_closed_positions(self, address: str, limit: int = 500) -> list[dict]:
-        """Get a trader's closed/resolved positions."""
+    async def get_closed_positions(self, address: str) -> list[dict]:
+        """Get a trader's closed/resolved positions with full pagination."""
         try:
-            result = await self._get("closed-positions", {"user": address, "limit": limit})
-            if isinstance(result, list):
-                return result
-            return []
+            # Use TIMESTAMP sorting to ensure we get all positions in order
+            return await self._fetch_all_pages(
+                "closed-positions",
+                {
+                    "user": address,
+                    "sortBy": "TIMESTAMP",
+                    "sortDirection": "DESC"
+                }
+            )
         except Exception as e:
             logger.error(f"Error getting closed positions for {address}: {e}")
             return []
 
-    async def get_activity(self, address: str, limit: int = 500) -> list[dict]:
-        """Get a trader's activity history."""
+    async def get_activity(self, address: str) -> list[dict]:
+        """Get a trader's activity history with full pagination."""
         try:
-            result = await self._get("activity", {"user": address, "limit": limit})
-            if isinstance(result, list):
-                return result
-            return []
+            return await self._fetch_all_pages("activity", {"user": address})
         except Exception as e:
             logger.error(f"Error getting activity for {address}: {e}")
             return []
