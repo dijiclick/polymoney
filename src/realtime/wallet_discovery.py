@@ -2,17 +2,17 @@
 Wallet discovery processor for live trade monitoring.
 
 Discovers new wallets from live trades >= $100 and fetches their trade history.
+Uses Polymarket Data API for all metrics calculation.
 """
 
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Callable
+from typing import Optional
 
 from supabase import Client
 
 from ..scrapers.data_api import PolymarketDataAPI
-from ..scrapers.goldsky_api import GoldskyAPI
 
 logger = logging.getLogger(__name__)
 
@@ -23,49 +23,44 @@ class WalletDiscoveryProcessor:
 
     When a trade >= $100 comes in from an unknown wallet:
     1. Queue the wallet for processing
-    2. Fetch portfolio value and trade history from Polymarket API
+    2. Fetch portfolio value and positions from Polymarket API
     3. Calculate 7d and 30d metrics (PnL, ROI, win rate, etc.)
-    4. Store wallet with metrics and trades in database
+    4. Store wallet with metrics in database
     """
 
     # Processing settings
-    # Each wallet needs 4 API calls, rate limit is 60/min
-    # With 3 workers processing 1 wallet every 0.8s each = ~15 wallets/min = ~60 API calls/min
     NUM_WORKERS = 3
     REQUEST_INTERVAL = 0.8  # seconds between wallet processing per worker
 
-    MAX_QUEUE_SIZE = 500  # Larger queue to handle bursts
+    MAX_QUEUE_SIZE = 500
     HISTORY_DAYS = 30
-    REANALYSIS_COOLDOWN_DAYS = 3  # Don't re-analyze wallets within this period
+    REANALYSIS_COOLDOWN_DAYS = 3
 
-    def __init__(self, supabase: Client, use_goldsky: bool = True):
+    def __init__(self, supabase: Client):
         """
         Initialize the wallet discovery processor.
 
         Args:
             supabase: Supabase client instance
-            use_goldsky: If True, use Goldsky for complete trade history (volume/counts)
         """
         self.supabase = supabase
         self._api: Optional[PolymarketDataAPI] = None
-        self._goldsky: Optional[GoldskyAPI] = None
-        self._use_goldsky = use_goldsky
 
         # In-memory caches for O(1) lookup
         self._known_wallets: set[str] = set()
-        self._wallet_last_analyzed: dict[str, datetime] = {}  # addr -> last analysis time
+        self._wallet_last_analyzed: dict[str, datetime] = {}
         self._pending_wallets: set[str] = set()
 
-        # Processing queue (priority queue would be nice but asyncio doesn't have one)
+        # Processing queue
         self._queue: asyncio.Queue[tuple[str, float]] = asyncio.Queue(maxsize=self.MAX_QUEUE_SIZE)
 
         # Per-worker rate limiting
         self._worker_last_request: dict[int, datetime] = {}
 
         # Stats
-        self._wallets_discovered = 0  # New wallets seen (>= $100 trades)
-        self._wallets_skipped_cooldown = 0  # Skipped due to recent analysis
-        self._wallets_processed = 0  # Actually analyzed
+        self._wallets_discovered = 0
+        self._wallets_skipped_cooldown = 0
+        self._wallets_processed = 0
         self._trades_stored = 0
         self._errors = 0
 
@@ -82,7 +77,6 @@ class WalletDiscoveryProcessor:
                 addr = w["address"].lower()
                 self._known_wallets.add(addr)
 
-                # Parse last analysis time
                 if w.get("metrics_updated_at"):
                     try:
                         last_analyzed = datetime.fromisoformat(
@@ -94,15 +88,10 @@ class WalletDiscoveryProcessor:
 
             logger.info(f"Loaded {len(self._known_wallets)} wallet addresses into cache")
 
-            # Initialize API clients
+            # Initialize Polymarket API client
             self._api = PolymarketDataAPI()
             await self._api.__aenter__()
-
-            # Initialize Goldsky API for complete trade history
-            if self._use_goldsky:
-                self._goldsky = GoldskyAPI()
-                await self._goldsky.__aenter__()
-                logger.info("Goldsky API initialized for complete trade history")
+            logger.info("Polymarket API initialized for metrics calculation")
 
         except Exception as e:
             logger.error(f"Failed to initialize wallet discovery: {e}")
@@ -112,8 +101,6 @@ class WalletDiscoveryProcessor:
         """Clean up resources."""
         if self._api:
             await self._api.__aexit__(None, None, None)
-        if self._goldsky:
-            await self._goldsky.__aexit__(None, None, None)
 
     async def check_and_queue(self, trader_address: str, usd_value: float) -> bool:
         """
@@ -132,27 +119,21 @@ class WalletDiscoveryProcessor:
         """
         addr = trader_address.lower()
 
-        # Always count as discovered (>= $100 trade)
         self._wallets_discovered += 1
 
-        # Skip if already pending
         if addr in self._pending_wallets:
             return False
 
-        # Check if wallet was recently analyzed (within cooldown period)
         if addr in self._known_wallets:
             last_analyzed = self._wallet_last_analyzed.get(addr)
             if last_analyzed:
                 now = datetime.now(timezone.utc)
                 days_since = (now - last_analyzed).days
                 if days_since < self.REANALYSIS_COOLDOWN_DAYS:
-                    # Skip - analyzed recently
                     return False
 
-            # Wallet exists but needs re-analysis (older than cooldown)
             logger.debug(f"Wallet {addr[:10]}... needs re-analysis")
 
-        # Try to queue
         try:
             self._queue.put_nowait((addr, usd_value))
             self._pending_wallets.add(addr)
@@ -164,30 +145,21 @@ class WalletDiscoveryProcessor:
             return True
 
         except asyncio.QueueFull:
-            # Queue is full - only add if this is a high-value trade
             if usd_value >= 1000:
                 logger.warning(f"Queue full, but high-value trade (${usd_value:,.0f}) - wallet will be processed later")
             return False
 
     async def process_queue(self, worker_id: int = 0) -> None:
-        """Background task to process discovery queue.
-
-        Args:
-            worker_id: Unique ID for this worker (for rate limiting)
-        """
+        """Background task to process discovery queue."""
         logger.info(f"Starting wallet discovery worker {worker_id}")
         self._worker_last_request[worker_id] = datetime.now(timezone.utc)
 
         while True:
             try:
-                # Get wallet from queue
                 addr, usd_value = await self._queue.get()
 
                 try:
-                    # Rate limit - wait between requests for this worker
                     await self._rate_limit_wait(worker_id)
-
-                    # Process the wallet
                     await self._process_wallet(addr)
 
                 except Exception as e:
@@ -223,51 +195,58 @@ class WalletDiscoveryProcessor:
         """
         Process a single wallet: fetch data, calculate metrics, store.
 
-        ALL METRICS come from Goldsky on-chain data:
-        - Volume, trade counts (orderbook subgraph)
-        - PnL, win rate, ROI (PnL subgraph)
-        - Position counts (PnL subgraph)
-
-        Polymarket REST API is only used for:
-        - Profile info (username, profile image)
-        - Portfolio value (current balance)
+        ALL METRICS come from Polymarket Data API:
+        - Positions (open and closed)
+        - PnL, win rate, ROI
+        - Portfolio value
 
         Args:
             address: The wallet address to process
         """
-        if not self._goldsky:
-            raise RuntimeError("Goldsky API client not initialized")
+        if not self._api:
+            raise RuntimeError("Polymarket API client not initialized")
 
         logger.debug(f"Processing wallet: {address[:10]}...")
 
-        # Fetch data in parallel:
-        # - Goldsky: ALL metrics (volume, trades, PnL, win rate, ROI, positions)
-        # - Polymarket API: Only profile info and portfolio value
+        # Fetch data in parallel from Polymarket API
         api_tasks = [
-            self._goldsky.get_complete_metrics(address),  # ALL metrics from Goldsky
-            self._api.get_portfolio_value(address) if self._api else asyncio.coroutine(lambda: 0)(),
-            self._api.get_profile(address) if self._api else asyncio.coroutine(lambda: {})(),
+            self._api.get_positions(address),
+            self._api.get_closed_positions(address),
+            self._api.get_portfolio_value(address),
+            self._api.get_profile(address),
         ]
 
         results = await asyncio.gather(*api_tasks, return_exceptions=True)
 
-        # Unpack results
-        goldsky_metrics = results[0] if not isinstance(results[0], Exception) else None
-        portfolio_value = results[1] if not isinstance(results[1], Exception) else 0
-        profile = results[2] if not isinstance(results[2], Exception) else {}
+        positions = results[0] if not isinstance(results[0], Exception) else []
+        closed_positions = results[1] if not isinstance(results[1], Exception) else []
+        portfolio_value = results[2] if not isinstance(results[2], Exception) else 0
+        profile = results[3] if not isinstance(results[3], Exception) else {}
 
-        if goldsky_metrics is None:
-            logger.error(f"Failed to fetch Goldsky metrics for {address[:10]}...")
-            self._errors += 1
+        if not positions and not closed_positions:
+            logger.debug(f"No positions found for {address[:10]}...")
             return
 
-        logger.debug(
-            f"Goldsky: {goldsky_metrics.get('trades_fetched', 0)} trades, "
-            f"${goldsky_metrics.get('volume_30d', 0):,.0f} volume (30d), "
-            f"{goldsky_metrics.get('win_rate_all', 0):.1f}% win rate"
+        # Parse and calculate metrics
+        parsed_positions = self._parse_positions(positions)
+        parsed_closed = self._parse_closed_positions(closed_positions)
+
+        # Calculate all metrics using our formulas
+        metrics = self._calculate_metrics(
+            positions=positions,
+            closed_positions=closed_positions,
+            current_balance=portfolio_value
         )
 
-        # All metrics come from Goldsky now (including ROI and drawdown for each period)
+        # Calculate period metrics (7d, 30d)
+        metrics_7d = self._calculate_period_metrics(closed_positions, 7, portfolio_value)
+        metrics_30d = self._calculate_period_metrics(closed_positions, 30, portfolio_value)
+
+        logger.debug(
+            f"Polymarket: {len(positions)} open, {len(closed_positions)} closed, "
+            f"{metrics['win_rate_all']:.1f}% win rate"
+        )
+
         wallet_data = {
             "address": address,
             "source": "live",
@@ -275,32 +254,32 @@ class WalletDiscoveryProcessor:
             "balance_updated_at": datetime.now(timezone.utc).isoformat(),
             "username": profile.get("name") or profile.get("pseudonym"),
             "account_created_at": profile.get("createdAt"),
-            # ===== 7-DAY METRICS (from Goldsky) =====
-            "pnl_7d": goldsky_metrics.get("pnl_7d", 0),
-            "roi_7d": goldsky_metrics.get("roi_7d", 0),
-            "win_rate_7d": goldsky_metrics.get("win_rate_7d", 0),
-            "volume_7d": goldsky_metrics.get("volume_7d", 0),
-            "trade_count_7d": goldsky_metrics.get("trade_count_7d", 0),
-            "drawdown_7d": goldsky_metrics.get("drawdown_7d", 0),
-            # ===== 30-DAY METRICS (from Goldsky) =====
-            "pnl_30d": goldsky_metrics.get("pnl_30d", 0),
-            "roi_30d": goldsky_metrics.get("roi_30d", 0),
-            "win_rate_30d": goldsky_metrics.get("win_rate_30d", 0),
-            "volume_30d": goldsky_metrics.get("volume_30d", 0),
-            "trade_count_30d": goldsky_metrics.get("trade_count_30d", 0),
-            "drawdown_30d": goldsky_metrics.get("drawdown_30d", 0),
-            # ===== OVERALL/ALL-TIME METRICS (from Goldsky) =====
-            "total_positions": goldsky_metrics.get("total_positions", 0),
-            "active_positions": goldsky_metrics.get("open_positions", 0),
-            "total_wins": goldsky_metrics.get("winning_positions", 0),
-            "total_losses": goldsky_metrics.get("losing_positions", 0),
-            "realized_pnl": goldsky_metrics.get("realized_pnl", 0),
-            "unrealized_pnl": 0,  # Would need positions subgraph for this
-            "overall_pnl": goldsky_metrics.get("realized_pnl", 0),
-            "overall_roi": goldsky_metrics.get("roi_all", 0),
-            "overall_win_rate": goldsky_metrics.get("win_rate_all", 0),
-            "total_volume": goldsky_metrics.get("volume_30d", 0),  # Use 30d as proxy
-            "total_trades": goldsky_metrics.get("trade_count_30d", 0),  # Use 30d as proxy
+            # 7-day metrics
+            "pnl_7d": metrics_7d["pnl"],
+            "roi_7d": metrics_7d["roi"],
+            "win_rate_7d": metrics_7d["win_rate"],
+            "volume_7d": metrics_7d["volume"],
+            "trade_count_7d": metrics_7d["trade_count"],
+            "drawdown_7d": metrics_7d["drawdown"],
+            # 30-day metrics
+            "pnl_30d": metrics_30d["pnl"],
+            "roi_30d": metrics_30d["roi"],
+            "win_rate_30d": metrics_30d["win_rate"],
+            "volume_30d": metrics_30d["volume"],
+            "trade_count_30d": metrics_30d["trade_count"],
+            "drawdown_30d": metrics_30d["drawdown"],
+            # Overall metrics
+            "total_positions": metrics["closed_count"],
+            "active_positions": metrics["open_count"],
+            "total_wins": metrics["win_count"],
+            "total_losses": metrics["loss_count"],
+            "realized_pnl": metrics["realized_pnl"],
+            "unrealized_pnl": metrics["unrealized_pnl"],
+            "overall_pnl": metrics["total_pnl"],
+            "overall_roi": metrics["roi_all"],
+            "overall_win_rate": metrics["win_rate_all"],
+            "total_volume": metrics["total_bought"],
+            "total_trades": metrics["trade_count"],
             "metrics_updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -318,314 +297,325 @@ class WalletDiscoveryProcessor:
         logger.info(
             f"Wallet processed: {address[:10]}... | "
             f"balance=${portfolio_value:,.0f} | "
-            f"positions={goldsky_metrics.get('total_positions', 0)} | "
-            f"win_rate={goldsky_metrics.get('win_rate_all', 0):.1f}% | "
-            f"pnl=${goldsky_metrics.get('realized_pnl', 0):,.0f}"
+            f"positions={metrics['closed_count']} | "
+            f"win_rate={metrics['win_rate_all']:.1f}% | "
+            f"pnl=${metrics['realized_pnl']:,.0f}"
         )
 
-    async def _store_trades(self, address: str, trades: list[dict]) -> int:
-        """
-        Store trades in wallet_trades table.
+    def _parse_positions(self, positions: list[dict]) -> dict:
+        """Parse open positions."""
+        if not positions:
+            return {"count": 0, "total_value": 0, "unrealized_pnl": 0}
 
-        Args:
-            address: Wallet address
-            trades: List of trade records from API
+        total_value = 0
+        unrealized_pnl = 0
 
-        Returns:
-            Number of trades stored
-        """
-        if not trades:
-            return 0
-
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(days=self.HISTORY_DAYS)
-
-        trade_records = []
-        for trade in trades:
-            # Parse timestamp
-            timestamp = trade.get("timestamp")
-            if timestamp:
-                try:
-                    if isinstance(timestamp, (int, float)):
-                        executed_at = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-                    else:
-                        executed_at = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
-                except Exception:
-                    executed_at = now
-            else:
-                executed_at = now
-
-            # Skip trades older than cutoff
-            if executed_at < cutoff:
-                continue
-
-            # Get USD value
-            usd_value = float(trade.get("usdcSize") or trade.get("usdValue") or 0)
-            if usd_value == 0:
-                size = float(trade.get("size") or 0)
-                price = float(trade.get("price") or 0)
-                usd_value = size * price
-
-            trade_record = {
-                "address": address,
-                "trade_id": str(trade.get("id") or trade.get("transactionHash") or f"{address}_{timestamp}"),
-                "condition_id": trade.get("conditionId"),
-                "market_slug": trade.get("slug"),
-                "market_title": trade.get("title"),
-                "event_slug": trade.get("eventSlug"),
-                "category": trade.get("category"),
-                "side": trade.get("side", "").upper(),
-                "outcome": trade.get("outcome"),
-                "outcome_index": trade.get("outcomeIndex"),
-                "size": float(trade.get("size") or 0),
-                "price": float(trade.get("price") or 0),
-                "usd_value": usd_value,
-                "executed_at": executed_at.isoformat(),
-                "tx_hash": trade.get("transactionHash"),
-            }
-            trade_records.append(trade_record)
-
-        if trade_records:
-            # Deduplicate by trade_id (in case API returns duplicates)
-            seen_ids = set()
-            unique_records = []
-            for record in trade_records:
-                trade_id = record["trade_id"]
-                if trade_id not in seen_ids:
-                    seen_ids.add(trade_id)
-                    unique_records.append(record)
-
-            try:
-                self.supabase.table("wallet_trades").upsert(
-                    unique_records, on_conflict="address,trade_id"
-                ).execute()
-            except Exception as e:
-                logger.error(f"Failed to store trades for {address[:10]}...: {e}")
-                return 0
-
-            return len(unique_records)
-
-        return 0
-
-    def _calculate_period_metrics(
-        self,
-        closed_positions: list[dict],
-        open_positions: list[dict],
-        trades: list[dict],
-        days: int
-    ) -> dict:
-        """
-        Calculate metrics for a specific time period (7d or 30d).
-
-        This calculates metrics INDEPENDENTLY for each period:
-        - Volume: Sum of all trades EXECUTED within the period
-        - Trade Count: Number of trades EXECUTED within the period
-        - Realized PnL: Sum of realizedPnl from positions RESOLVED within the period
-        - Win Rate: Percentage of positions RESOLVED within the period with positive PnL
-        - ROI: realized_pnl / total_invested for positions resolved in period
-
-        Args:
-            closed_positions: List of closed position records from API
-            open_positions: List of open position records from API
-            trades: List of trade records from API
-            days: Number of days to include (7 or 30)
-
-        Returns:
-            Dict with pnl, roi, win_rate, volume, trade_count
-        """
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(days=days)
-        cutoff_ts = cutoff.timestamp()
-
-        # =====================================================================
-        # 1. VOLUME & TRADE COUNT - from trades EXECUTED in this period
-        # =====================================================================
-        period_trades = []
-        total_volume = 0
-
-        for trade in trades:
-            timestamp = trade.get("timestamp")
-            if timestamp:
-                try:
-                    if isinstance(timestamp, (int, float)):
-                        # Check if timestamp is in milliseconds (> year 2100 in seconds)
-                        trade_ts = timestamp / 1000 if timestamp > 4102444800 else timestamp
-                    else:
-                        trade_ts = datetime.fromisoformat(
-                            str(timestamp).replace("Z", "+00:00")
-                        ).timestamp()
-
-                    if trade_ts >= cutoff_ts:
-                        period_trades.append(trade)
-                        # Calculate USD value
-                        usd_value = float(trade.get("usdcSize") or 0)
-                        if usd_value == 0:
-                            size = float(trade.get("size") or 0)
-                            price = float(trade.get("price") or 0)
-                            usd_value = size * price
-                        total_volume += usd_value
-                except Exception:
-                    pass
-
-        # =====================================================================
-        # 2. WIN RATE & REALIZED PNL - from positions RESOLVED in this period
-        # =====================================================================
-        period_closed = []
-        realized_pnl = 0
-        total_invested = 0
-        winning_count = 0
-
-        for pos in closed_positions:
-            # Try multiple possible field names for resolution date
-            # API may use: resolvedAt, endDate, or timestamp
-            resolved_date = (
-                pos.get("resolvedAt") or
-                pos.get("endDate") or
-                pos.get("timestamp") or
-                pos.get("settledAt")
-            )
-
-            if resolved_date:
-                try:
-                    if isinstance(resolved_date, (int, float)):
-                        # Check if timestamp is in milliseconds (> year 2100 in seconds)
-                        resolved_ts = resolved_date / 1000 if resolved_date > 4102444800 else resolved_date
-                    else:
-                        resolved_ts = datetime.fromisoformat(
-                            str(resolved_date).replace("Z", "+00:00")
-                        ).timestamp()
-
-                    if resolved_ts >= cutoff_ts:
-                        period_closed.append(pos)
-                        # Try multiple field names for PnL
-                        pnl = float(pos.get("realizedPnl") or pos.get("cashPnl") or pos.get("pnl") or 0)
-                        realized_pnl += pnl
-
-                        # Calculate initial investment - try multiple field names
-                        total_bought = float(pos.get("totalBought") or pos.get("size") or 0)
-                        avg_price = float(pos.get("avgPrice") or pos.get("buyAvgPrice") or 0)
-                        initial_value = float(pos.get("initialValue") or (total_bought * avg_price) or 0)
-                        total_invested += initial_value
-
-                        if pnl > 0:
-                            winning_count += 1
-                except Exception as e:
-                    logger.debug(f"Error parsing closed position date: {e}")
-
-        # Win rate for this period
-        # Note: If no positions resolved in this period, win_rate will be 0
-        total_closed = len(period_closed)
-        losing_count = total_closed - winning_count
-        win_rate = (winning_count / total_closed * 100) if total_closed > 0 else 0
-
-        # ROI for this period
-        roi = (realized_pnl / total_invested * 100) if total_invested > 0 else 0
+        for pos in positions:
+            total_value += float(pos.get("currentValue", 0))
+            unrealized_pnl += float(pos.get("cashPnl", 0))
 
         return {
-            "pnl": round(realized_pnl, 2),
-            "roi": round(roi, 2),
-            "win_rate": round(win_rate, 2),
-            "volume": round(total_volume, 2),
-            "trade_count": len(period_trades),
-            # Additional detail fields
-            "positions_resolved": total_closed,
-            "winning_positions": winning_count,
-            "losing_positions": losing_count,
+            "count": len(positions),
+            "total_value": total_value,
+            "unrealized_pnl": unrealized_pnl
         }
 
-    def _calculate_overall_metrics(
-        self,
-        closed_positions: list[dict],
-        open_positions: list[dict],
-        trades: list[dict]
-    ) -> dict:
-        """
-        Calculate ALL-TIME metrics from closed positions, open positions, and trade history.
+    def _parse_closed_positions(self, closed_positions: list[dict]) -> dict:
+        """Parse closed positions."""
+        if not closed_positions:
+            return {"count": 0, "realized_pnl": 0, "wins": 0, "losses": 0}
 
-        This matches Polymarket's profile display:
-        - Total Positions: count of all closed positions
-        - Total Wins: positions with realizedPnl > 0
-        - Total Losses: positions with realizedPnl <= 0
-        - Overall PnL: sum of all realizedPnl + unrealized PnL from open positions
-        - Overall Win Rate: total_wins / total_positions * 100
-
-        Args:
-            closed_positions: List of ALL closed position records from API
-            open_positions: List of ALL open position records from API
-            trades: List of ALL trade records from API
-
-        Returns:
-            Dict with overall metrics
-        """
-        # =====================================================================
-        # Calculate ALL-TIME metrics from ALL closed positions
-        # =====================================================================
-        total_positions = len(closed_positions)
-        total_wins = 0
-        total_losses = 0
         realized_pnl = 0
-        total_invested_closed = 0
+        wins = 0
+        losses = 0
 
         for pos in closed_positions:
             pnl = float(pos.get("realizedPnl", 0))
             realized_pnl += pnl
-
-            # Calculate initial investment
-            total_bought = float(pos.get("totalBought", 0))
-            avg_price = float(pos.get("avgPrice", 0))
-            initial_value = total_bought * avg_price
-            total_invested_closed += initial_value
-
             if pnl > 0:
-                total_wins += 1
+                wins += 1
             else:
-                total_losses += 1
-
-        # =====================================================================
-        # Calculate unrealized PnL from OPEN positions
-        # =====================================================================
-        unrealized_pnl = 0
-        total_invested_open = 0
-        active_positions = len(open_positions)
-
-        for pos in open_positions:
-            unrealized_pnl += float(pos.get("cashPnl", 0))
-            total_invested_open += float(pos.get("initialValue", 0))
-
-        # Overall PnL = realized + unrealized
-        overall_pnl = realized_pnl + unrealized_pnl
-
-        # Overall win rate (all-time, based on closed positions only)
-        overall_win_rate = (total_wins / total_positions * 100) if total_positions > 0 else 0
-
-        # Overall ROI (all-time)
-        total_invested = total_invested_closed + total_invested_open
-        overall_roi = (overall_pnl / total_invested * 100) if total_invested > 0 else 0
-
-        # =====================================================================
-        # Calculate ALL-TIME volume from ALL trades
-        # =====================================================================
-        total_volume = 0
-        for trade in trades:
-            usd_value = float(trade.get("usdcSize") or 0)
-            if usd_value == 0:
-                size = float(trade.get("size") or 0)
-                price = float(trade.get("price") or 0)
-                usd_value = size * price
-            total_volume += usd_value
+                losses += 1
 
         return {
-            "total_positions": total_positions,
-            "active_positions": active_positions,
-            "total_wins": total_wins,
-            "total_losses": total_losses,
+            "count": len(closed_positions),
+            "realized_pnl": realized_pnl,
+            "wins": wins,
+            "losses": losses
+        }
+
+    def _group_into_trades(
+        self,
+        closed_positions: list[dict],
+        open_positions: list[dict]
+    ) -> list[dict]:
+        """
+        Group positions into trades.
+        - Same conditionId + different outcomes (hedging) = 1 trade
+        - Same conditionId + same outcome (re-entry) = separate trades
+        """
+        market_groups: dict[str, dict] = {}
+
+        # Process closed positions
+        for pos in closed_positions:
+            condition_id = pos.get("conditionId", "")
+            outcome = pos.get("outcome", "unknown")
+            pnl = float(pos.get("realizedPnl", 0))
+            size = float(pos.get("size", 0))
+            avg_price = float(pos.get("avgPrice", 0))
+            bought = size * avg_price
+
+            if condition_id not in market_groups:
+                market_groups[condition_id] = {"outcomes": {}}
+
+            if outcome not in market_groups[condition_id]["outcomes"]:
+                market_groups[condition_id]["outcomes"][outcome] = []
+
+            market_groups[condition_id]["outcomes"][outcome].append({
+                "pnl": pnl,
+                "bought": bought,
+                "is_resolved": True,
+                "resolved_at": pos.get("resolvedAt") or pos.get("timestamp")
+            })
+
+        # Process open positions
+        for pos in open_positions:
+            condition_id = pos.get("conditionId", "")
+            outcome = pos.get("outcome", "unknown")
+            pnl = float(pos.get("cashPnl", 0))
+            size = float(pos.get("size", 0))
+            avg_price = float(pos.get("avgPrice", 0))
+            bought = size * avg_price
+            current_value = float(pos.get("currentValue", 0))
+            is_resolved = current_value == 0
+
+            if condition_id not in market_groups:
+                market_groups[condition_id] = {"outcomes": {}}
+
+            if outcome not in market_groups[condition_id]["outcomes"]:
+                market_groups[condition_id]["outcomes"][outcome] = []
+
+            market_groups[condition_id]["outcomes"][outcome].append({
+                "pnl": pnl,
+                "bought": bought,
+                "is_resolved": is_resolved,
+                "resolved_at": None
+            })
+
+        # Convert to trades
+        trades = []
+        for condition_id, group in market_groups.items():
+            outcome_keys = list(group["outcomes"].keys())
+
+            if len(outcome_keys) > 1:
+                # Multiple outcomes (hedging) = 1 trade
+                total_pnl = 0
+                total_bought = 0
+                is_resolved = False
+                latest_resolved_at = None
+
+                for outcome, entries in group["outcomes"].items():
+                    for entry in entries:
+                        total_pnl += entry["pnl"]
+                        total_bought += entry["bought"]
+                        if entry["is_resolved"]:
+                            is_resolved = True
+                        if entry["resolved_at"]:
+                            if not latest_resolved_at or entry["resolved_at"] > latest_resolved_at:
+                                latest_resolved_at = entry["resolved_at"]
+
+                trades.append({
+                    "condition_id": condition_id,
+                    "total_pnl": total_pnl,
+                    "total_bought": total_bought,
+                    "is_resolved": is_resolved,
+                    "resolved_at": latest_resolved_at
+                })
+            else:
+                # Single outcome - each entry is a separate trade
+                outcome = outcome_keys[0]
+                for entry in group["outcomes"][outcome]:
+                    trades.append({
+                        "condition_id": condition_id,
+                        "total_pnl": entry["pnl"],
+                        "total_bought": entry["bought"],
+                        "is_resolved": entry["is_resolved"],
+                        "resolved_at": entry["resolved_at"]
+                    })
+
+        return trades
+
+    def _calculate_max_drawdown(
+        self,
+        closed_positions: list[dict],
+        initial_balance: float = 0
+    ) -> float:
+        """
+        Calculate max drawdown from closed positions.
+
+        Max Drawdown = (peak - trough) / peak * 100
+        Track portfolio balance over time based on realized P&L.
+        """
+        # Sort by resolution date
+        sorted_positions = sorted(
+            [p for p in closed_positions if p.get("resolvedAt") or p.get("timestamp")],
+            key=lambda p: p.get("resolvedAt") or p.get("timestamp") or ""
+        )
+
+        if not sorted_positions:
+            return 0
+
+        balance = initial_balance
+        max_balance = initial_balance
+        max_drawdown_pct = 0
+
+        for pos in sorted_positions:
+            pnl = float(pos.get("realizedPnl", 0))
+            balance += pnl
+
+            if balance > max_balance:
+                max_balance = balance
+
+            if max_balance > 0:
+                drawdown_pct = ((max_balance - balance) / max_balance) * 100
+                if drawdown_pct > max_drawdown_pct:
+                    max_drawdown_pct = drawdown_pct
+
+        return min(round(max_drawdown_pct * 100) / 100, 100)
+
+    def _calculate_metrics(
+        self,
+        positions: list[dict],
+        closed_positions: list[dict],
+        current_balance: float = 0
+    ) -> dict:
+        """
+        Calculate all metrics from positions data.
+
+        Trade counting:
+        - Same conditionId + different outcomes (hedging) = 1 trade
+        - Same conditionId + same outcome (re-entry) = separate trades
+
+        ROI calculation:
+        - Account ROI = Total PnL / Initial Balance * 100
+        - Initial Balance = Current Balance - Total PnL
+        """
+        trades = self._group_into_trades(closed_positions, positions)
+
+        realized_pnl = 0
+        unrealized_pnl = 0
+        total_bought = 0
+        win_count = 0
+        loss_count = 0
+        active_count = 0
+
+        for trade in trades:
+            if trade["is_resolved"]:
+                realized_pnl += trade["total_pnl"]
+                total_bought += trade["total_bought"]
+                if trade["total_pnl"] > 0:
+                    win_count += 1
+                else:
+                    loss_count += 1
+            else:
+                unrealized_pnl += trade["total_pnl"]
+                active_count += 1
+
+        total_pnl = realized_pnl + unrealized_pnl
+        trade_count = win_count + loss_count
+
+        # ROI = Total PnL / Total Capital Deployed (total_bought)
+        # This is more reliable than initial_balance which can be negative when users withdraw profits
+        roi_all = (total_pnl / total_bought * 100) if total_bought > 0 else 0
+
+        # Win rate from resolved trades
+        win_rate_all = (win_count / trade_count * 100) if trade_count > 0 else 0
+
+        # Calculate max drawdown
+        max_drawdown = self._calculate_max_drawdown(closed_positions, initial_balance)
+
+        # Count open positions
+        open_count = len([p for p in positions if float(p.get("currentValue", 0)) > 0])
+
+        return {
             "realized_pnl": round(realized_pnl, 2),
             "unrealized_pnl": round(unrealized_pnl, 2),
-            "overall_pnl": round(overall_pnl, 2),
-            "overall_roi": round(overall_roi, 2),
-            "overall_win_rate": round(overall_win_rate, 2),
-            "total_volume": round(total_volume, 2),
-            "total_trades": len(trades),
+            "total_pnl": round(total_pnl, 2),
+            "total_bought": round(total_bought, 2),
+            "roi_all": round(roi_all, 2),
+            "win_rate_all": round(win_rate_all, 2),
+            "win_count": win_count,
+            "loss_count": loss_count,
+            "trade_count": trade_count,
+            "active_count": active_count,
+            "open_count": open_count,
+            "closed_count": len(closed_positions),
+            "max_drawdown": max_drawdown,
+        }
+
+    def _calculate_period_metrics(
+        self,
+        closed_positions: list[dict],
+        days: int,
+        current_balance: float = 0
+    ) -> dict:
+        """Calculate metrics for a specific time period (7d, 30d)."""
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=days)
+        cutoff_ts = cutoff.timestamp()
+
+        # Filter positions resolved within the period
+        period_positions = []
+        for pos in closed_positions:
+            resolved_at = pos.get("resolvedAt") or pos.get("timestamp")
+            if resolved_at:
+                try:
+                    if isinstance(resolved_at, (int, float)):
+                        resolved_ts = resolved_at / 1000 if resolved_at > 4102444800 else resolved_at
+                    else:
+                        resolved_ts = datetime.fromisoformat(
+                            str(resolved_at).replace("Z", "+00:00")
+                        ).timestamp()
+
+                    if resolved_ts >= cutoff_ts:
+                        period_positions.append(pos)
+                except Exception:
+                    pass
+
+        if not period_positions:
+            return {
+                "pnl": 0, "roi": 0, "volume": 0,
+                "trade_count": 0, "win_rate": 0, "drawdown": 0
+            }
+
+        # Calculate PnL
+        pnl = sum(float(p.get("realizedPnl", 0)) for p in period_positions)
+
+        # Calculate volume
+        volume = sum(
+            float(p.get("size", 0)) * float(p.get("avgPrice", 0))
+            for p in period_positions
+        )
+
+        # Calculate win rate
+        wins = sum(1 for p in period_positions if float(p.get("realizedPnl", 0)) > 0)
+        win_rate = (wins / len(period_positions) * 100) if period_positions else 0
+
+        # Calculate ROI for period = Period PnL / Period Volume (capital deployed)
+        roi = (pnl / volume * 100) if volume > 0 else 0
+
+        # Calculate drawdown for period
+        total_pnl = sum(float(p.get("realizedPnl", 0)) for p in closed_positions)
+        initial_balance = max(current_balance - total_pnl, 1)  # Ensure positive for drawdown calc
+        drawdown = self._calculate_max_drawdown(period_positions, initial_balance)
+
+        return {
+            "pnl": round(pnl, 2),
+            "roi": round(roi, 2),
+            "volume": round(volume, 2),
+            "trade_count": len(period_positions),
+            "win_rate": round(win_rate, 2),
+            "drawdown": drawdown,
         }
 
     def refresh_cache(self, address: str) -> None:
@@ -639,8 +629,8 @@ class WalletDiscoveryProcessor:
             "known_wallets": len(self._known_wallets),
             "pending_wallets": len(self._pending_wallets),
             "queue_size": self._queue.qsize(),
-            "wallets_discovered": self._wallets_discovered,  # Total $100+ trades seen
-            "wallets_processed": self._wallets_processed,    # Actually analyzed
+            "wallets_discovered": self._wallets_discovered,
+            "wallets_processed": self._wallets_processed,
             "trades_stored": self._trades_stored,
             "errors": self._errors,
         }

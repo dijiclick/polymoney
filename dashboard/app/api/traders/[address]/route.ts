@@ -446,13 +446,12 @@ function calculatePeriodMetrics(
   const wins = periodPositions.filter(p => p.realizedPnl > 0).length
   const winRate = periodPositions.length > 0 ? (wins / periodPositions.length) * 100 : 0
 
-  // Calculate ROI for period
-  // Use Account ROI formula: PnL / Initial Balance
-  const totalPnl = closedPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
-  const initialBalance = currentBalance - totalPnl
-  const roi = initialBalance > 0 ? (pnl / initialBalance) * 100 : 0
+  // ROI = Period PnL / Period Volume (capital deployed in this period)
+  const roi = volume > 0 ? (pnl / volume) * 100 : 0
 
   // Calculate drawdown for period
+  const totalPnl = closedPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
+  const initialBalance = Math.max(currentBalance - totalPnl, 1) // Ensure positive for drawdown calc
   const drawdown = calculateMaxDrawdown(periodPositions, initialBalance)
 
   return {
@@ -577,16 +576,15 @@ function calculatePolymarketMetrics(
   const totalPnl = realizedPnl + unrealizedPnl
   const tradeCount = winCount + lossCount
 
-  // Calculate Account ROI: Total PnL / Initial Balance * 100
-  // Initial Balance = Current Balance - Total PnL
-  const initialBalance = currentBalance - totalPnl
-  const roiAll = initialBalance > 0 ? (totalPnl / initialBalance) * 100 : 0
+  // ROI = Total PnL / Total Capital Deployed (totalBoughtResolved)
+  // More reliable than initialBalance which can be negative when users withdraw profits
+  const roiAll = totalBoughtResolved > 0 ? (totalPnl / totalBoughtResolved) * 100 : 0
 
   // Win rate from resolved trades
   const winRateAll = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0
 
   // Calculate max drawdown from closed positions
-  // Track balance over time: initial balance + cumulative realized P&L
+  const initialBalance = Math.max(currentBalance - totalPnl, 1) // Ensure positive for drawdown calc
   const maxDrawdown = calculateMaxDrawdown(closedPositions, initialBalance)
 
   return {
