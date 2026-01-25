@@ -1,7 +1,8 @@
-"""Polymarket Data API client."""
+"""Polymarket Data API client with per-endpoint rate limiting."""
 
 import asyncio
 import logging
+import time
 from typing import Optional
 from datetime import datetime
 
@@ -12,21 +13,72 @@ from ..config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Parallel fetching settings - SAFE (avoids Cloudflare rate limits)
+# Page size for pagination
 PAGE_SIZE = 50
-PARALLEL_BATCH_SIZE = 10  # Fetch 10 pages at once (500 items per batch)
+
+# Per-endpoint rate limits (requests per second)
+# Polymarket limits: positions=15/s, closed-positions=15/s, general=100/s
+# We use conservative values below the limits
+ENDPOINT_RATE_LIMITS = {
+    "positions": 10,        # 10 req/s (limit: 15)
+    "closed-positions": 10, # 10 req/s (limit: 15)
+    "activity": 30,         # 30 req/s (limit: 100)
+    "value": 30,            # 30 req/s (limit: 100)
+    "trades": 30,           # 30 req/s (limit: 100)
+}
+
+# Batch sizes per endpoint (how many parallel requests)
+ENDPOINT_BATCH_SIZES = {
+    "positions": 5,         # 5 parallel = 0.5s per batch at 10 req/s
+    "closed-positions": 5,  # 5 parallel = 0.5s per batch at 10 req/s
+    "activity": 10,         # 10 parallel = 0.33s per batch at 30 req/s
+}
+
+
+class EndpointRateLimiter:
+    """Per-endpoint rate limiter using token bucket algorithm."""
+
+    def __init__(self, rate: float):
+        """
+        Args:
+            rate: Maximum requests per second
+        """
+        self.rate = rate
+        self.tokens = rate
+        self.last_update = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self):
+        """Wait until a request can be made."""
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self.last_update
+            self.tokens = min(self.rate, self.tokens + elapsed * self.rate)
+            self.last_update = now
+
+            if self.tokens < 1:
+                wait_time = (1 - self.tokens) / self.rate
+                await asyncio.sleep(wait_time)
+                self.tokens = 0
+            else:
+                self.tokens -= 1
 
 
 class PolymarketDataAPI:
-    """Client for Polymarket Data API."""
+    """Client for Polymarket Data API with per-endpoint rate limiting."""
 
     def __init__(self):
         self.settings = get_settings()
         self.base_url = self.settings.api.polymarket.base_url
-        self.rate_limit = self.settings.api.polymarket.rate_limit
         self._session: Optional[aiohttp.ClientSession] = None
-        self._request_count = 0
-        self._last_request_time = datetime.now()
+
+        # Per-endpoint rate limiters
+        self._rate_limiters: dict[str, EndpointRateLimiter] = {}
+        for endpoint, rate in ENDPOINT_RATE_LIMITS.items():
+            self._rate_limiters[endpoint] = EndpointRateLimiter(rate)
+
+        # Default rate limiter for unknown endpoints
+        self._default_limiter = EndpointRateLimiter(30)
 
     async def __aenter__(self):
         self._session = aiohttp.ClientSession()
@@ -41,35 +93,40 @@ class PolymarketDataAPI:
         if not self._session:
             self._session = aiohttp.ClientSession()
 
-    async def _rate_limit_wait(self):
-        """Wait to respect rate limits."""
-        self._request_count += 1
-        if self._request_count >= self.rate_limit:
-            elapsed = (datetime.now() - self._last_request_time).total_seconds()
-            if elapsed < 60:
-                wait_time = 60 - elapsed
-                logger.debug(f"Rate limit reached, waiting {wait_time:.1f}s")
-                await asyncio.sleep(wait_time)
-            self._request_count = 0
-            self._last_request_time = datetime.now()
+    def _get_rate_limiter(self, endpoint: str) -> EndpointRateLimiter:
+        """Get the rate limiter for an endpoint."""
+        return self._rate_limiters.get(endpoint, self._default_limiter)
+
+    def _get_batch_size(self, endpoint: str) -> int:
+        """Get the batch size for an endpoint."""
+        return ENDPOINT_BATCH_SIZES.get(endpoint, 5)
 
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10)
+        wait=wait_exponential(multiplier=1, min=2, max=30)
     )
     async def _get(self, endpoint: str, params: Optional[dict] = None) -> dict | list:
-        """Make a GET request to the API."""
+        """Make a GET request to the API with rate limiting."""
         await self._ensure_session()
-        await self._rate_limit_wait()
+
+        # Apply per-endpoint rate limiting
+        limiter = self._get_rate_limiter(endpoint)
+        await limiter.acquire()
 
         url = f"{self.base_url}/{endpoint}"
 
         async with self._session.get(url, params=params) as response:
             if response.status == 404:
                 return []
+            if response.status == 429:
+                # Rate limited - wait and retry
+                retry_after = int(response.headers.get("Retry-After", 10))
+                logger.warning(f"Rate limited on {endpoint}, waiting {retry_after}s")
+                await asyncio.sleep(retry_after)
+                raise Exception(f"Rate limited: {response.status}")
             if response.status != 200:
                 text = await response.text()
-                logger.error(f"API error: {response.status} - {text}")
+                logger.error(f"API error on {endpoint}: {response.status}")
                 raise Exception(f"API error: {response.status}")
 
             return await response.json()
@@ -85,7 +142,7 @@ class PolymarketDataAPI:
                 return result, True
             return [], True
         except Exception as e:
-            logger.debug(f"Page fetch failed: {e}")
+            logger.debug(f"Page fetch failed for {endpoint}: {e}")
             return [], False
 
     async def _fetch_all_pages(
@@ -95,20 +152,18 @@ class PolymarketDataAPI:
         page_size: int = PAGE_SIZE
     ) -> list[dict]:
         """
-        Fetch all pages of data using parallel batch fetching.
+        Fetch all pages of data using rate-limited parallel batching.
 
-        Strategy:
-        1. Fetch first batch of pages in parallel
-        2. If any page returns data, fetch more batches
-        3. Stop when a batch returns all empty pages
+        Uses endpoint-specific batch sizes to respect rate limits.
         """
         all_data = []
         offset = 0
+        batch_size = self._get_batch_size(endpoint)
 
         while True:
             # Create batch of page requests
             batch_tasks = []
-            for i in range(PARALLEL_BATCH_SIZE):
+            for i in range(batch_size):
                 params = {**base_params, "limit": page_size, "offset": offset + (i * page_size)}
                 batch_tasks.append(self._fetch_page(endpoint, params))
 
@@ -126,9 +181,9 @@ class PolymarketDataAPI:
             if not batch_has_data:
                 break
 
-            offset += PARALLEL_BATCH_SIZE * page_size
+            offset += batch_size * page_size
 
-            # Safety limit: max 100 batches (50,000 items)
+            # Safety limit: max 200 batches (10,000 items for batch_size=5)
             if offset >= 50000:
                 logger.warning(f"Hit safety limit for {endpoint}")
                 break
@@ -136,14 +191,15 @@ class PolymarketDataAPI:
         return all_data
 
     # =========================================================================
-    # Profile Endpoint (Gamma API)
+    # Profile Endpoint (Gamma API - separate rate limit)
     # =========================================================================
 
     async def get_profile(self, address: str) -> dict:
         """Get a trader's public profile from Gamma API."""
         try:
             await self._ensure_session()
-            await self._rate_limit_wait()
+            # Gamma API has its own rate limits, use default limiter
+            await self._default_limiter.acquire()
 
             url = f"https://gamma-api.polymarket.com/public-profile"
             async with self._session.get(url, params={"address": address}) as response:
@@ -221,7 +277,7 @@ class PolymarketDataAPI:
     async def get_multiple_portfolio_values(
         self,
         addresses: list[str],
-        concurrency: int = 10
+        concurrency: int = 5
     ) -> dict[str, float]:
         """Get portfolio values for multiple addresses concurrently."""
         results = {}
@@ -237,7 +293,7 @@ class PolymarketDataAPI:
         return results
 
     async def get_full_trader_data(self, address: str) -> dict:
-        """Get all data for a single trader."""
+        """Get all data for a single trader (sequential to respect rate limits)."""
         portfolio_value = await self.get_portfolio_value(address)
         positions = await self.get_positions(address)
         closed_positions = await self.get_closed_positions(address)
