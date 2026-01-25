@@ -64,56 +64,175 @@ export async function getPortfolioValue(address: string): Promise<number> {
 }
 
 /**
- * Get a trader's open positions
+ * Get a trader's open positions with pagination
+ * API has a hard cap of 50 per request, so we paginate through all results
  */
-export async function getPositions(address: string): Promise<RawPolymarketPosition[]> {
+export async function getPositions(address: string, maxPositions: number = 10000): Promise<RawPolymarketPosition[]> {
+  const PAGE_SIZE = 50 // API hard cap
+  const allPositions: RawPolymarketPosition[] = []
+  let offset = 0
+
   try {
-    const response = await fetch(`${DATA_API_BASE}/positions?user=${address}`)
-    if (!response.ok) {
-      if (response.status === 404) return []
-      throw new Error(`API error: ${response.status}`)
+    while (offset < maxPositions) {
+      const response = await fetch(
+        `${DATA_API_BASE}/positions?user=${address}&limit=${PAGE_SIZE}&offset=${offset}`
+      )
+      if (!response.ok) {
+        if (response.status === 404) return allPositions
+        throw new Error(`API error: ${response.status}`)
+      }
+      const data = await response.json()
+      const positions = Array.isArray(data) ? data : []
+
+      if (positions.length === 0) break
+
+      allPositions.push(...positions)
+
+      // If we got less than PAGE_SIZE, we've reached the end
+      if (positions.length < PAGE_SIZE) break
+
+      offset += PAGE_SIZE
     }
-    const data = await response.json()
-    return Array.isArray(data) ? data : []
+
+    return allPositions
   } catch (error) {
     console.error(`Error getting positions for ${address}:`, error)
-    return []
+    return allPositions // Return what we have so far
   }
 }
 
 /**
- * Get a trader's closed/resolved positions
+ * Get a trader's closed/resolved positions with pagination
+ * API has a hard cap of 50 per request, so we paginate through all results
+ * @param address - Wallet address
+ * @param maxPositions - Maximum positions to fetch (default 10000)
+ * @param days - Only include positions from last N days (default 30)
  */
-export async function getClosedPositions(address: string): Promise<RawPolymarketClosedPosition[]> {
+export async function getClosedPositions(
+  address: string,
+  maxPositions: number = 10000,
+  days: number = 30
+): Promise<RawPolymarketClosedPosition[]> {
+  const PAGE_SIZE = 50 // API hard cap
+  const allPositions: RawPolymarketClosedPosition[] = []
+  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000
+  let offset = 0
+  let reachedOldData = false
+
   try {
-    const response = await fetch(`${DATA_API_BASE}/closed-positions?user=${address}`)
-    if (!response.ok) {
-      if (response.status === 404) return []
-      throw new Error(`API error: ${response.status}`)
+    while (offset < maxPositions && !reachedOldData) {
+      const response = await fetch(
+        `${DATA_API_BASE}/closed-positions?user=${address}&limit=${PAGE_SIZE}&offset=${offset}`
+      )
+      if (!response.ok) {
+        if (response.status === 404) return allPositions
+        throw new Error(`API error: ${response.status}`)
+      }
+      const data = await response.json()
+      const positions = Array.isArray(data) ? data : []
+
+      if (positions.length === 0) break
+
+      // Filter positions by date and check if we've gone past the cutoff
+      for (const pos of positions) {
+        // Get timestamp from various possible fields
+        let posTime = 0
+        if (pos.timestamp) {
+          posTime = typeof pos.timestamp === 'number' ? pos.timestamp * 1000 : new Date(pos.timestamp).getTime()
+        } else if (pos.resolvedAt) {
+          posTime = new Date(pos.resolvedAt).getTime()
+        } else if (pos.endDate) {
+          posTime = new Date(pos.endDate).getTime()
+        }
+
+        // If position is within date range, include it
+        if (posTime >= cutoffMs || posTime === 0) {
+          allPositions.push(pos)
+        }
+
+        // Check if we've reached data older than cutoff (API returns sorted by date desc)
+        if (posTime > 0 && posTime < cutoffMs) {
+          reachedOldData = true
+        }
+      }
+
+      // If we got less than PAGE_SIZE, we've reached the end
+      if (positions.length < PAGE_SIZE) break
+
+      offset += PAGE_SIZE
+
+      // Safety check: stop if we have enough positions
+      if (allPositions.length >= maxPositions) break
     }
-    const data = await response.json()
-    return Array.isArray(data) ? data : []
+
+    return allPositions.slice(0, maxPositions)
   } catch (error) {
     console.error(`Error getting closed positions for ${address}:`, error)
-    return []
+    return allPositions // Return what we have so far
   }
 }
 
 /**
- * Get a trader's activity history
+ * Get a trader's activity history with pagination
+ * API has a hard cap of 50 per request, so we paginate through all results
+ * @param address - Wallet address
+ * @param maxActivities - Maximum activities to fetch (default 10000)
+ * @param days - Only include activities from last N days (default 30)
  */
-export async function getActivity(address: string): Promise<unknown[]> {
+export async function getActivity(
+  address: string,
+  maxActivities: number = 10000,
+  days: number = 30
+): Promise<unknown[]> {
+  const PAGE_SIZE = 50 // API hard cap
+  const allActivities: unknown[] = []
+  const cutoffTimestamp = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000) // In seconds
+  let offset = 0
+  let reachedOldData = false
+
   try {
-    const response = await fetch(`${DATA_API_BASE}/activity?user=${address}`)
-    if (!response.ok) {
-      if (response.status === 404) return []
-      throw new Error(`API error: ${response.status}`)
+    while (offset < maxActivities && !reachedOldData) {
+      const response = await fetch(
+        `${DATA_API_BASE}/activity?user=${address}&limit=${PAGE_SIZE}&offset=${offset}`
+      )
+      if (!response.ok) {
+        if (response.status === 404) return allActivities
+        throw new Error(`API error: ${response.status}`)
+      }
+      const data = await response.json()
+      const activities = Array.isArray(data) ? data : []
+
+      if (activities.length === 0) break
+
+      // Filter activities by date (timestamp is in seconds)
+      for (const activity of activities) {
+        const activityData = activity as { timestamp?: number }
+        const activityTime = activityData.timestamp || 0
+
+        // If activity is within date range, include it
+        if (activityTime >= cutoffTimestamp || activityTime === 0) {
+          allActivities.push(activity)
+        }
+
+        // Check if we've reached data older than cutoff (API returns sorted by date desc)
+        if (activityTime > 0 && activityTime < cutoffTimestamp) {
+          reachedOldData = true
+        }
+      }
+
+      // If we got less than PAGE_SIZE, we've reached the end
+      if (activities.length < PAGE_SIZE) break
+
+      offset += PAGE_SIZE
+
+      // Safety check: stop if we have enough activities
+      if (allActivities.length >= maxActivities) break
     }
-    const data = await response.json()
-    return Array.isArray(data) ? data : []
+
+    return allActivities.slice(0, maxActivities)
   } catch (error) {
     console.error(`Error getting activity for ${address}:`, error)
-    return []
+    return allActivities // Return what we have so far
   }
 }
 

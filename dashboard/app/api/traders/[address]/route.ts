@@ -7,7 +7,6 @@ import {
   parseClosedPositions,
   isValidEthAddress,
 } from '@/lib/polymarket-api'
-import { getTraderMetrics as getGoldskyMetrics, GoldskyMetrics } from '@/lib/goldsky-api'
 import { TraderProfileResponse, TraderFetchError, TimePeriodMetrics } from '@/lib/types/trader'
 
 // Cache duration: 5 minutes
@@ -106,18 +105,15 @@ export async function GET(
       scores: undefined,
       isNewlyFetched: false,
       lastUpdatedAt: dbWallet.metrics_updated_at,
-      goldskyEnhanced: true, // Cached data comes from Goldsky
+      goldskyEnhanced: false,
     }
 
     return NextResponse.json(response)
   }
 
-  // 5. Fetch live data: Goldsky for trade metrics, Polymarket for positions only
+  // 5. Fetch live data from Polymarket API
   try {
-    // Goldsky: Trade metrics (volume, trades, PnL, win rate, drawdown)
-    // Polymarket API: Only positions (open and closed)
-    const [goldskyMetrics, rawPositions, rawClosedPositions] = await Promise.all([
-      getGoldskyMetrics(address, 30),
+    const [rawPositions, rawClosedPositions] = await Promise.all([
       getPositions(address).catch(() => []),
       getClosedPositions(address).catch(() => []),
     ])
@@ -161,35 +157,28 @@ export async function GET(
 
     console.log(`[${address}] Open: ${openPositions.length}, Closed: ${closedPositions.length}`)
 
-    // Calculate ROI from Polymarket closed positions data (matches Polymarket's calculation)
-    // ROI = realizedPnl / totalBought * 100
-    const polymarketMetrics = calculatePolymarketMetrics(closedPositions, allPositions)
+    // Get current balance for ROI calculation
+    const currentBalance = dbWallet?.balance || 0
 
-    // Build metrics from Goldsky data (includes ROI and drawdown for each period)
-    const metrics7d: TimePeriodMetrics = {
-      pnl: goldskyMetrics.pnl7d,
-      roi: goldskyMetrics.roi7d,
-      volume: goldskyMetrics.volume7d,
-      tradeCount: goldskyMetrics.tradeCount7d,
-      winRate: goldskyMetrics.winRate7d,
-      drawdown: goldskyMetrics.drawdown7d,
-    }
+    // Calculate all metrics from Polymarket positions data
+    // Trade counting: hedged positions (same market, different outcomes) = 1 trade
+    // ROI = Account ROI = Total PnL / Initial Balance
+    // Max Drawdown = calculated from closed positions chronologically
+    const polymarketMetrics = calculatePolymarketMetrics(closedPositions, allPositions, currentBalance)
 
-    const metrics30d: TimePeriodMetrics = {
-      pnl: goldskyMetrics.pnl30d,
-      roi: goldskyMetrics.roi30d,
-      volume: goldskyMetrics.volume30d,
-      tradeCount: goldskyMetrics.tradeCount30d,
-      winRate: goldskyMetrics.winRate30d,
-      drawdown: goldskyMetrics.drawdown30d,
-    }
+    // Calculate period-based metrics (7d and 30d) from closed positions
+    const metrics7d = calculatePeriodMetrics(closedPositions, 7, currentBalance)
+    const metrics30d = calculatePeriodMetrics(closedPositions, 30, currentBalance)
 
     // 6. Update wallets table with fresh data (if wallet exists)
     if (dbWallet) {
-      updateWalletMetrics(address, goldskyMetrics, polymarketMetrics, openPositions.length, closedPositions.length)
+      updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, openPositions.length, closedPositions.length)
     }
 
-    // 7. Build response - positions from Polymarket, metrics from Goldsky/calculated
+    // Count unique markets
+    const uniqueMarkets = new Set(closedPositions.map(p => p.conditionId)).size
+
+    // 7. Build response - all metrics from Polymarket
     const response: TraderProfileResponse = {
       source: dbWallet ? 'mixed' : 'live',
       dataFreshness: 'fresh',
@@ -203,34 +192,32 @@ export async function GET(
       trades: [],
       metrics: {
         portfolioValue: dbWallet?.balance || 0,
-        // Use Polymarket calculated PnL (matches their UI)
         totalPnl: polymarketMetrics.totalPnl,
         unrealizedPnl: polymarketMetrics.unrealizedPnl,
         realizedPnl: polymarketMetrics.realizedPnl,
         metrics7d,
         metrics30d,
         avgTradeIntervalHours: 0,
-        activePositions: openPositions.length, // Use Polymarket API count, not Goldsky
-        winRate30d: goldskyMetrics.winRate30d,
-        // Use Polymarket calculated win rate and ROI (matches their UI)
+        activePositions: openPositions.length,
+        winRate30d: metrics30d.winRate,
         winRateAllTime: polymarketMetrics.winRateAll,
         roiPercent: polymarketMetrics.roiAll,
-        tradeCount30d: goldskyMetrics.tradeCount30d,
-        tradeCountAllTime: goldskyMetrics.tradeCount30d, // Use 30d as proxy
-        uniqueMarkets30d: goldskyMetrics.uniqueMarkets,
+        tradeCount30d: metrics30d.tradeCount,
+        tradeCountAllTime: polymarketMetrics.tradeCount,
+        uniqueMarkets30d: uniqueMarkets,
         accountAgeDays: undefined,
         positionConcentration: 0,
         maxPositionSize: 0,
         avgPositionSize: 0,
-        totalPositions: closedPositions.length + openPositions.length, // Use actual counts
-        maxDrawdown: goldskyMetrics.drawdown30d,
-        tradeFrequency: goldskyMetrics.tradeCount30d / 30,
+        totalPositions: closedPositions.length + openPositions.length,
+        maxDrawdown: polymarketMetrics.maxDrawdown,
+        tradeFrequency: metrics30d.tradeCount / 30,
         nightTradeRatio: 0,
       },
       scores: undefined,
       isNewlyFetched: true,
       lastUpdatedAt: new Date().toISOString(),
-      goldskyEnhanced: true,
+      goldskyEnhanced: false,
     }
 
     return NextResponse.json(response)
@@ -296,7 +283,7 @@ export async function GET(
         isNewlyFetched: false,
         lastUpdatedAt: dbWallet.metrics_updated_at,
         warning: 'Live data unavailable, showing cached data',
-        goldskyEnhanced: true,
+        goldskyEnhanced: false,
       }
 
       return NextResponse.json(response)
@@ -313,12 +300,239 @@ export async function GET(
 }
 
 /**
- * Calculate metrics from Polymarket positions data (matches Polymarket's ROI calculation)
- * ROI = realizedPnl / totalBought * 100
+ * Trade counting logic:
+ * - Same conditionId + different outcomes (hedging) = 1 trade
+ * - Same conditionId + same outcome (re-entry) = multiple trades
+ *
+ * A "trade" is a complete position cycle. Simultaneous hedged positions count as 1 trade.
+ */
+interface Trade {
+  conditionId: string
+  totalPnl: number
+  totalBought: number
+  isResolved: boolean
+  outcomes: Set<string> // Track unique outcomes for this trade
+}
+
+/**
+ * Group positions into trades
+ * - Positions with same conditionId and different outcomes are hedged (1 trade)
+ * - Positions with same conditionId and same outcome are re-entries (separate trades)
+ */
+function groupPositionsIntoTrades(
+  closedPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; realizedPnl: number }[],
+  openPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; cashPnl: number; currentValue: number }[]
+): Trade[] {
+  // First, group by conditionId
+  const marketGroups = new Map<string, {
+    outcomes: Map<string, { pnl: number; bought: number; isResolved: boolean }[]>
+  }>()
+
+  // Process closed positions
+  for (const pos of closedPositions) {
+    const outcome = pos.outcome || 'unknown'
+    if (!marketGroups.has(pos.conditionId)) {
+      marketGroups.set(pos.conditionId, { outcomes: new Map() })
+    }
+    const group = marketGroups.get(pos.conditionId)!
+    if (!group.outcomes.has(outcome)) {
+      group.outcomes.set(outcome, [])
+    }
+    group.outcomes.get(outcome)!.push({
+      pnl: pos.realizedPnl,
+      bought: pos.size * pos.avgPrice,
+      isResolved: true,
+    })
+  }
+
+  // Process open positions
+  for (const pos of openPositions) {
+    const outcome = pos.outcome || 'unknown'
+    const isResolvedNotRedeemed = pos.currentValue === 0
+    if (!marketGroups.has(pos.conditionId)) {
+      marketGroups.set(pos.conditionId, { outcomes: new Map() })
+    }
+    const group = marketGroups.get(pos.conditionId)!
+    if (!group.outcomes.has(outcome)) {
+      group.outcomes.set(outcome, [])
+    }
+    group.outcomes.get(outcome)!.push({
+      pnl: pos.cashPnl,
+      bought: pos.size * pos.avgPrice,
+      isResolved: isResolvedNotRedeemed,
+    })
+  }
+
+  // Now convert to trades
+  const trades: Trade[] = []
+
+  for (const [conditionId, group] of marketGroups) {
+    const outcomeKeys = Array.from(group.outcomes.keys())
+
+    if (outcomeKeys.length > 1) {
+      // Multiple outcomes (hedging) = 1 trade with combined PnL
+      let totalPnl = 0
+      let totalBought = 0
+      let isResolved = false
+      const outcomes = new Set<string>()
+
+      for (const [outcome, entries] of group.outcomes) {
+        outcomes.add(outcome)
+        for (const entry of entries) {
+          totalPnl += entry.pnl
+          totalBought += entry.bought
+          if (entry.isResolved) isResolved = true
+        }
+      }
+
+      trades.push({ conditionId, totalPnl, totalBought, isResolved, outcomes })
+    } else {
+      // Single outcome - each entry is a separate trade (could be re-entries)
+      const outcome = outcomeKeys[0]
+      const entries = group.outcomes.get(outcome)!
+
+      for (const entry of entries) {
+        trades.push({
+          conditionId,
+          totalPnl: entry.pnl,
+          totalBought: entry.bought,
+          isResolved: entry.isResolved,
+          outcomes: new Set([outcome]),
+        })
+      }
+    }
+  }
+
+  return trades
+}
+
+/**
+ * Calculate period-based metrics (7d, 30d) from closed positions
+ * Filters positions by resolvedAt date and calculates metrics for that period
+ */
+function calculatePeriodMetrics(
+  closedPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; realizedPnl: number; isWin: boolean; resolvedAt?: string }[],
+  days: number,
+  currentBalance: number = 0
+): TimePeriodMetrics {
+  const cutoffDate = new Date()
+  cutoffDate.setDate(cutoffDate.getDate() - days)
+  const cutoffMs = cutoffDate.getTime()
+
+  // Filter positions resolved within the period
+  const periodPositions = closedPositions.filter(p => {
+    if (!p.resolvedAt) return false
+    return new Date(p.resolvedAt).getTime() >= cutoffMs
+  })
+
+  if (periodPositions.length === 0) {
+    return {
+      pnl: 0,
+      roi: 0,
+      volume: 0,
+      tradeCount: 0,
+      winRate: 0,
+      drawdown: 0,
+    }
+  }
+
+  // Calculate PnL
+  const pnl = periodPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
+
+  // Calculate volume (total bought)
+  const volume = periodPositions.reduce((sum, p) => sum + (p.size * p.avgPrice), 0)
+
+  // Calculate win rate
+  const wins = periodPositions.filter(p => p.realizedPnl > 0).length
+  const winRate = periodPositions.length > 0 ? (wins / periodPositions.length) * 100 : 0
+
+  // Calculate ROI for period
+  // Use Account ROI formula: PnL / Initial Balance
+  const totalPnl = closedPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
+  const initialBalance = currentBalance - totalPnl
+  const roi = initialBalance > 0 ? (pnl / initialBalance) * 100 : 0
+
+  // Calculate drawdown for period
+  const drawdown = calculateMaxDrawdown(periodPositions, initialBalance)
+
+  return {
+    pnl: Math.round(pnl * 100) / 100,
+    roi: Math.round(roi * 100) / 100,
+    volume: Math.round(volume * 100) / 100,
+    tradeCount: periodPositions.length,
+    winRate: Math.round(winRate * 100) / 100,
+    drawdown,
+  }
+}
+
+/**
+ * Calculate max drawdown from closed positions
+ *
+ * Max Drawdown = highest (maxBalance - currentBalance) / maxBalance * 100
+ *
+ * We track portfolio balance over time:
+ * 1. Start with initial balance
+ * 2. As each position resolves, add its realized P&L to balance
+ * 3. Track max balance seen so far
+ * 4. Calculate drawdown when balance drops below max
+ * 5. Return the maximum drawdown percentage
+ *
+ * @param closedPositions - Array of closed positions with realizedPnl and resolvedAt
+ * @param initialBalance - Starting balance
+ */
+function calculateMaxDrawdown(
+  closedPositions: { realizedPnl: number; resolvedAt?: string }[],
+  initialBalance: number = 0
+): number {
+  // Sort positions by resolution date chronologically
+  const sortedPositions = [...closedPositions]
+    .filter(p => p.resolvedAt)
+    .sort((a, b) => new Date(a.resolvedAt!).getTime() - new Date(b.resolvedAt!).getTime())
+
+  if (sortedPositions.length === 0) return 0
+
+  // Track running balance and max balance
+  let balance = initialBalance
+  let maxBalance = initialBalance
+  let maxDrawdownPercent = 0
+
+  for (const position of sortedPositions) {
+    // Add realized P&L to balance
+    balance += position.realizedPnl
+
+    // Update max balance if we hit a new high
+    if (balance > maxBalance) {
+      maxBalance = balance
+    }
+
+    // Calculate current drawdown from max
+    if (maxBalance > 0) {
+      const drawdownPercent = ((maxBalance - balance) / maxBalance) * 100
+      if (drawdownPercent > maxDrawdownPercent) {
+        maxDrawdownPercent = drawdownPercent
+      }
+    }
+  }
+
+  // Cap at 100%
+  return Math.min(Math.round(maxDrawdownPercent * 100) / 100, 100)
+}
+
+/**
+ * Calculate metrics from Polymarket positions data
+ *
+ * Trade counting:
+ * - Same conditionId + different outcomes (hedging) = 1 trade
+ * - Same conditionId + same outcome (re-entry) = separate trades
+ *
+ * ROI calculation:
+ * - Account ROI = Total PnL / Initial Balance * 100
+ * - Initial Balance = Current Balance - Total PnL (estimated from portfolio value)
  */
 function calculatePolymarketMetrics(
-  closedPositions: { size: number; avgPrice: number; realizedPnl: number; isWin: boolean }[],
-  allPositions: { size: number; avgPrice: number; cashPnl: number; currentValue: number }[]
+  closedPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; realizedPnl: number; isWin: boolean; resolvedAt?: string }[],
+  allPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; cashPnl: number; currentValue: number }[],
+  currentBalance: number = 0
 ): {
   realizedPnl: number
   unrealizedPnl: number
@@ -328,87 +542,108 @@ function calculatePolymarketMetrics(
   winRateAll: number
   winCount: number
   lossCount: number
+  tradeCount: number
+  activeTradeCount: number
+  maxDrawdown: number
 } {
-  // Calculate total realized PnL and total bought from closed positions
+  // Group positions into trades
+  const trades = groupPositionsIntoTrades(closedPositions, allPositions)
+
+  // Calculate metrics from trades
   let realizedPnl = 0
-  let totalBoughtClosed = 0
+  let unrealizedPnl = 0
+  let totalBoughtResolved = 0
   let winCount = 0
   let lossCount = 0
+  let activeTradeCount = 0
 
-  for (const pos of closedPositions) {
-    realizedPnl += pos.realizedPnl
-    totalBoughtClosed += pos.size * pos.avgPrice // Initial investment
-    if (pos.isWin) {
-      winCount++
+  for (const trade of trades) {
+    if (trade.isResolved) {
+      // Resolved trade: count in win rate and ROI
+      realizedPnl += trade.totalPnl
+      totalBoughtResolved += trade.totalBought
+      if (trade.totalPnl > 0) {
+        winCount++
+      } else {
+        lossCount++
+      }
     } else {
-      lossCount++
-    }
-  }
-
-  // Calculate unrealized PnL from open positions
-  let unrealizedPnl = 0
-  for (const pos of allPositions) {
-    if (pos.currentValue > 0) {
-      unrealizedPnl += pos.cashPnl
+      // Active trade: track separately, don't count in win rate
+      unrealizedPnl += trade.totalPnl
+      activeTradeCount++
     }
   }
 
   const totalPnl = realizedPnl + unrealizedPnl
+  const tradeCount = winCount + lossCount
 
-  // Calculate ROI: realizedPnl / totalBought * 100 (matches Polymarket's calculation)
-  const roiAll = totalBoughtClosed > 0 ? (realizedPnl / totalBoughtClosed) * 100 : 0
+  // Calculate Account ROI: Total PnL / Initial Balance * 100
+  // Initial Balance = Current Balance - Total PnL
+  const initialBalance = currentBalance - totalPnl
+  const roiAll = initialBalance > 0 ? (totalPnl / initialBalance) * 100 : 0
 
-  // Win rate from closed positions
-  const totalClosed = winCount + lossCount
-  const winRateAll = totalClosed > 0 ? (winCount / totalClosed) * 100 : 0
+  // Win rate from resolved trades
+  const winRateAll = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0
+
+  // Calculate max drawdown from closed positions
+  // Track balance over time: initial balance + cumulative realized P&L
+  const maxDrawdown = calculateMaxDrawdown(closedPositions, initialBalance)
 
   return {
     realizedPnl: Math.round(realizedPnl * 100) / 100,
     unrealizedPnl: Math.round(unrealizedPnl * 100) / 100,
     totalPnl: Math.round(totalPnl * 100) / 100,
-    totalBought: Math.round(totalBoughtClosed * 100) / 100,
+    totalBought: Math.round(totalBoughtResolved * 100) / 100,
     roiAll: Math.round(roiAll * 100) / 100,
     winRateAll: Math.round(winRateAll * 100) / 100,
     winCount,
     lossCount,
+    tradeCount,
+    activeTradeCount,
+    maxDrawdown,
   }
 }
 
 /**
- * Update wallet metrics in Supabase from Goldsky + calculated data
+ * Update wallet metrics in Supabase from Polymarket calculated data
  */
 async function updateWalletMetrics(
   address: string,
-  goldskyMetrics: GoldskyMetrics,
   polymarketMetrics: {
     realizedPnl: number
     unrealizedPnl: number
     totalPnl: number
+    totalBought: number
     roiAll: number
     winRateAll: number
     winCount: number
     lossCount: number
+    tradeCount: number
+    activeTradeCount: number
+    maxDrawdown: number
   },
+  metrics7d: TimePeriodMetrics,
+  metrics30d: TimePeriodMetrics,
   activePositionCount: number,
   closedPositionCount: number
 ) {
   try {
     await supabase.from('wallets').update({
-      // 7-day metrics (from Goldsky - volume, trades, drawdown)
-      pnl_7d: goldskyMetrics.pnl7d,
-      roi_7d: goldskyMetrics.roi7d,
-      win_rate_7d: goldskyMetrics.winRate7d,
-      volume_7d: goldskyMetrics.volume7d,
-      trade_count_7d: goldskyMetrics.tradeCount7d,
-      drawdown_7d: goldskyMetrics.drawdown7d,
-      // 30-day metrics (from Goldsky - volume, trades, drawdown)
-      pnl_30d: goldskyMetrics.pnl30d,
-      roi_30d: goldskyMetrics.roi30d,
-      win_rate_30d: goldskyMetrics.winRate30d,
-      volume_30d: goldskyMetrics.volume30d,
-      trade_count_30d: goldskyMetrics.tradeCount30d,
-      drawdown_30d: goldskyMetrics.drawdown30d,
-      // Overall metrics - use Polymarket calculations (matches their UI)
+      // 7-day metrics
+      pnl_7d: metrics7d.pnl,
+      roi_7d: metrics7d.roi,
+      win_rate_7d: metrics7d.winRate,
+      volume_7d: metrics7d.volume,
+      trade_count_7d: metrics7d.tradeCount,
+      drawdown_7d: metrics7d.drawdown,
+      // 30-day metrics
+      pnl_30d: metrics30d.pnl,
+      roi_30d: metrics30d.roi,
+      win_rate_30d: metrics30d.winRate,
+      volume_30d: metrics30d.volume,
+      trade_count_30d: metrics30d.tradeCount,
+      drawdown_30d: metrics30d.drawdown,
+      // Overall metrics
       total_positions: closedPositionCount,
       active_positions: activePositionCount,
       total_wins: polymarketMetrics.winCount,
@@ -418,8 +653,8 @@ async function updateWalletMetrics(
       overall_pnl: polymarketMetrics.totalPnl,
       overall_roi: polymarketMetrics.roiAll,
       overall_win_rate: polymarketMetrics.winRateAll,
-      total_volume: goldskyMetrics.volume30d,
-      total_trades: goldskyMetrics.tradeCount30d,
+      total_volume: polymarketMetrics.totalBought,
+      total_trades: polymarketMetrics.tradeCount,
       metrics_updated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('address', address)
