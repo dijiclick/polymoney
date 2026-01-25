@@ -362,9 +362,8 @@ class WalletDiscoveryProcessor:
             condition_id = pos.get("conditionId", "")
             outcome = pos.get("outcome", "unknown")
             pnl = float(pos.get("realizedPnl", 0))
-            size = float(pos.get("size", 0))
-            avg_price = float(pos.get("avgPrice", 0))
-            bought = size * avg_price
+            # Use totalBought directly (API returns this) or fallback to size * avgPrice
+            bought = float(pos.get("totalBought", 0)) or (float(pos.get("size", 0)) * float(pos.get("avgPrice", 0)))
 
             if condition_id not in market_groups:
                 market_groups[condition_id] = {"outcomes": {}}
@@ -384,9 +383,8 @@ class WalletDiscoveryProcessor:
             condition_id = pos.get("conditionId", "")
             outcome = pos.get("outcome", "unknown")
             pnl = float(pos.get("cashPnl", 0))
-            size = float(pos.get("size", 0))
-            avg_price = float(pos.get("avgPrice", 0))
-            bought = size * avg_price
+            # Open positions: use initialValue or size * avgPrice
+            bought = float(pos.get("initialValue", 0)) or (float(pos.get("size", 0)) * float(pos.get("avgPrice", 0)))
             current_value = float(pos.get("currentValue", 0))
             is_resolved = current_value == 0
 
@@ -592,9 +590,9 @@ class WalletDiscoveryProcessor:
         # Calculate PnL
         pnl = sum(float(p.get("realizedPnl", 0)) for p in period_positions)
 
-        # Calculate volume
+        # Calculate volume - use totalBought directly (API returns this instead of size)
         volume = sum(
-            float(p.get("size", 0)) * float(p.get("avgPrice", 0))
+            float(p.get("totalBought", 0)) or (float(p.get("size", 0)) * float(p.get("avgPrice", 0)))
             for p in period_positions
         )
 
