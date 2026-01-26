@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 # Page size for pagination
 PAGE_SIZE = 50
 
+# USDC.e contract on Polygon (used by Polymarket)
+USDC_CONTRACT = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+USDC_DECIMALS = 6
+
+# Polygon RPC endpoint (free public endpoint)
+POLYGON_RPC_URL = "https://polygon-rpc.com"
+
 # Per-endpoint rate limits (requests per second)
 # Polymarket limits: positions=15/s, closed-positions=15/s, general=100/s
 # We use conservative values below the limits
@@ -217,7 +224,7 @@ class PolymarketDataAPI:
     # =========================================================================
 
     async def get_portfolio_value(self, address: str) -> float:
-        """Get a trader's portfolio value."""
+        """Get a trader's portfolio value (positions only, no USDC cash)."""
         try:
             result = await self._get("value", {"user": address})
             if isinstance(result, list) and len(result) > 0:
@@ -226,6 +233,65 @@ class PolymarketDataAPI:
         except Exception as e:
             logger.error(f"Error getting portfolio value for {address}: {e}")
             return 0
+
+    async def get_usdc_balance(self, address: str) -> float:
+        """
+        Get USDC.e balance for a wallet on Polygon via RPC.
+
+        This is needed because /value endpoint only returns position value,
+        not USDC cash balance. For accurate ROI calculation, we need both.
+        """
+        await self._ensure_session()
+
+        # ERC-20 balanceOf function selector + address (padded to 32 bytes)
+        # balanceOf(address) = 0x70a08231
+        address_padded = address.lower().replace("0x", "").zfill(64)
+        data = f"0x70a08231{address_padded}"
+
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "eth_call",
+            "params": [
+                {
+                    "to": USDC_CONTRACT,
+                    "data": data
+                },
+                "latest"
+            ],
+            "id": 1
+        }
+
+        try:
+            async with self._session.post(
+                POLYGON_RPC_URL,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if "result" in result and result["result"]:
+                        # Convert hex to int, then to USD (6 decimals)
+                        balance_raw = int(result["result"], 16)
+                        balance_usd = balance_raw / (10 ** USDC_DECIMALS)
+                        return balance_usd
+                return 0
+        except Exception as e:
+            logger.debug(f"Error getting USDC balance for {address}: {e}")
+            return 0
+
+    async def get_total_balance(self, address: str) -> tuple[float, float, float]:
+        """
+        Get total balance including positions and USDC cash.
+
+        Returns:
+            Tuple of (total_balance, position_value, usdc_cash)
+        """
+        position_value, usdc_cash = await asyncio.gather(
+            self.get_portfolio_value(address),
+            self.get_usdc_balance(address)
+        )
+        total = position_value + usdc_cash
+        return total, position_value, usdc_cash
 
     async def get_positions(self, address: str) -> list[dict]:
         """Get a trader's open positions with full pagination."""

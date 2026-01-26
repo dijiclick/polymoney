@@ -236,6 +236,7 @@ class WalletDiscoveryProcessor:
         positions = []
         closed_positions = []
         portfolio_value = 0
+        usdc_cash = 0
         profile = {}
         goldsky_summary = None
 
@@ -244,7 +245,7 @@ class WalletDiscoveryProcessor:
             api_tasks = [
                 self._api.get_positions(address),
                 self._api.get_closed_positions(address),
-                self._api.get_portfolio_value(address),
+                self._api.get_total_balance(address),  # Returns (total, positions, usdc)
                 self._api.get_profile(address),
             ]
 
@@ -252,7 +253,11 @@ class WalletDiscoveryProcessor:
 
             positions = results[0] if not isinstance(results[0], Exception) else []
             closed_positions = results[1] if not isinstance(results[1], Exception) else []
-            portfolio_value = results[2] if not isinstance(results[2], Exception) else 0
+            # get_total_balance returns (total, position_value, usdc_cash)
+            if not isinstance(results[2], Exception):
+                portfolio_value, _, usdc_cash = results[2]
+            else:
+                portfolio_value, usdc_cash = 0, 0
             profile = results[3] if not isinstance(results[3], Exception) else {}
 
         # Fetch from Goldsky if enabled
