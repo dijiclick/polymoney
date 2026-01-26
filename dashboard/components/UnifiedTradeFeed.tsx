@@ -24,7 +24,6 @@ export default function UnifiedTradeFeed({
   const filterRef = useRef(filter)
   const isPausedRef = useRef(isPaused)
 
-  // Keep refs in sync
   useEffect(() => {
     filterRef.current = filter
   }, [filter])
@@ -77,12 +76,10 @@ export default function UnifiedTradeFeed({
     setTrades(data || [])
   }, [mode, filter, maxTrades])
 
-  // Fetch trades when mode or filter changes
   useEffect(() => {
     fetchRecentTrades()
   }, [fetchRecentTrades])
 
-  // Subscription only depends on mode - uses refs for filter/pause state
   useEffect(() => {
     const channelName = `unified_trades_feed_${mode}`
     const channel = supabase.channel(channelName)
@@ -118,10 +115,10 @@ export default function UnifiedTradeFeed({
     const diff = now.getTime() - date.getTime()
     const mins = Math.floor(diff / 60000)
 
-    if (mins < 1) return 'Just now'
-    if (mins < 60) return `${mins}m ago`
+    if (mins < 1) return 'now'
+    if (mins < 60) return `${mins}m`
     const hours = Math.floor(mins / 60)
-    if (hours < 24) return `${hours}h ago`
+    if (hours < 24) return `${hours}h`
     return date.toLocaleDateString()
   }
 
@@ -134,67 +131,51 @@ export default function UnifiedTradeFeed({
   const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
   const getValueColor = (value: number) => {
-    if (value >= 50000) return 'text-red-400 font-bold'
-    if (value >= 10000) return 'text-amber-400 font-semibold'
+    if (value >= 50000) return 'text-red-400'
+    if (value >= 10000) return 'text-amber-400'
     if (value >= 1000) return 'text-emerald-400'
-    return 'text-gray-300'
-  }
-
-  const getScoreColor = (score: number | undefined) => {
-    if (!score) return 'text-gray-500'
-    if (score >= 85) return 'text-red-400'
-    if (score >= 70) return 'text-orange-400'
-    return 'text-yellow-400'
-  }
-
-  const modeTitle = {
-    all: 'Live Trades',
-    insider: 'Insider Trades',
-    whales: 'Whale Trades'
+    return 'text-gray-400'
   }
 
   return (
-    <div className="bg-gray-900/50 backdrop-blur-sm rounded-2xl border border-gray-800/50 h-full flex flex-col overflow-hidden">
+    <div className="glass rounded-xl h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-gray-800/50">
+      <div className="px-4 py-3 border-b border-white/5">
         <div className="flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-semibold text-white">{modeTitle[mode]}</h2>
-            <span className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+          <div className="flex items-center gap-2">
+            <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="text-xs text-gray-500">
+              {trades.length} trades {tradeCount > 0 && `(${tradeCount} seen)`}
+            </span>
           </div>
-          <div className="flex items-center gap-3">
-            {tradeCount > 0 && (
-              <span className="text-sm text-gray-500 px-3 py-1.5 bg-gray-800/50 rounded-lg">
-                {tradeCount.toLocaleString()} seen
-              </span>
-            )}
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() => {
                 setTrades([])
                 setTradeCount(0)
               }}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 bg-gray-800/50 hover:bg-gray-700/50 hover:text-white transition-all"
+              className="px-2 py-1 rounded-md text-[10px] text-gray-500 hover:text-white hover:bg-white/5 transition-all"
             >
               Clear
             </button>
             <button
               onClick={() => setIsPaused(!isPaused)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+              className={`px-2 py-1 rounded-md text-[10px] transition-all flex items-center gap-1 ${
                 isPaused
-                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                  : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-white'
+                  ? 'bg-amber-500/10 text-amber-400'
+                  : 'text-gray-500 hover:text-white hover:bg-white/5'
               }`}
             >
               {isPaused ? (
                 <>
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M8 5v14l11-7z"/>
                   </svg>
                   Resume
                 </>
               ) : (
                 <>
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
                   </svg>
                   Pause
@@ -209,27 +190,27 @@ export default function UnifiedTradeFeed({
       <div ref={listRef} className="flex-1 overflow-y-auto">
         {trades.length === 0 ? (
           <div className="p-8 text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-800/50 mb-4">
-              <svg className="w-8 h-8 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white/[0.02] mb-3">
+              <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
               </svg>
             </div>
-            <p className="text-gray-400 font-medium text-lg">
+            <p className="text-gray-500 text-sm">
               {mode === 'insider' ? 'No insider trades yet' :
                mode === 'whales' ? 'No whale trades yet' :
                'Waiting for trades...'}
             </p>
-            <p className="text-gray-600 text-base mt-1">
+            <p className="text-gray-600 text-xs mt-1">
               {mode === 'insider'
-                ? 'Trades from suspected insiders will appear here'
+                ? 'Suspected insider trades will appear here'
                 : mode === 'whales'
-                ? 'Trades of $10K or more will appear here'
+                ? 'Trades $10K+ will appear here'
                 : 'Live trades will stream in real-time'
               }
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-800/30">
+          <div className="divide-y divide-white/[0.02]">
             {trades.map((trade, idx) => {
               const isInsider = trade.is_insider_suspect
 
@@ -237,18 +218,17 @@ export default function UnifiedTradeFeed({
                 <div
                   key={trade.id || idx}
                   className={`
-                    px-5 py-4 transition-all group
-                    hover:bg-gray-800/30
-                    ${isInsider && mode === 'all' ? 'border-l-4 border-orange-500 bg-orange-500/5' : ''}
+                    px-4 py-3 transition-all group hover:bg-white/[0.02]
+                    ${isInsider && mode === 'all' ? 'border-l-2 border-orange-500/50 bg-orange-500/[0.02]' : ''}
                   `}
                 >
-                  <div className="flex items-start gap-4">
+                  <div className="flex items-start gap-3">
                     {/* Score Badge (if insider) */}
                     {isInsider && (
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold ${
-                        (trade.trader_insider_score || 0) >= 85 ? 'bg-red-500/20 text-red-400' :
-                        (trade.trader_insider_score || 0) >= 70 ? 'bg-orange-500/20 text-orange-400' :
-                        'bg-yellow-500/20 text-yellow-400'
+                      <div className={`w-8 h-8 rounded-md flex items-center justify-center text-xs font-semibold ${
+                        (trade.trader_insider_score || 0) >= 85 ? 'bg-red-500/10 text-red-400' :
+                        (trade.trader_insider_score || 0) >= 70 ? 'bg-orange-500/10 text-orange-400' :
+                        'bg-yellow-500/10 text-yellow-400'
                       }`}>
                         {trade.trader_insider_score || '?'}
                       </div>
@@ -256,9 +236,9 @@ export default function UnifiedTradeFeed({
 
                     {/* Trade Info */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <span className={`text-sm font-bold px-2.5 py-1 rounded ${
-                          trade.side === 'BUY' ? 'bg-emerald-500/80 text-white' : 'bg-red-500/80 text-white'
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                          trade.side === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
                         }`}>
                           {trade.side}
                         </span>
@@ -267,44 +247,41 @@ export default function UnifiedTradeFeed({
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="text-white hover:text-blue-300 text-lg font-semibold truncate max-w-[250px] flex items-center gap-2 transition-colors"
+                          className="text-gray-300 hover:text-white text-xs font-medium truncate max-w-[180px] transition-colors"
                         >
                           {trade.trader_username || formatAddress(trade.trader_address)}
-                          <svg className="w-4 h-4 text-gray-500 group-hover:text-blue-400 transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                          </svg>
                         </a>
                         {isInsider && mode === 'all' && (
-                          <span className="text-xs px-2 py-1 rounded bg-orange-500/80 text-white font-semibold">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400">
                             INSIDER
                           </span>
                         )}
                         {trade.is_whale && (
-                          <span className="text-amber-400 text-sm font-bold">WHALE</span>
+                          <span className="text-[9px] text-amber-400">WHALE</span>
                         )}
                       </div>
 
-                      <div className="text-gray-400 text-base mt-2">
-                        <span className="text-gray-300 font-medium">{trade.outcome || 'Position'}</span>
-                        {' on '}
-                        <span className="text-gray-500">{trade.market_slug || 'Unknown'}</span>
+                      <div className="text-gray-600 text-[11px] mt-1 truncate">
+                        <span className="text-gray-500">{trade.outcome || 'Position'}</span>
+                        {' · '}
+                        <span className="text-gray-600">{trade.market_slug || 'Unknown'}</span>
                         {' @ '}
-                        <span className="text-gray-300 font-semibold">{(trade.price * 100).toFixed(0)}%</span>
+                        <span className="text-gray-500">{(trade.price * 100).toFixed(0)}%</span>
                       </div>
 
                       {/* Red Flags */}
                       {isInsider && trade.trader_red_flags && trade.trader_red_flags.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mt-2.5">
-                          {trade.trader_red_flags.slice(0, 3).map((flag, i) => (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {trade.trader_red_flags.slice(0, 2).map((flag, i) => (
                             <span
                               key={i}
-                              className="text-xs px-2 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20"
+                              className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/5 text-red-400/80"
                             >
                               {flag}
                             </span>
                           ))}
-                          {trade.trader_red_flags.length > 3 && (
-                            <span className="text-xs text-gray-500">+{trade.trader_red_flags.length - 3}</span>
+                          {trade.trader_red_flags.length > 2 && (
+                            <span className="text-[9px] text-gray-600">+{trade.trader_red_flags.length - 2}</span>
                           )}
                         </div>
                       )}
@@ -312,17 +289,12 @@ export default function UnifiedTradeFeed({
 
                     {/* Right side: Value & Time */}
                     <div className="text-right flex-shrink-0">
-                      <div className={`font-mono text-xl font-semibold ${getValueColor(trade.usd_value)}`}>
+                      <div className={`font-mono text-sm ${getValueColor(trade.usd_value)}`}>
                         {formatUsd(trade.usd_value)}
                       </div>
-                      <div className="text-sm text-gray-500 mt-1">
+                      <div className="text-[10px] text-gray-600 mt-0.5">
                         {formatTime(trade.executed_at)}
                       </div>
-                      {trade.processing_latency_ms !== undefined && trade.processing_latency_ms !== null && (
-                        <div className={`text-xs mt-0.5 ${trade.processing_latency_ms > 500 ? 'text-amber-500' : 'text-gray-600'}`}>
-                          {trade.processing_latency_ms}ms
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -330,17 +302,6 @@ export default function UnifiedTradeFeed({
             })}
           </div>
         )}
-      </div>
-
-      {/* Footer */}
-      <div className="px-5 py-3 border-t border-gray-800/50 flex justify-between items-center">
-        <span className="text-sm text-gray-500">
-          {trades.length} trade{trades.length !== 1 ? 's' : ''}
-        </span>
-        <span className={`text-sm flex items-center gap-2 ${isConnected ? 'text-emerald-500' : 'text-red-500'}`}>
-          <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-          {isConnected ? 'Connected' : 'Reconnecting...'}
-        </span>
       </div>
     </div>
   )

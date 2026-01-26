@@ -70,49 +70,49 @@ function FilterPopover({
   return (
     <div
       ref={ref}
-      className="absolute top-full left-0 mt-2 z-50 bg-gray-800 border border-gray-700 rounded-xl shadow-xl p-4 min-w-[200px]"
+      className="absolute top-full left-0 mt-2 z-50 bg-[#12121a] border border-white/10 rounded-lg shadow-2xl p-3 min-w-[180px]"
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="text-xs font-medium text-gray-400 mb-3 uppercase tracking-wider">{label} Filter</div>
-      <div className="space-y-3">
+      <div className="text-[10px] font-medium text-gray-500 mb-2.5 uppercase tracking-wider">{label}</div>
+      <div className="space-y-2.5">
         <div>
-          <label className="text-xs text-gray-500 mb-1 block">Min</label>
+          <label className="text-[10px] text-gray-600 mb-1 block">Min</label>
           <div className="relative">
-            {prefix && <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{prefix}</span>}
+            {prefix && <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{prefix}</span>}
             <input
               type="number"
               value={min}
               onChange={(e) => setMin(e.target.value)}
               placeholder="No min"
-              className={`w-full bg-gray-700/50 border border-gray-600 rounded-lg py-2 text-sm text-white focus:border-blue-500 focus:outline-none ${prefix ? 'pl-6' : 'pl-3'} ${suffix ? 'pr-6' : 'pr-3'}`}
+              className={`w-full bg-white/[0.03] border border-white/5 rounded-md py-1.5 text-xs text-white focus:border-white/20 focus:outline-none transition-colors ${prefix ? 'pl-5' : 'pl-2.5'} ${suffix ? 'pr-5' : 'pr-2.5'}`}
             />
-            {suffix && <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{suffix}</span>}
+            {suffix && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{suffix}</span>}
           </div>
         </div>
         <div>
-          <label className="text-xs text-gray-500 mb-1 block">Max</label>
+          <label className="text-[10px] text-gray-600 mb-1 block">Max</label>
           <div className="relative">
-            {prefix && <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{prefix}</span>}
+            {prefix && <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{prefix}</span>}
             <input
               type="number"
               value={max}
               onChange={(e) => setMax(e.target.value)}
               placeholder="No max"
-              className={`w-full bg-gray-700/50 border border-gray-600 rounded-lg py-2 text-sm text-white focus:border-blue-500 focus:outline-none ${prefix ? 'pl-6' : 'pl-3'} ${suffix ? 'pr-6' : 'pr-3'}`}
+              className={`w-full bg-white/[0.03] border border-white/5 rounded-md py-1.5 text-xs text-white focus:border-white/20 focus:outline-none transition-colors ${prefix ? 'pl-5' : 'pl-2.5'} ${suffix ? 'pr-5' : 'pr-2.5'}`}
             />
-            {suffix && <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{suffix}</span>}
+            {suffix && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{suffix}</span>}
           </div>
         </div>
-        <div className="flex gap-2 pt-2">
+        <div className="flex gap-1.5 pt-1">
           <button
             onClick={handleClear}
-            className="flex-1 px-3 py-1.5 text-xs text-gray-400 hover:text-white border border-gray-600 rounded-lg hover:bg-gray-700 transition-colors"
+            className="flex-1 px-2 py-1 text-[10px] text-gray-500 hover:text-white rounded-md hover:bg-white/5 transition-colors"
           >
             Clear
           </button>
           <button
             onClick={handleApply}
-            className="flex-1 px-3 py-1.5 text-xs text-white bg-blue-600 rounded-lg hover:bg-blue-500 transition-colors"
+            className="flex-1 px-2 py-1 text-[10px] text-white bg-white/10 rounded-md hover:bg-white/15 transition-colors"
           >
             Apply
           </button>
@@ -190,84 +190,13 @@ export default function WalletTable({
 
   // Get metrics based on time period
   const getMetric = (wallet: Wallet, metric: string): number => {
-    const suffix = timePeriod === '30d' ? '_30d' : '_7d'
+    const suffix = timePeriod === 'all' ? '_all' : timePeriod === '30d' ? '_30d' : '_7d'
     return (wallet as any)[metric + suffix] || 0
   }
 
-  // Debug: Log wallet data to browser console
-  useEffect(() => {
-    if (wallets.length > 0) {
-      const suffix = timePeriod === '30d' ? '_30d' : '_7d'
-
-      console.log(`\n%c═══════════════════════════════════════════════════════════════`, 'color: #3b82f6')
-      console.log(`%c  WALLET TABLE DEBUG - ${timePeriod.toUpperCase()} Period - ${wallets.length} wallets`, 'color: #3b82f6; font-weight: bold')
-      console.log(`%c═══════════════════════════════════════════════════════════════`, 'color: #3b82f6')
-
-      wallets.forEach((wallet, index) => {
-        const pnlVal = (wallet as any)[`pnl${suffix}`]
-        const roiVal = (wallet as any)[`roi${suffix}`]
-        const winRateVal = (wallet as any)[`win_rate${suffix}`]
-        const drawdownVal = (wallet as any)[`drawdown${suffix}`]
-        const volumeVal = (wallet as any)[`volume${suffix}`]
-        const tradeCountVal = (wallet as any)[`trade_count${suffix}`]
-
-        console.log(`\n%c[${index + 1}] ${wallet.username || wallet.address.slice(0, 10)}...`, 'color: #10b981; font-weight: bold')
-        console.log(`%cRaw DB values for ${timePeriod}:`, 'color: #f59e0b')
-        console.table({
-          address: wallet.address,
-          username: wallet.username,
-          balance: wallet.balance,
-          [`pnl${suffix}`]: pnlVal,
-          [`roi${suffix}`]: roiVal,
-          [`win_rate${suffix}`]: winRateVal,
-          [`drawdown${suffix}`]: drawdownVal,
-          [`volume${suffix}`]: volumeVal,
-          [`trade_count${suffix}`]: tradeCountVal,
-          active_positions: wallet.active_positions,
-          total_positions: wallet.total_positions,
-          total_wins: wallet.total_wins,
-          total_losses: wallet.total_losses,
-          realized_pnl: wallet.realized_pnl,
-          overall_pnl: wallet.overall_pnl,
-          overall_roi: wallet.overall_roi,
-          overall_win_rate: wallet.overall_win_rate,
-        })
-
-        // Show the displayed values
-        const fmtMoney = (v: number | undefined | null) => {
-          if (v === undefined || v === null) return '-'
-          const abs = Math.abs(v)
-          if (abs >= 1000000) return `$${(v / 1000000).toFixed(2)}M`
-          if (abs >= 1000) return `$${(v / 1000).toFixed(1)}K`
-          return `$${v.toFixed(0)}`
-        }
-        const fmtPct = (v: number | undefined | null) => {
-          if (v === undefined || v === null) return '-'
-          return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
-        }
-        const fmtPctPlain = (v: number | undefined | null) => {
-          if (v === undefined || v === null) return '-'
-          return `${v.toFixed(1)}%`
-        }
-
-        console.log(`%cDisplayed in table:`, 'color: #8b5cf6')
-        console.table({
-          'Active Positions Value': fmtMoney(wallet.balance),
-          'Win Rate': fmtPctPlain(winRateVal),
-          'ROI': fmtPct(roiVal),
-          'PnL': fmtMoney(pnlVal),
-          'Active': wallet.active_positions || 0,
-          'Positions': wallet.total_positions || 0,
-          'Drawdown': fmtPctPlain(drawdownVal),
-        })
-      })
-
-      console.log(`\n%c═══════════════════════════════════════════════════════════════`, 'color: #3b82f6')
-    }
-  }, [wallets, timePeriod])
-
   // Dynamic column name based on time period
   const getColumnName = (base: string) => {
+    if (timePeriod === 'all') return `${base}_all`
     return timePeriod === '30d' ? `${base}_30d` : `${base}_7d`
   }
 
@@ -293,26 +222,26 @@ export default function WalletTable({
 
     return (
       <th
-        className={`px-3 py-3 font-medium relative
+        className={`px-3 py-2.5 font-medium relative text-[11px] uppercase tracking-wider
           ${align === 'left' ? 'text-left' : align === 'center' ? 'text-center' : 'text-right'}
-          ${isActive ? 'text-blue-400' : 'text-gray-500'}`}
+          ${isActive ? 'text-white' : 'text-gray-500'}`}
       >
         <div className="flex items-center justify-end gap-1">
           <button
             onClick={() => setOpenFilter(isFilterOpen ? null : column)}
-            className={`p-1 rounded hover:bg-gray-700 transition-colors ${hasActiveFilter ? 'text-blue-400' : 'text-gray-600 hover:text-gray-400'}`}
+            className={`p-0.5 rounded hover:bg-white/5 transition-colors ${hasActiveFilter ? 'text-blue-400' : 'text-gray-600 hover:text-gray-400'}`}
             title="Filter"
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
             </svg>
           </button>
           <button
             onClick={() => onSort?.(column)}
-            className="cursor-pointer select-none hover:text-gray-300 transition-colors flex items-center gap-1"
+            className="cursor-pointer select-none hover:text-white transition-colors flex items-center gap-0.5"
           >
             {label}
-            <span className={`transition-opacity ${isActive ? 'opacity-100' : 'opacity-0'}`}>
+            <span className={`transition-opacity text-[10px] ${isActive ? 'opacity-100' : 'opacity-0'}`}>
               {sortDir === 'asc' ? '↑' : '↓'}
             </span>
           </button>
@@ -333,13 +262,13 @@ export default function WalletTable({
 
   if (loading) {
     return (
-      <div className="bg-gray-900/50 backdrop-blur-sm rounded-2xl border border-gray-800/50 p-12">
+      <div className="glass rounded-xl p-10">
         <div className="flex flex-col items-center justify-center">
-          <div className="relative w-12 h-12">
-            <div className="absolute inset-0 rounded-full border-2 border-blue-500/20"></div>
-            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-blue-500 animate-spin"></div>
+          <div className="relative w-8 h-8">
+            <div className="absolute inset-0 rounded-full border border-white/10"></div>
+            <div className="absolute inset-0 rounded-full border border-transparent border-t-white/40 animate-spin"></div>
           </div>
-          <p className="text-gray-500 mt-4 text-sm">Loading wallets...</p>
+          <p className="text-gray-600 mt-3 text-xs">Loading...</p>
         </div>
       </div>
     )
@@ -347,36 +276,36 @@ export default function WalletTable({
 
   if (wallets.length === 0) {
     return (
-      <div className="bg-gray-900/50 backdrop-blur-sm rounded-2xl border border-gray-800/50 p-12 text-center">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-800/50 mb-4">
-          <svg className="w-8 h-8 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div className="glass rounded-xl p-10 text-center">
+        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-white/[0.02] mb-3">
+          <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
         </div>
-        <p className="text-gray-400">No wallets found matching your filters</p>
-        <p className="text-gray-600 text-sm mt-1">Try adjusting your filter criteria</p>
+        <p className="text-gray-500 text-sm">No wallets found</p>
+        <p className="text-gray-600 text-xs mt-1">Try adjusting your filters</p>
       </div>
     )
   }
 
   return (
-    <div className="bg-gray-900/50 backdrop-blur-sm rounded-2xl border border-gray-800/50 overflow-hidden">
+    <div className="glass rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-gray-800/50 text-sm">
-              <th className="px-3 py-3 text-left text-gray-500 font-medium">Trader</th>
-              <SortHeader column="balance" label="Active Positions Value" filterType="money" />
+            <tr className="border-b border-white/5">
+              <th className="px-3 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
+              <SortHeader column="balance" label="Value" filterType="money" />
               <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" />
               <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" />
               <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" />
               <SortHeader column="active_positions" label="Active" align="center" filterType="number" />
-              <SortHeader column="total_positions" label="Positions" align="center" filterType="number" />
-              <SortHeader column={getColumnName('drawdown')} label="Drawdown" filterType="percent" />
-              <SortHeader column="account_created_at" label="Created" filterType="number" />
+              <SortHeader column="total_positions" label="Total" align="center" filterType="number" />
+              <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" />
+              <SortHeader column="account_created_at" label="Joined" filterType="number" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-800/30">
+          <tbody className="divide-y divide-white/[0.02]">
             {wallets.map((wallet, index) => {
               const pnl = getMetric(wallet, 'pnl')
               const roi = getMetric(wallet, 'roi')
@@ -395,14 +324,14 @@ export default function WalletTable({
               return (
                 <tr
                   key={wallet.address}
-                  className="group hover:bg-gray-800/30 transition-colors"
+                  className="group hover:bg-white/[0.02] transition-colors"
                 >
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-2.5">
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-2">
                       <button
                         onClick={() => setSelectedTrader({ address: wallet.address, username: wallet.username })}
-                        className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 hover:from-blue-500/40 hover:to-purple-500/40 flex items-center justify-center text-xs font-medium text-gray-400 hover:text-white transition-all cursor-pointer"
-                        title="View trader details"
+                        className="w-6 h-6 rounded-md bg-white/[0.03] hover:bg-white/[0.08] flex items-center justify-center text-[10px] font-medium text-gray-500 hover:text-white transition-all cursor-pointer"
+                        title="View details"
                       >
                         {index + 1}
                       </button>
@@ -410,50 +339,50 @@ export default function WalletTable({
                         href={`https://polymarket.com/profile/${wallet.address}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sm text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1"
+                        className="text-xs text-gray-300 hover:text-white transition-colors flex items-center gap-1"
                       >
                         {getDisplayName(wallet)}
-                        <svg className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg className="w-2.5 h-2.5 opacity-0 group-hover:opacity-50 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                         </svg>
                       </a>
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-right">
-                    <span className="text-gray-300 text-sm">{formatMoney(wallet.balance)}</span>
+                  <td className="px-3 py-2.5 text-right">
+                    <span className="text-gray-400 text-xs">{formatMoney(wallet.balance)}</span>
                   </td>
-                  <td className="px-3 py-3 text-right">
-                    <span className={`text-sm font-medium ${getWinRateColor(winRate)}`}>
+                  <td className="px-3 py-2.5 text-right">
+                    <span className={`text-xs ${getWinRateColor(winRate)}`}>
                       {formatPercentPlain(winRate)}
                     </span>
                   </td>
-                  <td className="px-3 py-3 text-right">
-                    <span className={`text-sm font-semibold ${getPnlColor(roi)}`}>
+                  <td className="px-3 py-2.5 text-right">
+                    <span className={`text-xs font-medium ${getPnlColor(roi)}`}>
                       {formatPercent(roi)}
                     </span>
                   </td>
-                  <td className="px-3 py-3 text-right">
-                    <span className={`text-sm font-medium ${getPnlColor(pnl)}`}>
+                  <td className="px-3 py-2.5 text-right">
+                    <span className={`text-xs ${getPnlColor(pnl)}`}>
                       {formatMoney(pnl)}
                     </span>
                   </td>
-                  <td className="px-3 py-3 text-center">
-                    <span className="inline-flex items-center justify-center min-w-[1.75rem] px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400">
+                  <td className="px-3 py-2.5 text-center">
+                    <span className="text-xs text-gray-400">
                       {wallet.active_positions || 0}
                     </span>
                   </td>
-                  <td className="px-3 py-3 text-center">
-                    <span className="text-gray-400 text-sm">
+                  <td className="px-3 py-2.5 text-center">
+                    <span className="text-gray-500 text-xs">
                       {wallet.total_positions || 0}
                     </span>
                   </td>
-                  <td className="px-3 py-3 text-right">
-                    <span className={`text-sm font-medium ${getDrawdownColor(drawdown)}`}>
-                      {drawdown > 0 ? `${formatPercentPlain(drawdown)}` : '0%'}
+                  <td className="px-3 py-2.5 text-right">
+                    <span className={`text-xs ${getDrawdownColor(drawdown)}`}>
+                      {drawdown > 0 ? `${formatPercentPlain(drawdown)}` : '-'}
                     </span>
                   </td>
-                  <td className="px-3 py-3 text-right">
-                    <span className="text-gray-400 text-sm">
+                  <td className="px-3 py-2.5 text-right">
+                    <span className="text-gray-600 text-xs">
                       {formatCreatedDate(wallet.account_created_at)}
                     </span>
                   </td>

@@ -233,9 +233,10 @@ class WalletDiscoveryProcessor:
             current_balance=portfolio_value
         )
 
-        # Calculate period metrics (7d, 30d)
+        # Calculate period metrics (7d, 30d, all-time)
         metrics_7d = self._calculate_period_metrics(closed_positions, 7, portfolio_value)
         metrics_30d = self._calculate_period_metrics(closed_positions, 30, portfolio_value)
+        metrics_all = self._calculate_period_metrics(closed_positions, 36500, portfolio_value)  # 100 years = all time
 
         logger.debug(
             f"Positions={metrics.get('closed_count', 0)}, "
@@ -263,13 +264,22 @@ class WalletDiscoveryProcessor:
             "volume_30d": metrics_30d["volume"],
             "trade_count_30d": metrics_30d["trade_count"],
             "drawdown_30d": metrics_30d["drawdown"],
-            # Overall metrics
+            # All-time metrics (consistent naming)
+            "pnl_all": metrics_all["pnl"],
+            "roi_all": metrics_all["roi"],
+            "win_rate_all": metrics_all["win_rate"],
+            "volume_all": metrics_all["volume"],
+            "trade_count_all": metrics_all["trade_count"],
+            "drawdown_all": metrics_all["drawdown"],
+            # Position counts
             "total_positions": metrics.get("closed_count", 0),
             "active_positions": metrics.get("open_count", 0),
             "total_wins": metrics.get("win_count", 0),
             "total_losses": metrics.get("loss_count", 0),
+            # PnL breakdown
             "realized_pnl": metrics.get("realized_pnl", 0),
             "unrealized_pnl": metrics.get("unrealized_pnl", 0),
+            # Legacy fields (keep for backward compatibility)
             "overall_pnl": metrics.get("total_pnl", 0),
             "overall_roi": metrics.get("roi_all", 0),
             "overall_win_rate": metrics.get("win_rate_all", 0),
@@ -372,13 +382,13 @@ class WalletDiscoveryProcessor:
             })
 
         # Process open positions
+        # NOTE: Open positions are ALWAYS unrealized, even if currentValue = 0
+        # The market hasn't officially resolved, so we don't count them as realized
         for pos in open_positions:
             condition_id = pos.get("conditionId", "")
             outcome = pos.get("outcome", "unknown")
             pnl = float(pos.get("cashPnl", 0))
             bought = float(pos.get("initialValue", 0)) or (float(pos.get("size", 0)) * float(pos.get("avgPrice", 0)))
-            current_value = float(pos.get("currentValue", 0))
-            is_resolved = current_value == 0
 
             if condition_id not in market_groups:
                 market_groups[condition_id] = {"outcomes": {}}
@@ -389,7 +399,7 @@ class WalletDiscoveryProcessor:
             market_groups[condition_id]["outcomes"][outcome].append({
                 "pnl": pnl,
                 "bought": bought,
-                "is_resolved": is_resolved,
+                "is_resolved": False,  # Open positions are always unrealized
                 "resolved_at": None
             })
 

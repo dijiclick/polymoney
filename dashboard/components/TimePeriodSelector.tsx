@@ -7,26 +7,26 @@ interface Props {
   onChange: (period: TimePeriod) => void
 }
 
-const periods: { value: TimePeriod; label: string; shortLabel: string }[] = [
-  { value: '7d', label: '7 Days', shortLabel: '7D' },
-  { value: '30d', label: '30 Days', shortLabel: '30D' },
+const periods: { value: TimePeriod; label: string }[] = [
+  { value: '7d', label: '7D' },
+  { value: '30d', label: '30D' },
+  { value: 'all', label: 'All' },
 ]
 
 export default function TimePeriodSelector({ value, onChange }: Props) {
   return (
-    <div className="inline-flex bg-gray-800/50 rounded-xl p-1 border border-gray-700/50">
+    <div className="inline-flex bg-white/[0.02] rounded-lg p-0.5 border border-white/5">
       {periods.map((period) => (
         <button
           key={period.value}
           onClick={() => onChange(period.value)}
-          className={`relative px-5 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+          className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${
             value === period.value
-              ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
-              : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+              ? 'bg-white/10 text-white'
+              : 'text-gray-500 hover:text-gray-300'
           }`}
         >
-          <span className="hidden sm:inline">{period.label}</span>
-          <span className="sm:hidden">{period.shortLabel}</span>
+          {period.label}
         </button>
       ))}
     </div>

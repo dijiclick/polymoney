@@ -100,7 +100,7 @@ export interface TradeStats {
 // ============================================
 
 export type WalletSource = 'goldsky' | 'live'
-export type TimePeriod = '7d' | '30d'
+export type TimePeriod = '7d' | '30d' | 'all'
 
 export interface Wallet {
   address: string
@@ -125,7 +125,14 @@ export interface Wallet {
   // ===== DRAWDOWN METRICS =====
   drawdown_7d: number      // max drawdown in last 7 days (percentage)
   drawdown_30d: number     // max drawdown in last 30 days (percentage)
-  // ===== OVERALL/ALL-TIME METRICS (matches Polymarket profile) =====
+  // ===== ALL-TIME METRICS (consistent naming with 7d/30d) =====
+  pnl_all: number          // realized PnL from all positions
+  roi_all: number          // ROI for all positions
+  win_rate_all: number     // win rate for all positions
+  volume_all: number       // total volume all-time
+  trade_count_all: number  // total trades all-time
+  drawdown_all: number     // max drawdown all-time (percentage)
+  // ===== OVERALL/LEGACY METRICS (matches Polymarket profile) =====
   total_positions: number   // closed positions (all-time)
   active_positions: number  // currently open positions
   total_wins: number        // positions with positive PnL
@@ -191,6 +198,7 @@ export function getTimePeriodDays(period: TimePeriod): number {
   switch (period) {
     case '7d': return 7
     case '30d': return 30
+    case 'all': return 36500 // ~100 years
   }
 }
 

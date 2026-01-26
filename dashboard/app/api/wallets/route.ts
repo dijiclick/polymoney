@@ -4,20 +4,26 @@ import { supabase, Wallet, WalletSource } from '@/lib/supabase'
 // Valid columns for sorting
 const VALID_SORT_COLUMNS = [
   'balance',
-  // Period metrics (7d/30d)
+  // Period metrics (7d/30d/all)
   'win_rate_7d',
   'win_rate_30d',
+  'win_rate_all',
   'pnl_7d',
   'pnl_30d',
+  'pnl_all',
   'roi_7d',
   'roi_30d',
+  'roi_all',
   'volume_7d',
   'volume_30d',
+  'volume_all',
   'trade_count_7d',
   'trade_count_30d',
+  'trade_count_all',
   'drawdown_7d',
   'drawdown_30d',
-  // Overall/all-time metrics
+  'drawdown_all',
+  // Overall/legacy metrics
   'overall_win_rate',
   'overall_pnl',
   'overall_roi',
@@ -70,7 +76,7 @@ export async function GET(request: NextRequest) {
 
     // Filter by minimum win rate (based on selected period)
     if (minWinRate > 0) {
-      const winRateColumn = period === '30d' ? 'win_rate_30d' : 'win_rate_7d'
+      const winRateColumn = period === 'all' ? 'win_rate_all' : period === '30d' ? 'win_rate_30d' : 'win_rate_7d'
       query = query.gte(winRateColumn, minWinRate)
     }
 
@@ -109,7 +115,14 @@ export async function GET(request: NextRequest) {
       // ===== DRAWDOWN METRICS =====
       drawdown_7d: wallet.drawdown_7d || 0,
       drawdown_30d: wallet.drawdown_30d || 0,
-      // ===== OVERALL/ALL-TIME METRICS =====
+      // ===== ALL-TIME METRICS (consistent naming) =====
+      pnl_all: wallet.pnl_all || 0,
+      roi_all: wallet.roi_all || 0,
+      win_rate_all: wallet.win_rate_all || 0,
+      volume_all: wallet.volume_all || 0,
+      trade_count_all: wallet.trade_count_all || 0,
+      drawdown_all: wallet.drawdown_all || 0,
+      // ===== OVERALL/LEGACY METRICS =====
       total_positions: wallet.total_positions || 0,
       active_positions: wallet.active_positions || 0,
       total_wins: wallet.total_wins || 0,
