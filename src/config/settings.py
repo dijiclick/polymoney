@@ -35,6 +35,20 @@ class PolymarketApiConfig(BaseModel):
     rate_limit: int = 60
 
 
+class GoldskyAnalyticsConfig(BaseModel):
+    """Goldsky analytics configuration."""
+    enabled: bool = True
+    compare_mode: bool = True
+    tolerance_pct: float = 1.0
+
+
+class AnalyticsConfig(BaseModel):
+    """Analytics data source configuration."""
+    # Data source: "polymarket", "goldsky", or "both"
+    data_source: str = "polymarket"
+    goldsky: GoldskyAnalyticsConfig = Field(default_factory=GoldskyAnalyticsConfig)
+
+
 class ApiConfig(BaseModel):
     """API configuration."""
     polymarket: PolymarketApiConfig = Field(default_factory=PolymarketApiConfig)
@@ -46,6 +60,7 @@ class Settings(BaseModel):
     polymarket: PolymarketConfig
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
+    analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
     platform_wallets: list[str] = Field(default_factory=list)
     config_path: Path = Field(default=Path("config.yaml"))
 
@@ -84,11 +99,20 @@ class Settings(BaseModel):
             polymarket=PolymarketApiConfig(**api_data.get("polymarket", {})),
         )
 
+        # Load analytics config from yaml
+        analytics_data = config_data.get("analytics", {})
+        goldsky_analytics_data = analytics_data.get("goldsky", {})
+        analytics_config = AnalyticsConfig(
+            data_source=analytics_data.get("data_source", "polymarket"),
+            goldsky=GoldskyAnalyticsConfig(**goldsky_analytics_data),
+        )
+
         return cls(
             supabase=supabase_config,
             polymarket=polymarket_config,
             pipeline=pipeline_config,
             api=api_config,
+            analytics=analytics_config,
             platform_wallets=config_data.get("platform_wallets", []),
             config_path=config_path,
         )

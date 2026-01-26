@@ -69,6 +69,22 @@ advanced:
     min_roi_30d: null
     max_losing_streak: null
 
+# Analytics Configuration
+# Controls data source for wallet analytics
+analytics:
+  # Data source: "polymarket", "goldsky", or "both"
+  # - polymarket: Use Polymarket Data API (original behavior)
+  # - goldsky: Use Goldsky-synced local tables (fastest, no rate limits)
+  # - both: Use both sources and compare results (for validation)
+  data_source: "goldsky"
+
+  goldsky:
+    enabled: true
+    # Log discrepancies when using "both" data source
+    compare_mode: true
+    # Tolerance for metric comparison (percentage)
+    tolerance_pct: 1.0
+
 # API Configuration
 api:
   goldsky:

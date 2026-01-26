@@ -2,7 +2,7 @@
 Wallet discovery processor for live trade monitoring.
 
 Discovers new wallets from live trades >= $100 and fetches their trade history.
-Uses Polymarket Data API for all metrics calculation.
+Supports multiple data sources: Polymarket Data API, Goldsky, or both.
 """
 
 import asyncio
@@ -13,6 +13,8 @@ from typing import Optional
 from supabase import Client
 
 from ..scrapers.data_api import PolymarketDataAPI
+from ..scrapers.goldsky_client import GoldskyClient, get_price_cache
+from ..config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,13 @@ class WalletDiscoveryProcessor:
         """
         self.supabase = supabase
         self._api: Optional[PolymarketDataAPI] = None
+        self._goldsky: Optional[GoldskyClient] = None
+
+        # Load settings for data source configuration
+        self._settings = get_settings()
+        self._data_source = self._settings.analytics.data_source
+        self._compare_mode = self._settings.analytics.goldsky.compare_mode
+        self._tolerance_pct = self._settings.analytics.goldsky.tolerance_pct
 
         # In-memory caches for O(1) lookup
         self._known_wallets: set[str] = set()
@@ -63,6 +72,8 @@ class WalletDiscoveryProcessor:
         self._wallets_processed = 0
         self._trades_stored = 0
         self._errors = 0
+        self._goldsky_comparisons = 0
+        self._goldsky_discrepancies = 0
 
     async def initialize(self) -> None:
         """Load existing wallet addresses and last analysis times into memory cache."""
@@ -88,10 +99,25 @@ class WalletDiscoveryProcessor:
 
             logger.info(f"Loaded {len(self._known_wallets)} wallet addresses into cache")
 
-            # Initialize Polymarket API client
+            # Initialize data sources based on configuration
+            logger.info(f"Data source mode: {self._data_source}")
+
+            # Always initialize Polymarket API for profile endpoint
+            # In Goldsky mode, we only use it for /profile (1 call per wallet)
             self._api = PolymarketDataAPI()
             await self._api.__aenter__()
-            logger.info("Polymarket API initialized for metrics calculation")
+            if self._data_source == "goldsky":
+                logger.info("Polymarket API initialized (profile only)")
+            else:
+                logger.info("Polymarket API initialized for metrics calculation")
+
+            if self._data_source in ("goldsky", "both"):
+                # Initialize Goldsky client (queries local Supabase tables)
+                self._goldsky = GoldskyClient(self.supabase)
+                logger.info("Goldsky client initialized for metrics calculation")
+
+            if self._data_source == "both" and self._compare_mode:
+                logger.info(f"Comparison mode enabled (tolerance: {self._tolerance_pct}%)")
 
         except Exception as e:
             logger.error(f"Failed to initialize wallet discovery: {e}")
@@ -130,6 +156,7 @@ class WalletDiscoveryProcessor:
                 now = datetime.now(timezone.utc)
                 days_since = (now - last_analyzed).days
                 if days_since < self.REANALYSIS_COOLDOWN_DAYS:
+                    self._wallets_skipped_cooldown += 1
                     return False
 
             logger.debug(f"Wallet {addr[:10]}... needs re-analysis")
@@ -195,56 +222,87 @@ class WalletDiscoveryProcessor:
         """
         Process a single wallet: fetch data, calculate metrics, store.
 
-        ALL METRICS come from Polymarket Data API:
-        - Positions (open and closed)
-        - PnL, win rate, ROI
-        - Portfolio value
+        Data sources are determined by the analytics.data_source config:
+        - "polymarket": Use Polymarket Data API only
+        - "goldsky": Use Goldsky-synced local tables only
+        - "both": Use both and compare results for validation
 
         Args:
             address: The wallet address to process
         """
-        if not self._api:
-            raise RuntimeError("Polymarket API client not initialized")
-
         logger.debug(f"Processing wallet: {address[:10]}...")
 
-        # Fetch data in parallel from Polymarket API
-        api_tasks = [
-            self._api.get_positions(address),
-            self._api.get_closed_positions(address),
-            self._api.get_portfolio_value(address),
-            self._api.get_profile(address),
-        ]
+        # Variables to store data from each source
+        positions = []
+        closed_positions = []
+        portfolio_value = 0
+        profile = {}
+        goldsky_summary = None
 
-        results = await asyncio.gather(*api_tasks, return_exceptions=True)
+        # Fetch from Polymarket API if enabled
+        if self._api and self._data_source in ("polymarket", "both"):
+            api_tasks = [
+                self._api.get_positions(address),
+                self._api.get_closed_positions(address),
+                self._api.get_portfolio_value(address),
+                self._api.get_profile(address),
+            ]
 
-        positions = results[0] if not isinstance(results[0], Exception) else []
-        closed_positions = results[1] if not isinstance(results[1], Exception) else []
-        portfolio_value = results[2] if not isinstance(results[2], Exception) else 0
-        profile = results[3] if not isinstance(results[3], Exception) else {}
+            results = await asyncio.gather(*api_tasks, return_exceptions=True)
 
-        if not positions and not closed_positions:
-            logger.debug(f"No positions found for {address[:10]}...")
-            return
+            positions = results[0] if not isinstance(results[0], Exception) else []
+            closed_positions = results[1] if not isinstance(results[1], Exception) else []
+            portfolio_value = results[2] if not isinstance(results[2], Exception) else 0
+            profile = results[3] if not isinstance(results[3], Exception) else {}
 
-        # Parse and calculate metrics
-        parsed_positions = self._parse_positions(positions)
-        parsed_closed = self._parse_closed_positions(closed_positions)
+        # Fetch from Goldsky if enabled
+        if self._goldsky and self._data_source in ("goldsky", "both"):
+            goldsky_summary = self._goldsky.get_position_summary(address)
 
-        # Calculate all metrics using our formulas
-        metrics = self._calculate_metrics(
-            positions=positions,
-            closed_positions=closed_positions,
-            current_balance=portfolio_value
-        )
+            # If using Goldsky-only mode:
+            # - Get profile from Polymarket API (only API call needed)
+            # - Calculate portfolio value from balances + CLOB prices
+            if self._data_source == "goldsky":
+                if self._api:
+                    profile = await self._api.get_profile(address)
+                # Calculate NAV from Goldsky balances + cached CLOB prices
+                portfolio_value = await self._goldsky.calculate_portfolio_value(address)
 
-        # Calculate period metrics (7d, 30d)
-        metrics_7d = self._calculate_period_metrics(closed_positions, 7, portfolio_value)
-        metrics_30d = self._calculate_period_metrics(closed_positions, 30, portfolio_value)
+        # Comparison mode: log discrepancies between data sources
+        if self._data_source == "both" and self._compare_mode and goldsky_summary:
+            self._goldsky_comparisons += 1
+            self._compare_data_sources(address, closed_positions, goldsky_summary)
+
+        # Determine which data to use for metrics
+        if self._data_source == "goldsky" and goldsky_summary:
+            # Use Goldsky data for metrics
+            metrics = self._calculate_metrics_from_goldsky(goldsky_summary, portfolio_value)
+            metrics_7d = self._goldsky.calculate_period_metrics(address, 7, portfolio_value)
+            metrics_30d = self._goldsky.calculate_period_metrics(address, 30, portfolio_value)
+
+            if not goldsky_summary.get("position_count"):
+                logger.debug(f"No Goldsky positions found for {address[:10]}...")
+                return
+        else:
+            # Use Polymarket API data for metrics (default or "both" mode)
+            if not positions and not closed_positions:
+                logger.debug(f"No positions found for {address[:10]}...")
+                return
+
+            # Calculate all metrics using our formulas
+            metrics = self._calculate_metrics(
+                positions=positions,
+                closed_positions=closed_positions,
+                current_balance=portfolio_value
+            )
+
+            # Calculate period metrics (7d, 30d)
+            metrics_7d = self._calculate_period_metrics(closed_positions, 7, portfolio_value)
+            metrics_30d = self._calculate_period_metrics(closed_positions, 30, portfolio_value)
 
         logger.debug(
-            f"Polymarket: {len(positions)} open, {len(closed_positions)} closed, "
-            f"{metrics['win_rate_all']:.1f}% win rate"
+            f"Source={self._data_source}: positions={metrics.get('closed_count', 0)}, "
+            f"win_rate={metrics.get('win_rate_all', 0):.1f}%"
         )
 
         wallet_data = {
@@ -269,17 +327,17 @@ class WalletDiscoveryProcessor:
             "trade_count_30d": metrics_30d["trade_count"],
             "drawdown_30d": metrics_30d["drawdown"],
             # Overall metrics
-            "total_positions": metrics["closed_count"],
-            "active_positions": metrics["open_count"],
-            "total_wins": metrics["win_count"],
-            "total_losses": metrics["loss_count"],
-            "realized_pnl": metrics["realized_pnl"],
-            "unrealized_pnl": metrics["unrealized_pnl"],
-            "overall_pnl": metrics["total_pnl"],
-            "overall_roi": metrics["roi_all"],
-            "overall_win_rate": metrics["win_rate_all"],
-            "total_volume": metrics["total_bought"],
-            "total_trades": metrics["trade_count"],
+            "total_positions": metrics.get("closed_count", 0),
+            "active_positions": metrics.get("open_count", 0),
+            "total_wins": metrics.get("win_count", 0),
+            "total_losses": metrics.get("loss_count", 0),
+            "realized_pnl": metrics.get("realized_pnl", 0),
+            "unrealized_pnl": metrics.get("unrealized_pnl", 0),
+            "overall_pnl": metrics.get("total_pnl", 0),
+            "overall_roi": metrics.get("roi_all", 0),
+            "overall_win_rate": metrics.get("win_rate_all", 0),
+            "total_volume": metrics.get("total_bought", 0),
+            "total_trades": metrics.get("trade_count", 0),
             "metrics_updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -297,10 +355,107 @@ class WalletDiscoveryProcessor:
         logger.info(
             f"Wallet processed: {address[:10]}... | "
             f"balance=${portfolio_value:,.0f} | "
-            f"positions={metrics['closed_count']} | "
-            f"win_rate={metrics['win_rate_all']:.1f}% | "
-            f"pnl=${metrics['realized_pnl']:,.0f}"
+            f"positions={metrics.get('closed_count', 0)} | "
+            f"win_rate={metrics.get('win_rate_all', 0):.1f}% | "
+            f"pnl=${metrics.get('realized_pnl', 0):,.0f}"
         )
+
+    def _compare_data_sources(
+        self,
+        address: str,
+        polymarket_closed: list[dict],
+        goldsky_summary: dict
+    ) -> None:
+        """
+        Compare Polymarket API data with Goldsky data and log discrepancies.
+
+        Args:
+            address: Wallet address
+            polymarket_closed: Closed positions from Polymarket API
+            goldsky_summary: Position summary from Goldsky
+        """
+        # Calculate Polymarket totals
+        pm_realized_pnl = sum(float(p.get("realizedPnl", 0)) for p in polymarket_closed)
+        pm_total_bought = sum(
+            float(p.get("totalBought", 0)) or (float(p.get("size", 0)) * float(p.get("avgPrice", 0)))
+            for p in polymarket_closed
+        )
+        pm_position_count = len(polymarket_closed)
+
+        # Get Goldsky totals
+        gs_realized_pnl = goldsky_summary.get("total_realized_pnl", 0)
+        gs_total_bought = goldsky_summary.get("total_bought", 0)
+        gs_position_count = goldsky_summary.get("position_count", 0)
+
+        # Calculate deltas
+        pnl_delta = abs(gs_realized_pnl - pm_realized_pnl)
+        bought_delta = abs(gs_total_bought - pm_total_bought)
+
+        # Check tolerance
+        pnl_diff_pct = (pnl_delta / abs(pm_realized_pnl) * 100) if pm_realized_pnl != 0 else 0
+        bought_diff_pct = (bought_delta / pm_total_bought * 100) if pm_total_bought > 0 else 0
+
+        if pnl_diff_pct > self._tolerance_pct or bought_diff_pct > self._tolerance_pct:
+            self._goldsky_discrepancies += 1
+            logger.warning(
+                f"Data source discrepancy for {address[:10]}... | "
+                f"PnL: PM=${pm_realized_pnl:,.0f} vs GS=${gs_realized_pnl:,.0f} ({pnl_diff_pct:.1f}% diff) | "
+                f"Bought: PM=${pm_total_bought:,.0f} vs GS=${gs_total_bought:,.0f} ({bought_diff_pct:.1f}% diff)"
+            )
+        else:
+            logger.debug(
+                f"Data sources match for {address[:10]}... (within {self._tolerance_pct}% tolerance)"
+            )
+
+    def _calculate_metrics_from_goldsky(
+        self,
+        goldsky_summary: dict,
+        current_balance: float = 0
+    ) -> dict:
+        """
+        Calculate metrics from Goldsky position summary.
+
+        Args:
+            goldsky_summary: Position summary from GoldskyClient
+            current_balance: Current portfolio balance
+
+        Returns:
+            Metrics dict compatible with existing wallet_data format
+        """
+        realized_pnl = goldsky_summary.get("total_realized_pnl", 0)
+        total_bought = goldsky_summary.get("total_bought", 0)
+        win_count = goldsky_summary.get("win_count", 0)
+        loss_count = goldsky_summary.get("loss_count", 0)
+        open_count = goldsky_summary.get("open_count", 0)
+        position_count = goldsky_summary.get("position_count", 0)
+
+        # Unrealized PnL would need balance data from user_balances
+        # For now, use 0 (can be enhanced later with mark pricing)
+        unrealized_pnl = 0
+        total_pnl = realized_pnl + unrealized_pnl
+
+        # ROI calculation
+        roi_all = (total_pnl / total_bought * 100) if total_bought > 0 else 0
+
+        # Win rate
+        trade_count = win_count + loss_count
+        win_rate_all = (win_count / trade_count * 100) if trade_count > 0 else 0
+
+        return {
+            "realized_pnl": round(realized_pnl, 2),
+            "unrealized_pnl": round(unrealized_pnl, 2),
+            "total_pnl": round(total_pnl, 2),
+            "total_bought": round(total_bought, 2),
+            "roi_all": round(roi_all, 2),
+            "win_rate_all": round(win_rate_all, 2),
+            "win_count": win_count,
+            "loss_count": loss_count,
+            "trade_count": trade_count,
+            "active_count": open_count,
+            "open_count": open_count,
+            "closed_count": position_count,
+            "max_drawdown": 0,  # Calculated separately from fills
+        }
 
     def _parse_positions(self, positions: list[dict]) -> dict:
         """Parse open positions."""
@@ -623,12 +778,25 @@ class WalletDiscoveryProcessor:
     @property
     def stats(self) -> dict:
         """Get processor statistics."""
-        return {
+        stats = {
             "known_wallets": len(self._known_wallets),
             "pending_wallets": len(self._pending_wallets),
             "queue_size": self._queue.qsize(),
             "wallets_discovered": self._wallets_discovered,
+            "wallets_skipped_cooldown": self._wallets_skipped_cooldown,
             "wallets_processed": self._wallets_processed,
             "trades_stored": self._trades_stored,
             "errors": self._errors,
+            "data_source": self._data_source,
         }
+
+        # Add Goldsky comparison stats if in comparison mode
+        if self._data_source == "both" and self._compare_mode:
+            stats["goldsky_comparisons"] = self._goldsky_comparisons
+            stats["goldsky_discrepancies"] = self._goldsky_discrepancies
+            if self._goldsky_comparisons > 0:
+                stats["goldsky_match_rate"] = round(
+                    (1 - self._goldsky_discrepancies / self._goldsky_comparisons) * 100, 1
+                )
+
+        return stats

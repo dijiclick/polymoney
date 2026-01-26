@@ -1,0 +1,49 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            cd ${{ secrets.VPS_APP_PATH }}
+
+            # Pull latest changes
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Install Python dependencies
+            if [ -f "requirements.txt" ]; then
+              source venv/bin/activate 2>/dev/null || python3 -m venv venv && source venv/bin/activate
+              pip install -r requirements.txt
+            fi
+
+            # Build and restart Next.js dashboard
+            if [ -d "dashboard" ]; then
+              cd dashboard
+              npm ci
+              npm run build
+              pm2 restart polymarket-dashboard --update-env || pm2 start npm --name "polymarket-dashboard" -- start
+              cd ..
+            fi
+
+            # Restart Python services (adjust as needed)
+            pm2 restart polymarket-python --update-env 2>/dev/null || echo "No Python service to restart"
+
+            echo "Deployment completed successfully!"
