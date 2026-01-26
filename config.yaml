@@ -76,7 +76,7 @@ analytics:
   # - polymarket: Use Polymarket Data API (original behavior)
   # - goldsky: Use Goldsky-synced local tables (fastest, no rate limits)
   # - both: Use both sources and compare results (for validation)
-  data_source: "goldsky"
+  data_source: "polymarket"
 
   goldsky:
     enabled: true
