@@ -24,14 +24,14 @@ USDC_DECIMALS = 6
 POLYGON_RPC_URL = "https://polygon-rpc.com"
 
 # Per-endpoint rate limits (requests per second)
-# Polymarket limits: positions=15/s, closed-positions=15/s, general=100/s
+# Official Polymarket limits: positions/closed-positions=15/s, trades=20/s, general=100/s
 # We use conservative values below the limits
 ENDPOINT_RATE_LIMITS = {
     "positions": 10,        # 10 req/s (limit: 15)
     "closed-positions": 10, # 10 req/s (limit: 15)
     "activity": 30,         # 30 req/s (limit: 100)
     "value": 30,            # 30 req/s (limit: 100)
-    "trades": 30,           # 30 req/s (limit: 100)
+    "trades": 15,           # 15 req/s (limit: 20)
 }
 
 # Batch sizes per endpoint (how many parallel requests)
