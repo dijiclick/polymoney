@@ -677,9 +677,18 @@ class WalletDiscoveryProcessor:
         total_pnl = realized_pnl + unrealized_pnl
         trade_count = win_count + loss_count
 
-        # ROI = Total PnL / Total Capital Deployed (total_bought)
-        # This is more reliable than initial_balance which can be negative when users withdraw profits
-        roi_all = (total_pnl / total_bought * 100) if total_bought > 0 else 0
+        # ROI = Total PnL / Initial Capital * 100
+        # Initial Capital = Current Balance - Total PnL
+        # This gives true return on capital, not volume-based ROI
+        initial_capital = current_balance - total_pnl
+        if initial_capital > 0:
+            roi_all = (total_pnl / initial_capital * 100)
+        elif total_pnl < 0 and current_balance == 0:
+            # Lost everything: ROI = -100% (or close to it)
+            # Use absolute PnL as proxy for initial capital
+            roi_all = -100.0
+        else:
+            roi_all = 0
 
         # Win rate from resolved trades
         win_rate_all = (win_count / trade_count * 100) if trade_count > 0 else 0
