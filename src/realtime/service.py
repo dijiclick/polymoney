@@ -32,7 +32,7 @@ class TradeMonitorService:
     Provides:
     - WebSocket connection to Polymarket RTDS
     - Trade enrichment and storage
-    - Alert generation
+    - Wallet discovery and analysis
     - Statistics reporting
     """
 
@@ -103,7 +103,8 @@ class TradeMonitorService:
 
         logger.info("Trade monitor service started")
         logger.info(f"Whale threshold: ${self.processor.WHALE_THRESHOLD_USD:,}")
-        logger.info(f"Watchlist size: {len(self.processor._watchlist_cache)}")
+        logger.info(f"Wallet discovery: $50+ trades, {self.processor._discovery_processor.NUM_WORKERS} workers")
+        logger.info(f"Re-analysis cooldown: {self.processor._discovery_processor.REANALYSIS_COOLDOWN_DAYS} day(s)")
         logger.info("=" * 60)
 
         # Start WebSocket client (this blocks until stopped)
@@ -164,7 +165,6 @@ class TradeMonitorService:
             f"Trades: {processor_stats['trades_processed']:,} seen, "
             f"{processor_stats['trades_stored']:,} saved (>=$100) | "
             f"Wallets: {discovered:,} discovered, {analyzed:,} analyzed | "
-            f"Alerts: {processor_stats['alerts_triggered']} | "
             f"Errors: {processor_stats['errors']} | "
             f"Uptime: {uptime_str}"
         )

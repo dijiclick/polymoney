@@ -25,20 +25,20 @@ POLYGON_RPC_URL = "https://polygon-rpc.com"
 
 # Per-endpoint rate limits (requests per second)
 # Official Polymarket limits: positions/closed-positions=15/s, trades=20/s, general=100/s
-# We use conservative values below the limits
+# We use 40% of limits for extra safety margin
 ENDPOINT_RATE_LIMITS = {
-    "positions": 10,        # 10 req/s (limit: 15)
-    "closed-positions": 10, # 10 req/s (limit: 15)
-    "activity": 30,         # 30 req/s (limit: 100)
-    "value": 30,            # 30 req/s (limit: 100)
-    "trades": 15,           # 15 req/s (limit: 20)
+    "positions": 6,         # 6 req/s (limit: 15, 40%)
+    "closed-positions": 6,  # 6 req/s (limit: 15, 40%)
+    "activity": 40,         # 40 req/s (limit: 100, 40%)
+    "value": 40,            # 40 req/s (limit: 100, 40%)
+    "trades": 8,            # 8 req/s (limit: 20, 40%)
 }
 
 # Batch sizes per endpoint (how many parallel requests)
 ENDPOINT_BATCH_SIZES = {
-    "positions": 5,         # 5 parallel = 0.5s per batch at 10 req/s
-    "closed-positions": 5,  # 5 parallel = 0.5s per batch at 10 req/s
-    "activity": 10,         # 10 parallel = 0.33s per batch at 30 req/s
+    "positions": 3,         # 3 parallel at 6 req/s
+    "closed-positions": 3,  # 3 parallel at 6 req/s
+    "activity": 8,          # 8 parallel at 40 req/s
 }
 
 

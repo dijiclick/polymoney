@@ -1,5 +1,5 @@
 """
-Trade processor for enriching, storing, and alerting on live trades.
+Trade processor for enriching and storing live trades.
 """
 
 import asyncio
@@ -21,7 +21,6 @@ class TradeProcessor:
     1. Enriches with trader data from existing database
     2. Detects whale trades and patterns
     3. Stores to live_trades table
-    4. Triggers alerts when rules match
     """
 
     # Whale thresholds
@@ -44,9 +43,6 @@ class TradeProcessor:
 
         # Caches (refresh periodically)
         self._trader_cache: dict[str, dict] = {}
-        self._watchlist_cache: set[str] = set()
-        self._watchlist_config: dict[str, dict] = {}  # address -> config
-        self._alert_rules: list[dict] = []
 
         # Session-based tracking for real-time insider detection
         self._session_trades: dict[str, list[dict]] = {}  # trader_addr -> trades
@@ -67,23 +63,13 @@ class TradeProcessor:
         # Stats
         self._trades_processed = 0
         self._trades_stored = 0
-        self._alerts_triggered = 0
         self._errors = 0
 
     async def initialize(self) -> None:
         """Load caches from database."""
         logger.info("Initializing trade processor caches...")
-        await asyncio.gather(
-            self._load_trader_cache(),
-            self._load_watchlist(),
-            self._load_alert_rules(),
-            return_exceptions=True,
-        )
-        logger.info(
-            f"Loaded {len(self._trader_cache)} wallets, "
-            f"{len(self._watchlist_cache)} watchlist, "
-            f"{len(self._alert_rules)} alert rules"
-        )
+        await self._load_trader_cache()
+        logger.info(f"Loaded {len(self._trader_cache)} wallets")
 
         # Initialize wallet discovery processor
         self._discovery_processor = WalletDiscoveryProcessor(self.supabase)
@@ -91,12 +77,15 @@ class TradeProcessor:
         logger.info("Wallet discovery processor initialized")
 
     async def _load_trader_cache(self) -> None:
-        """Load known wallets into cache."""
+        """Load known wallets into cache (limited to prevent timeout)."""
         try:
-            # Use the new wallets table from wallet analytics schema
+            # Only load wallets with balance to avoid timeout
             result = (
                 self.supabase.table("wallets")
                 .select("address, source, balance")
+                .not_.is_("balance", "null")
+                .gte("balance", 100)
+                .limit(5000)
                 .execute()
             )
 
@@ -108,9 +97,7 @@ class TradeProcessor:
                     "address": addr,
                     "source": w.get("source"),
                     "portfolio_value": w.get("balance"),
-                    # Legacy fields for compatibility - set to None/defaults
                     "username": None,
-                    "copytrade_score": None,
                     "bot_score": None,
                     "insider_score": None,
                     "insider_level": None,
@@ -121,49 +108,15 @@ class TradeProcessor:
             logger.debug(f"Loaded {len(self._trader_cache)} wallets to cache")
 
         except Exception as e:
-            logger.error(f"Failed to load wallet cache: {e}")
-            self._errors += 1
-
-    async def _load_watchlist(self) -> None:
-        """Load watchlist addresses and config."""
-        try:
-            result = self.supabase.table("watchlist").select("address, min_trade_size, alert_threshold_usd").execute()
-
-            self._watchlist_cache = set()
-            self._watchlist_config = {}
-
-            for w in result.data or []:
-                addr = w["address"].lower()
-                self._watchlist_cache.add(addr)
-                self._watchlist_config[addr] = {
-                    "min_trade_size": float(w.get("min_trade_size") or 0),
-                    "alert_threshold": float(w.get("alert_threshold_usd") or 0),
-                }
-
-            logger.debug(f"Loaded {len(self._watchlist_cache)} watchlist addresses")
-
-        except Exception as e:
-            logger.error(f"Failed to load watchlist: {e}")
-            self._errors += 1
-
-    async def _load_alert_rules(self) -> None:
-        """Load alert rules."""
-        try:
-            result = self.supabase.table("alert_rules").select("*").eq("enabled", True).execute()
-
-            self._alert_rules = result.data or []
-            logger.debug(f"Loaded {len(self._alert_rules)} alert rules")
-
-        except Exception as e:
-            logger.error(f"Failed to load alert rules: {e}")
-            self._errors += 1
+            # Wallet cache is optional - continue without it
+            logger.warning(f"Wallet cache not available: {e}")
+            self._trader_cache = {}
 
     def _calculate_realtime_score(self, trade: RTDSMessage) -> tuple[int, list[str]]:
         """
         Calculate heuristic insider score for unknown traders.
 
-        Uses session-based signals to detect suspicious patterns without
-        requiring the full Goldsky pipeline to run first.
+        Uses session-based signals to detect suspicious patterns.
 
         Returns:
             Tuple of (score 0-100, list of red flag strings)
@@ -176,7 +129,6 @@ class TradeProcessor:
         history = self._session_trades.get(addr, [])
 
         # 1. Trade size (0-30 pts)
-        # Large trades from unknown accounts are suspicious
         if trade.usd_value >= 5000:
             score += 30
             flags.append("Large trade ($5K+) from new account")
@@ -184,7 +136,6 @@ class TradeProcessor:
             score += 15
 
         # 2. Market concentration (0-25 pts)
-        # Same trader betting same market repeatedly
         same_market = sum(1 for t in history if t.get("condition_id") == trade.condition_id)
         if same_market >= 4:
             score += 25
@@ -193,7 +144,6 @@ class TradeProcessor:
             score += 15
 
         # 3. Session volume (0-25 pts)
-        # High total volume from single trader in session
         total_volume = sum(t.get("usd_value", 0) for t in history) + trade.usd_value
         if total_volume >= 50000:
             score += 25
@@ -202,14 +152,12 @@ class TradeProcessor:
             score += 15
 
         # 4. Off-hours trading (0-10 pts)
-        # 2am-6am UTC is unusual
         hour = trade.executed_at.hour
         if 2 <= hour <= 6:
             score += 10
             flags.append("Off-hours trading (2-6am UTC)")
 
         # 5. One-sided trading (0-10 pts)
-        # All buys or all sells suggests conviction/info
         if history:
             sides = set(t.get("side") for t in history)
             sides.add(trade.side)
@@ -245,9 +193,13 @@ class TradeProcessor:
         """
         self._trades_processed += 1
 
-        # Check for new wallet discovery (non-blocking, for trades >= $100)
-        MIN_TRADE_VALUE_USD = 100
-        if trade.usd_value >= MIN_TRADE_VALUE_USD and self._discovery_processor:
+        # Wallet discovery threshold (lower to capture more wallets)
+        DISCOVERY_THRESHOLD_USD = 50
+        # Trade storage threshold (higher to avoid database bloat)
+        STORAGE_THRESHOLD_USD = 100
+
+        # Check for new wallet discovery (non-blocking, for trades >= $50)
+        if trade.usd_value >= DISCOVERY_THRESHOLD_USD and self._discovery_processor:
             await self._discovery_processor.check_and_queue(
                 trade.trader_address,
                 trade.usd_value
@@ -260,16 +212,11 @@ class TradeProcessor:
         is_whale = trade.usd_value >= self.WHALE_THRESHOLD_USD
         trade_record["is_whale"] = is_whale
 
-        # Check watchlist (addresses stored lowercase in cache)
-        is_watchlist = trade.trader_address.lower() in self._watchlist_cache
-        trade_record["is_watchlist"] = is_watchlist
-
         # Check insider
         is_insider = trade_record.get("is_insider_suspect", False)
 
         # Store trades >= $100 to database for live feed display
-        MIN_TRADE_VALUE_USD = 100
-        should_store = trade.usd_value >= MIN_TRADE_VALUE_USD or is_whale or is_insider or is_watchlist
+        should_store = trade.usd_value >= STORAGE_THRESHOLD_USD or is_whale or is_insider
 
         if should_store:
             try:
@@ -277,10 +224,6 @@ class TradeProcessor:
             except asyncio.QueueFull:
                 logger.warning("Trade queue full, dropping trade")
                 self._errors += 1
-
-        # Trigger immediate alerts for critical events
-        if is_whale or is_watchlist or is_insider:
-            asyncio.create_task(self._check_alerts(trade_record))
 
     def _enrich_trade(self, trade: RTDSMessage) -> dict:
         """Enrich trade with cached trader data or real-time heuristics."""
@@ -291,7 +234,7 @@ class TradeProcessor:
 
         # Determine insider score and flags
         if trader_data:
-            # Known trader - use cached score from pipeline
+            # Known trader - use cached score
             insider_score = trader_data.get("insider_score") or 0
             red_flags = trader_data.get("insider_red_flags") or []
         else:
@@ -310,7 +253,6 @@ class TradeProcessor:
             "trader_username": trader_data.get("username"),
             "is_known_trader": bool(trader_data),
             "trader_classification": trader_data.get("primary_classification"),
-            "trader_copytrade_score": trader_data.get("copytrade_score"),
             "trader_bot_score": trader_data.get("bot_score"),
             "trader_insider_score": insider_score,
             "trader_insider_level": trader_data.get("insider_level"),
@@ -333,118 +275,15 @@ class TradeProcessor:
             "received_at": now.isoformat(),
             "processing_latency_ms": latency_ms,
             "is_whale": False,
-            "is_watchlist": False,
-            "alert_triggered": False,
+            "is_insider_suspect": is_insider,
             "raw_data": trade.raw_data,
         }
-
-    async def _check_alerts(self, trade: dict) -> None:
-        """Check alert rules and trigger if matched."""
-        for rule in self._alert_rules:
-            try:
-                if self._rule_matches(rule, trade):
-                    await self._trigger_alert(rule, trade)
-            except Exception as e:
-                logger.error(f"Error checking alert rule {rule.get('id')}: {e}")
-                self._errors += 1
-
-    def _rule_matches(self, rule: dict, trade: dict) -> bool:
-        """Check if a trade matches an alert rule."""
-        conditions = rule.get("conditions", {})
-        rule_type = rule.get("rule_type")
-
-        # Watchlist activity - only match if trader is on watchlist
-        if rule_type == "watchlist_activity":
-            if not trade["is_watchlist"]:
-                return False
-            # Check minimum trade size from watchlist config
-            config = self._watchlist_config.get(trade["trader_address"].lower(), {})
-            min_size = config.get("min_trade_size", 0)
-            if trade["usd_value"] < min_size:
-                return False
-            return True
-
-        # Insider activity - only match if trader is an insider suspect
-        if rule_type == "insider_activity":
-            if not trade.get("is_insider_suspect"):
-                return False
-            min_score = conditions.get("min_score", 60)
-            if trade.get("trader_insider_score", 0) < min_score:
-                return False
-            min_usd = conditions.get("min_usd_value", 0)
-            if trade["usd_value"] < min_usd:
-                return False
-            return True
-
-        # Whale check
-        if "min_usd_value" in conditions:
-            if trade["usd_value"] < conditions["min_usd_value"]:
-                return False
-
-        # Category check
-        if "categories" in conditions:
-            if trade.get("category") and trade["category"] not in conditions["categories"]:
-                return False
-
-        # Time check (unusual hours in UTC)
-        if "hours" in conditions:
-            try:
-                executed_at = datetime.fromisoformat(trade["executed_at"].replace("Z", "+00:00"))
-                hour = executed_at.hour
-                if hour not in conditions["hours"]:
-                    return False
-            except Exception:
-                pass
-
-        # Side check
-        if "sides" in conditions:
-            if trade["side"] not in conditions["sides"]:
-                return False
-
-        return True
-
-    async def _trigger_alert(self, rule: dict, trade: dict) -> None:
-        """Create an alert record."""
-        # Build alert title
-        usd_formatted = f"${trade['usd_value']:,.0f}"
-        trader_display = trade.get("trader_username") or f"{trade['trader_address'][:8]}..."
-
-        alert = {
-            "trade_id": trade["trade_id"],
-            "trader_address": trade["trader_address"],
-            "alert_type": rule["rule_type"],
-            "severity": rule.get("alert_severity", "info"),
-            "title": f"{rule['name']}: {usd_formatted}",
-            "description": (
-                f"{trader_display} {trade['side']} {trade.get('outcome', 'position')} "
-                f"on {trade.get('market_slug', 'unknown market')}"
-            ),
-            "metadata": {
-                "usd_value": trade["usd_value"],
-                "market_slug": trade.get("market_slug"),
-                "side": trade["side"],
-                "outcome": trade.get("outcome"),
-                "rule_id": rule.get("id"),
-                "is_known_trader": trade.get("is_known_trader"),
-                "trader_classification": trade.get("trader_classification"),
-            },
-        }
-
-        try:
-            self.supabase.table("trade_alerts").insert(alert).execute()
-            trade["alert_triggered"] = True
-            self._alerts_triggered += 1
-            logger.info(f"Alert triggered: {alert['title']} - {alert['description']}")
-
-        except Exception as e:
-            logger.error(f"Failed to create alert: {e}")
-            self._errors += 1
 
     async def _cleanup_old_trades(self, retention_days: int = 7) -> None:
         """Delete trades older than retention period to manage database size.
 
         Regular trades are kept for 1 day, while important trades
-        (whales/insiders/watchlist) are kept for the full retention period.
+        (whales/insiders) are kept for the full retention period.
         """
         try:
             now = datetime.now(timezone.utc)
@@ -453,7 +292,7 @@ class TradeProcessor:
             regular_cutoff = (now - timedelta(days=1)).isoformat()
             regular_result = self.supabase.table("live_trades").delete().lt(
                 "received_at", regular_cutoff
-            ).eq("is_whale", False).eq("is_insider_suspect", False).eq("is_watchlist", False).execute()
+            ).eq("is_whale", False).eq("is_insider_suspect", False).execute()
 
             regular_deleted = len(regular_result.data) if regular_result.data else 0
 
@@ -472,16 +311,6 @@ class TradeProcessor:
                     f"Database cleanup: deleted {regular_deleted} regular trades (>1d), "
                     f"{important_deleted} important trades (>{retention_days}d)"
                 )
-
-            # Also clean up old acknowledged alerts (keep unacknowledged indefinitely)
-            alert_result = self.supabase.table("trade_alerts").delete().lt(
-                "created_at", important_cutoff
-            ).eq("acknowledged", True).execute()
-
-            deleted_alerts = len(alert_result.data) if alert_result.data else 0
-
-            if deleted_alerts > 0:
-                logger.info(f"Database cleanup: deleted {deleted_alerts} old acknowledged alerts")
 
         except Exception as e:
             logger.error(f"Database cleanup failed: {e}")
@@ -518,7 +347,7 @@ class TradeProcessor:
             logger.error(f"Failed to flush batch: {e}")
             self._errors += 1
             # Put trades back in queue for retry (limited)
-            for trade in batch[:10]:  # Only retry first 10
+            for trade in batch[:10]:
                 try:
                     self._queue.put_nowait(trade)
                 except asyncio.QueueFull:
@@ -566,7 +395,7 @@ class TradeProcessor:
         """Periodically refresh caches."""
         logger.info("Starting cache refresh task")
 
-        # Track last cleanup time for database cleanup (runs hourly, not every minute)
+        # Track last cleanup time for database cleanup (runs hourly)
         last_db_cleanup = datetime.now(timezone.utc)
         DB_CLEANUP_INTERVAL = timedelta(hours=1)
         TRADE_RETENTION_DAYS = 7
@@ -575,12 +404,7 @@ class TradeProcessor:
             try:
                 await asyncio.sleep(60)  # Refresh every minute
 
-                await asyncio.gather(
-                    self._load_trader_cache(),
-                    self._load_watchlist(),
-                    self._load_alert_rules(),
-                    return_exceptions=True,
-                )
+                await self._load_trader_cache()
 
                 # Clean up old session data (> 2 hours) to prevent memory growth
                 cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
@@ -600,7 +424,6 @@ class TradeProcessor:
 
                 logger.debug(
                     f"Caches refreshed: {len(self._trader_cache)} wallets, "
-                    f"{len(self._watchlist_cache)} watchlist, "
                     f"{len(self._session_trades)} session traders"
                 )
 
@@ -661,13 +484,10 @@ class TradeProcessor:
         stats = {
             "trades_processed": self._trades_processed,
             "trades_stored": self._trades_stored,
-            "alerts_triggered": self._alerts_triggered,
             "errors": self._errors,
             "queue_size": self._queue.qsize(),
             "batch_size": len(self._batch),
             "cached_traders": len(self._trader_cache),
-            "watchlist_size": len(self._watchlist_cache),
-            "alert_rules": len(self._alert_rules),
         }
 
         # Add discovery stats
