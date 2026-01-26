@@ -609,10 +609,10 @@ class WalletDiscoveryProcessor:
         Max Drawdown = (peak - trough) / peak * 100
         Track portfolio balance over time based on realized P&L.
         """
-        # Sort by resolution date
+        # Sort by timestamp (Unix timestamp from API)
         sorted_positions = sorted(
-            [p for p in closed_positions if p.get("resolvedAt") or p.get("timestamp")],
-            key=lambda p: p.get("resolvedAt") or p.get("timestamp") or ""
+            [p for p in closed_positions if p.get("timestamp")],
+            key=lambda p: p.get("timestamp") or 0
         )
 
         if not sorted_positions:
@@ -693,8 +693,8 @@ class WalletDiscoveryProcessor:
         # Win rate from resolved trades
         win_rate_all = (win_count / trade_count * 100) if trade_count > 0 else 0
 
-        # Calculate max drawdown
-        max_drawdown = self._calculate_max_drawdown(closed_positions, initial_balance)
+        # Calculate max drawdown using initial capital
+        max_drawdown = self._calculate_max_drawdown(closed_positions, initial_capital)
 
         # Count open positions
         open_count = len([p for p in positions if float(p.get("currentValue", 0)) > 0])
