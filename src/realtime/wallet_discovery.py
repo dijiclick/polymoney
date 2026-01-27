@@ -449,13 +449,14 @@ class WalletDiscoveryProcessor:
     def _calculate_max_drawdown(
         self,
         closed_positions: list[dict],
-        initial_balance: float = 0
+        initial_balance: float = 0,
     ) -> float:
         """
-        Calculate max drawdown from closed positions.
+        Calculate max drawdown from equity curve.
 
+        Tracks balance starting from initial_balance, adding realized PnL
+        for each position chronologically.
         Max Drawdown = (peak - trough) / peak * 100
-        Track portfolio balance over time based on realized P&L.
         """
         sorted_positions = sorted(
             [p for p in closed_positions if p.get("timestamp")],
@@ -541,7 +542,8 @@ class WalletDiscoveryProcessor:
         win_rate_all = (win_count / trade_count * 100) if trade_count > 0 else 0
 
         # Calculate max drawdown
-        drawdown_base = initial_capital if initial_capital > 0 else total_bought
+        # Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
+        drawdown_base = max(current_balance - realized_pnl - unrealized_pnl, current_balance, 1)
         max_drawdown = self._calculate_max_drawdown(closed_positions, drawdown_base)
 
         # Count unique markets (conditionId), not raw position entries
@@ -630,8 +632,8 @@ class WalletDiscoveryProcessor:
         roi = (pnl / volume * 100) if volume > 0 else 0
 
         # Calculate drawdown for period
-        total_pnl_all = sum(float(p.get("realizedPnl", 0)) for p in closed_positions)
-        initial_balance = max(current_balance - total_pnl_all, 1)
+        # Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
+        initial_balance = max(current_balance - pnl, current_balance, 1)
         drawdown = self._calculate_max_drawdown(period_positions, initial_balance)
 
         return {

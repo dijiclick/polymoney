@@ -117,11 +117,14 @@ function groupPositionsIntoTrades(
 }
 
 /**
- * Calculate max drawdown from closed positions
+ * Calculate max drawdown from equity curve.
+ * Tracks balance starting from initialBalance, adding realized PnL
+ * for each position chronologically.
+ * Max Drawdown = (peak - trough) / peak * 100
  */
 function calculateMaxDrawdown(
   closedPositions: { realizedPnl: number; resolvedAt?: string }[],
-  initialBalance: number = 0
+  initialBalance: number = 0,
 ): number {
   const sortedPositions = [...closedPositions]
     .filter(p => p.resolvedAt)
@@ -188,8 +191,8 @@ function calculatePeriodMetrics(
 
   // ROI = Period PnL / Period Volume (capital deployed in this period)
   const roi = volume > 0 ? (pnl / volume) * 100 : 0
-  const totalPnl = closedPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
-  const initialBalance = Math.max(currentBalance - totalPnl, 1) // Ensure positive for drawdown calc
+  // Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
+  const initialBalance = Math.max(currentBalance - pnl, currentBalance, 1)
   const drawdown = calculateMaxDrawdown(periodPositions, initialBalance)
 
   return {
@@ -237,8 +240,9 @@ function calculatePolymarketMetrics(
   // More reliable than initialBalance which can be negative when users withdraw profits
   const roiAll = totalBoughtResolved > 0 ? (totalPnl / totalBoughtResolved) * 100 : 0
   const winRateAll = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0
-  const initialBalance = Math.max(currentBalance - totalPnl, 1) // Ensure positive for drawdown calc
-  const maxDrawdown = calculateMaxDrawdown(closedPositions, initialBalance)
+  // Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
+  const drawdownBase = Math.max(currentBalance - totalPnl, currentBalance, 1)
+  const maxDrawdown = calculateMaxDrawdown(closedPositions, drawdownBase)
 
   return {
     realizedPnl: Math.round(realizedPnl * 100) / 100,

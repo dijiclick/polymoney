@@ -98,7 +98,7 @@ export async function GET(
         maxPositionSize: 0,
         avgPositionSize: 0,
         totalPositions: (dbWallet.total_positions || 0) + (dbWallet.active_positions || 0),
-        maxDrawdown: 0,
+        maxDrawdown: dbWallet.drawdown_all || 0,
         tradeFrequency: (dbWallet.trade_count_30d || 0) / 30,
         nightTradeRatio: 0,
       },
@@ -170,15 +170,15 @@ export async function GET(
     const metrics7d = calculatePeriodMetrics(closedPositions, 7, currentBalance)
     const metrics30d = calculatePeriodMetrics(closedPositions, 30, currentBalance)
 
+    // Count unique markets
+    const uniqueClosedMarkets = new Set(closedPositions.map(p => p.conditionId).filter(Boolean)).size
+    const uniqueOpenMarkets = new Set(openPositions.map(p => p.conditionId).filter(Boolean)).size
+    const uniqueMarkets = uniqueClosedMarkets
+
     // 6. Update wallets table with fresh data (if wallet exists)
     if (dbWallet) {
-      const uniqueClosedMarkets = new Set(closedPositions.map(p => p.conditionId).filter(Boolean)).size
-      const uniqueOpenMarkets = new Set(openPositions.map(p => p.conditionId).filter(Boolean)).size
       updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, uniqueOpenMarkets, uniqueClosedMarkets)
     }
-
-    // Count unique markets
-    const uniqueMarkets = new Set(closedPositions.map(p => p.conditionId)).size
 
     // 7. Build response - all metrics from Polymarket
     const response: TraderProfileResponse = {
@@ -277,7 +277,7 @@ export async function GET(
           maxPositionSize: 0,
           avgPositionSize: 0,
           totalPositions: (dbWallet.total_positions || 0) + (dbWallet.active_positions || 0),
-          maxDrawdown: 0,
+          maxDrawdown: dbWallet.drawdown_all || 0,
           tradeFrequency: (dbWallet.trade_count_30d || 0) / 30,
           nightTradeRatio: 0,
         },
@@ -462,9 +462,8 @@ function calculatePeriodMetrics(
   // ROI = Period PnL / Period Volume (capital deployed in this period)
   const roi = volume > 0 ? (pnl / volume) * 100 : 0
 
-  // Calculate drawdown for period
-  const totalPnl = closedPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
-  const initialBalance = Math.max(currentBalance - totalPnl, 1) // Ensure positive for drawdown calc
+  // Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
+  const initialBalance = Math.max(currentBalance - pnl, currentBalance, 1)
   const drawdown = calculateMaxDrawdown(periodPositions, initialBalance)
 
   return {
@@ -478,46 +477,28 @@ function calculatePeriodMetrics(
 }
 
 /**
- * Calculate max drawdown from closed positions
- *
- * Max Drawdown = highest (maxBalance - currentBalance) / maxBalance * 100
- *
- * We track portfolio balance over time:
- * 1. Start with initial balance
- * 2. As each position resolves, add its realized P&L to balance
- * 3. Track max balance seen so far
- * 4. Calculate drawdown when balance drops below max
- * 5. Return the maximum drawdown percentage
- *
- * @param closedPositions - Array of closed positions with realizedPnl and resolvedAt
- * @param initialBalance - Starting balance
+ * Calculate max drawdown from equity curve.
+ * Tracks balance starting from initialBalance, adding realized PnL
+ * for each position chronologically.
+ * Max Drawdown = (peak - trough) / peak * 100
  */
 function calculateMaxDrawdown(
   closedPositions: { realizedPnl: number; resolvedAt?: string }[],
-  initialBalance: number = 0
+  initialBalance: number = 0,
 ): number {
-  // Sort positions by resolution date chronologically
   const sortedPositions = [...closedPositions]
     .filter(p => p.resolvedAt)
     .sort((a, b) => new Date(a.resolvedAt!).getTime() - new Date(b.resolvedAt!).getTime())
 
   if (sortedPositions.length === 0) return 0
 
-  // Track running balance and max balance
   let balance = initialBalance
   let maxBalance = initialBalance
   let maxDrawdownPercent = 0
 
   for (const position of sortedPositions) {
-    // Add realized P&L to balance
     balance += position.realizedPnl
-
-    // Update max balance if we hit a new high
-    if (balance > maxBalance) {
-      maxBalance = balance
-    }
-
-    // Calculate current drawdown from max
+    if (balance > maxBalance) maxBalance = balance
     if (maxBalance > 0) {
       const drawdownPercent = ((maxBalance - balance) / maxBalance) * 100
       if (drawdownPercent > maxDrawdownPercent) {
@@ -526,7 +507,6 @@ function calculateMaxDrawdown(
     }
   }
 
-  // Cap at 100%
   return Math.min(Math.round(maxDrawdownPercent * 100) / 100, 100)
 }
 
@@ -596,9 +576,9 @@ function calculatePolymarketMetrics(
   // Win rate from resolved trades
   const winRateAll = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0
 
-  // Calculate max drawdown from closed positions
-  const initialBalance = Math.max(currentBalance - totalPnl, 1) // Ensure positive for drawdown calc
-  const maxDrawdown = calculateMaxDrawdown(closedPositions, initialBalance)
+  // Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
+  const drawdownBase = Math.max(currentBalance - totalPnl, currentBalance, 1)
+  const maxDrawdown = calculateMaxDrawdown(closedPositions, drawdownBase)
 
   return {
     realizedPnl: Math.round(realizedPnl * 100) / 100,
