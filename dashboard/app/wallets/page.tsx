@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Wallet, WalletFilter, TimePeriod } from '@/lib/supabase'
 import TimePeriodSelector from '@/components/TimePeriodSelector'
 import WalletTable, { ColumnKey, COLUMNS, DEFAULT_VISIBLE } from '@/components/WalletTable'
@@ -154,7 +154,8 @@ export default function WalletsPage() {
         limit: '50',
         sortBy,
         sortDir,
-        ...(debouncedSearch.trim() && { search: debouncedSearch.trim() })
+        ...(debouncedSearch.trim() && { search: debouncedSearch.trim() }),
+        ...(Object.keys(columnFilters).length > 0 && { columnFilters: JSON.stringify(columnFilters) })
       })
 
       const res = await fetch(`/api/wallets?${params}`)
@@ -170,7 +171,7 @@ export default function WalletsPage() {
     } finally {
       setLoading(false)
     }
-  }, [timePeriod, page, sortBy, sortDir, debouncedSearch])
+  }, [timePeriod, page, sortBy, sortDir, debouncedSearch, columnFilters])
 
   useEffect(() => {
     fetchStats()
@@ -187,6 +188,7 @@ export default function WalletsPage() {
       setSortBy(column)
       setSortDir('desc')
     }
+    setPage(1)
   }
 
   const handleTimePeriodChange = (period: TimePeriod) => {
@@ -219,34 +221,6 @@ export default function WalletsPage() {
     })
     setPage(1)
   }
-
-  const filteredWallets = useMemo(() => {
-    let result = wallets
-
-    if (Object.keys(columnFilters).length > 0) {
-      result = result.filter(wallet => {
-        for (const [column, filter] of Object.entries(columnFilters)) {
-          let value: number | undefined
-
-          if (column === 'balance') {
-            value = wallet.balance
-          } else if (column === 'active_positions') {
-            value = wallet.active_positions
-          } else {
-            value = (wallet as any)[column] || 0
-          }
-
-          if (value === undefined) continue
-
-          if (filter.min !== undefined && value < filter.min) return false
-          if (filter.max !== undefined && value > filter.max) return false
-        }
-        return true
-      })
-    }
-
-    return result
-  }, [wallets, columnFilters])
 
   const activeFilterCount = Object.keys(columnFilters).length
 
@@ -445,8 +419,7 @@ export default function WalletsPage() {
           </div>
 
           <div className="text-xs text-gray-600">
-            <span className="text-gray-400">{filteredWallets.length.toLocaleString()}</span>
-            {(activeFilterCount > 0 || searchQuery) && <span className="text-gray-600"> / {totalWallets.toLocaleString()}</span>}
+            <span className="text-gray-400">{totalWallets.toLocaleString()}</span>
             {' '}traders
           </div>
         </div>
@@ -469,7 +442,7 @@ export default function WalletsPage() {
 
       {/* Wallet Table */}
       <WalletTable
-        wallets={filteredWallets}
+        wallets={wallets}
         loading={loading}
         timePeriod={timePeriod}
         onSort={handleSort}

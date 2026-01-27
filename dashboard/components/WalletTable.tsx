@@ -200,11 +200,39 @@ export default function WalletTable({
     return 'text-red-400'
   }
 
+  const getDrawdownBarColor = (value: number | undefined) => {
+    if (value === undefined || value === null || value === 0) return 'bg-gray-700'
+    if (value <= 10) return 'bg-emerald-500/40'
+    if (value <= 25) return 'bg-amber-500/40'
+    return 'bg-red-500/40'
+  }
+
   const getWinRateColor = (value: number | undefined) => {
     if (value === undefined || value === null) return 'text-gray-400'
     if (value >= 60) return 'text-emerald-400'
     if (value >= 50) return 'text-amber-400'
     return 'text-red-400'
+  }
+
+  const getWinRateBarColor = (value: number | undefined) => {
+    if (value === undefined || value === null) return 'bg-gray-700'
+    if (value >= 60) return 'bg-emerald-500/30'
+    if (value >= 50) return 'bg-amber-500/30'
+    return 'bg-red-500/30'
+  }
+
+  const getCategoryStyle = (category: string) => {
+    switch (category) {
+      case 'Sports': return 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+      case 'Crypto': return 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+      case 'Politics': return 'bg-red-500/10 text-red-400 border-red-500/20'
+      case 'Tech': case 'AI': return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
+      case 'Finance': case 'Business': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+      case 'Pop Culture': case 'Entertainment': return 'bg-pink-500/10 text-pink-400 border-pink-500/20'
+      case 'Science': case 'Health': return 'bg-teal-500/10 text-teal-400 border-teal-500/20'
+      case 'World': case 'Geopolitics': return 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+      default: return 'bg-white/5 text-gray-400 border-white/10'
+    }
   }
 
   // Get metrics based on time period
@@ -332,13 +360,11 @@ export default function WalletTable({
               const drawdown = getMetric(wallet, 'drawdown')
               const winRate = getMetric(wallet, 'win_rate')
 
-              // Format account created date as MM/YYYY
               const formatCreatedDate = (dateStr: string | undefined) => {
                 if (!dateStr) return '-'
                 const date = new Date(dateStr)
-                const month = (date.getMonth() + 1).toString().padStart(2, '0')
-                const year = date.getFullYear()
-                return `${month}/${year}`
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                return `${months[date.getMonth()]} ${date.getFullYear()}`
               }
 
               return (
@@ -370,61 +396,77 @@ export default function WalletTable({
                   </td>
                   {show('value') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className="text-gray-400 text-xs">{formatMoney(wallet.balance)}</span>
+                      <span className="text-gray-300 text-xs tabular-nums font-medium">{formatMoney(wallet.balance)}</span>
                     </td>
                   )}
                   {show('winRate') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className={`text-xs ${getWinRateColor(winRate)}`}>
+                      <span className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                        winRate >= 60 ? 'bg-emerald-500/10' : winRate >= 50 ? 'bg-amber-500/10' : 'bg-red-500/10'
+                      } ${getWinRateColor(winRate)}`}>
                         {formatPercentPlain(winRate)}
                       </span>
                     </td>
                   )}
                   {show('roi') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className={`text-xs font-medium ${getPnlColor(roi)}`}>
+                      <span className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                        roi > 0 ? 'bg-emerald-500/10' : roi < 0 ? 'bg-red-500/10' : ''
+                      } ${getPnlColor(roi)}`}>
                         {formatPercent(roi)}
                       </span>
                     </td>
                   )}
                   {show('pnl') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className={`text-xs ${getPnlColor(pnl)}`}>
+                      <span className={`text-xs tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                        pnl > 0 ? 'bg-emerald-500/10' : pnl < 0 ? 'bg-red-500/10' : ''
+                      } ${getPnlColor(pnl)}`}>
                         {formatMoney(pnl)}
                       </span>
                     </td>
                   )}
                   {show('active') && (
                     <td className="px-3 py-2.5 text-center">
-                      <span className="text-xs text-gray-400">
+                      <span className={`text-xs tabular-nums ${(wallet.active_positions || 0) > 0 ? 'text-gray-300' : 'text-gray-600'}`}>
                         {wallet.active_positions || 0}
                       </span>
                     </td>
                   )}
                   {show('total') && (
                     <td className="px-3 py-2.5 text-center">
-                      <span className="text-gray-500 text-xs">
+                      <span className="text-gray-400 text-xs tabular-nums">
                         {getMetric(wallet, 'trade_count') || 0}
                       </span>
                     </td>
                   )}
                   {show('dd') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className={`text-xs ${getDrawdownColor(drawdown)}`}>
-                        {drawdown > 0 ? `${formatPercentPlain(drawdown)}` : '-'}
-                      </span>
+                      {drawdown > 0 ? (
+                        <span className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                          drawdown <= 10 ? 'bg-emerald-500/10' : drawdown <= 25 ? 'bg-amber-500/10' : 'bg-red-500/10'
+                        } ${getDrawdownColor(drawdown)}`}>
+                          {formatPercentPlain(drawdown)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
                     </td>
                   )}
                   {show('category') && (
                     <td className="px-3 py-2.5 text-left">
-                      <span className="text-gray-500 text-xs whitespace-nowrap">
-                        {(wallet as any).top_category || '-'}
-                      </span>
+                      {(wallet as any).top_category ? (
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full border whitespace-nowrap ${getCategoryStyle((wallet as any).top_category)}`}>
+                          {(wallet as any).top_category}
+                        </span>
+                      ) : (
+                        <span className="text-gray-600 text-xs">-</span>
+                      )}
                     </td>
                   )}
                   {show('joined') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className="text-gray-600 text-xs">
+                      <span className="text-gray-500 text-xs tabular-nums">
                         {formatCreatedDate(wallet.account_created_at)}
                       </span>
                     </td>

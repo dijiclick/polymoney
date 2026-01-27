@@ -250,7 +250,9 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                     </div>
                     <div>
                       <p className="text-[10px] text-gray-600 uppercase tracking-wider">Trades</p>
-                      <p className="text-xs font-medium text-white">{data.metrics.tradeCountAllTime}</p>
+                      <p className="text-xs font-medium text-white">
+                        {data.metrics.tradeCountAllTime}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -287,7 +289,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                     {data.positions && data.positions.length > 0 ? (
                       data.positions.map((position, index) => (
                         <div
-                          key={position.conditionId || index}
+                          key={`${position.conditionId}-${position.outcome}-${index}`}
                           className="bg-white/[0.02] rounded-lg p-3 hover:bg-white/[0.04] transition-colors"
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -352,7 +354,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                                   {position.outcome} @ {(position.avgPrice * 100)?.toFixed(1)}¢
                                 </span>
                                 {position.resolvedAt && (
-                                  <span className="text-[10px] text-gray-700">
+                                  <span className="text-[10px] text-gray-500">
                                     {new Date(position.resolvedAt).toLocaleDateString()}
                                   </span>
                                 )}

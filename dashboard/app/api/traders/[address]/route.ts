@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import {
   getPositions,
   getClosedPositions,
+  getActivity,
   parsePositions,
   parseClosedPositions,
   isValidEthAddress,
@@ -115,9 +116,10 @@ export async function GET(
 
   // 5. Fetch live data from Polymarket API
   try {
-    const [rawPositions, rawClosedPositions] = await Promise.all([
+    const [rawPositions, rawClosedPositions, rawActivity] = await Promise.all([
       getPositions(address).catch(() => []),
       getClosedPositions(address).catch(() => []),
+      getActivity(address).catch(() => []),
     ])
 
     // Parse all positions from APIs

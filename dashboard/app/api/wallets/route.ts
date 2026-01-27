@@ -85,6 +85,25 @@ export async function GET(request: NextRequest) {
       query = query.eq('source', source)
     }
 
+    // Apply column filters (min/max ranges)
+    const columnFiltersParam = searchParams.get('columnFilters')
+    if (columnFiltersParam) {
+      try {
+        const columnFilters = JSON.parse(columnFiltersParam) as Record<string, { min?: number; max?: number }>
+        for (const [column, filter] of Object.entries(columnFilters)) {
+          if (!VALID_SORT_COLUMNS.includes(column)) continue
+          if (filter.min !== undefined && filter.min !== null) {
+            query = query.gte(column, filter.min)
+          }
+          if (filter.max !== undefined && filter.max !== null) {
+            query = query.lte(column, filter.max)
+          }
+        }
+      } catch {
+        // Ignore invalid JSON
+      }
+    }
+
     // Sort
     query = query.order(safeSortBy, { ascending: sortDir })
 
