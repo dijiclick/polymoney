@@ -48,25 +48,26 @@ export async function GET(request: NextRequest) {
     const minBalance = parseFloat(searchParams.get('minBalance') || '0')
     const minWinRate = parseFloat(searchParams.get('minWinRate') || '0')
     const period = searchParams.get('period') || '7d'
-    const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
     const sortBy = searchParams.get('sortBy') || 'balance'
-    const sortDir = searchParams.get('sortDir') === 'asc' ? true : false
+    const sortAsc = searchParams.get('sortDir') === 'asc'
 
     const search = searchParams.get('search')?.toLowerCase().trim() || ''
-    const offset = (page - 1) * limit
+
+    // Cursor parameters (null = first page)
+    const cursorSortValue = searchParams.get('cursorSortValue') || null
+    const cursorAddress = searchParams.get('cursorAddress') || null
 
     // Validate sort column
     const safeSortBy = VALID_SORT_COLUMNS.includes(sortBy) ? sortBy : 'balance'
 
-    // Build query - no more leaderboard join
+    // Build query with estimated count (fast for large tables)
     let query = supabase
       .from('wallets')
-      .select('*', { count: 'exact' })
+      .select('*', { count: 'estimated' })
 
     // Server-side search by username or address
     if (search) {
-      // Use OR filter for username ILIKE or address ILIKE
       query = query.or(`username.ilike.%${search}%,address.ilike.%${search}%`)
     }
 
@@ -105,11 +106,24 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Sort
-    query = query.order(safeSortBy, { ascending: sortDir })
+    // Cursor-based pagination: filter to rows after the cursor position
+    if (cursorSortValue !== null && cursorAddress) {
+      if (sortAsc) {
+        query = query.or(
+          `${safeSortBy}.gt.${cursorSortValue},and(${safeSortBy}.eq.${cursorSortValue},address.gt.${cursorAddress})`
+        )
+      } else {
+        query = query.or(
+          `${safeSortBy}.lt.${cursorSortValue},and(${safeSortBy}.eq.${cursorSortValue},address.lt.${cursorAddress})`
+        )
+      }
+    }
 
-    // Paginate
-    query = query.range(offset, offset + limit - 1)
+    // Sort with address as tiebreaker for stable cursor pagination
+    query = query
+      .order(safeSortBy, { ascending: sortAsc, nullsFirst: false })
+      .order('address', { ascending: sortAsc })
+      .limit(limit)
 
     const { data, error, count } = await query
 
@@ -118,10 +132,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    // Simple mapping - no more categories/best_rank processing
+    // Map with defaults
     const wallets: Wallet[] = (data || []).map((wallet: any) => ({
       ...wallet,
-      // ===== PERIOD METRICS (7d and 30d - independently calculated) =====
       pnl_7d: wallet.pnl_7d || 0,
       pnl_30d: wallet.pnl_30d || 0,
       roi_7d: wallet.roi_7d || 0,
@@ -132,10 +145,8 @@ export async function GET(request: NextRequest) {
       volume_30d: wallet.volume_30d || 0,
       trade_count_7d: wallet.trade_count_7d || 0,
       trade_count_30d: wallet.trade_count_30d || 0,
-      // ===== DRAWDOWN METRICS =====
       drawdown_7d: wallet.drawdown_7d || 0,
       drawdown_30d: wallet.drawdown_30d || 0,
-      // ===== ALL-TIME METRICS (consistent naming) =====
       pnl_all: wallet.pnl_all || 0,
       roi_all: wallet.roi_all || 0,
       win_rate_all: wallet.win_rate_all || 0,
@@ -143,7 +154,6 @@ export async function GET(request: NextRequest) {
       trade_count_all: wallet.trade_count_all || 0,
       drawdown_all: wallet.drawdown_all || 0,
       drawdown_amount_all: wallet.drawdown_amount_all || 0,
-      // ===== OVERALL/LEGACY METRICS =====
       total_positions: wallet.total_positions || 0,
       active_positions: wallet.active_positions || 0,
       total_wins: wallet.total_wins || 0,
@@ -158,12 +168,18 @@ export async function GET(request: NextRequest) {
       top_category: wallet.top_category || '',
     }))
 
+    // Build next cursor from the last item
+    const lastWallet = wallets.length > 0 ? wallets[wallets.length - 1] : null
+    const nextCursor = lastWallet ? {
+      sortValue: String((lastWallet as any)[safeSortBy] ?? ''),
+      address: lastWallet.address,
+    } : null
+
     return NextResponse.json({
       wallets,
-      total: count || 0,
-      page,
-      limit,
-      totalPages: Math.ceil((count || 0) / limit)
+      totalEstimate: count || 0,
+      nextCursor,
+      hasMore: wallets.length === limit,
     })
   } catch (error) {
     console.error('Error in wallets API:', error)
@@ -181,7 +197,14 @@ export async function POST(request: NextRequest) {
     const { action } = body
 
     if (action === 'stats') {
-      // Get aggregate stats
+      // Try RPC function first (efficient aggregates), fall back to client-side
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_wallet_stats')
+
+      if (!rpcError && rpcData) {
+        return NextResponse.json({ stats: rpcData })
+      }
+
+      // Fallback: fetch minimal columns for stats
       const { data: wallets, error } = await supabase
         .from('wallets')
         .select('source, balance, metrics_updated_at')

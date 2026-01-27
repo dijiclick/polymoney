@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Wallet, TimePeriod } from '@/lib/supabase'
 import TraderDetailModal from './TraderDetailModal'
 
@@ -28,6 +29,9 @@ export const DEFAULT_VISIBLE: ColumnKey[] = ['value', 'winRate', 'roi', 'pnl', '
 interface Props {
   wallets: Wallet[]
   loading: boolean
+  isFetchingMore?: boolean
+  hasMore?: boolean
+  onLoadMore?: () => void
   timePeriod: TimePeriod
   onSort?: (column: string) => void
   sortBy?: string
@@ -142,6 +146,9 @@ function FilterPopover({
 export default function WalletTable({
   wallets,
   loading,
+  isFetchingMore = false,
+  hasMore = false,
+  onLoadMore,
   timePeriod,
   onSort,
   sortBy,
@@ -154,15 +161,38 @@ export default function WalletTable({
   const [openFilter, setOpenFilter] = useState<string | null>(null)
   const [selectedTrader, setSelectedTrader] = useState<{ address: string; username?: string } | null>(null)
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  const virtualizer = useVirtualizer({
+    count: wallets.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => 44,
+    overscan: 15,
+  })
+
+  // Infinite scroll: trigger loadMore when near bottom
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container || !onLoadMore || !hasMore || isFetchingMore) return
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container
+      if (scrollHeight - scrollTop - clientHeight < 500) {
+        onLoadMore()
+      }
+    }
+
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [onLoadMore, hasMore, isFetchingMore])
+
   const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
-  // Check if username looks like an address (starts with 0x and is long)
   const isAddressLikeUsername = (username: string | undefined | null) => {
     if (!username) return false
     return username.startsWith('0x') && username.length > 20
   }
 
-  // Get display name - use formatted address if username looks like an address
   const getDisplayName = (wallet: Wallet) => {
     if (!wallet.username || isAddressLikeUsername(wallet.username)) {
       return formatAddress(wallet.address)
@@ -200,25 +230,11 @@ export default function WalletTable({
     return 'text-red-400'
   }
 
-  const getDrawdownBarColor = (value: number | undefined) => {
-    if (value === undefined || value === null || value === 0) return 'bg-gray-700'
-    if (value <= 10) return 'bg-emerald-500/40'
-    if (value <= 25) return 'bg-amber-500/40'
-    return 'bg-red-500/40'
-  }
-
   const getWinRateColor = (value: number | undefined) => {
     if (value === undefined || value === null) return 'text-gray-400'
     if (value >= 60) return 'text-emerald-400'
     if (value >= 50) return 'text-amber-400'
     return 'text-red-400'
-  }
-
-  const getWinRateBarColor = (value: number | undefined) => {
-    if (value === undefined || value === null) return 'bg-gray-700'
-    if (value >= 60) return 'bg-emerald-500/30'
-    if (value >= 50) return 'bg-amber-500/30'
-    return 'bg-red-500/30'
   }
 
   const getCategoryStyle = (category: string) => {
@@ -235,13 +251,11 @@ export default function WalletTable({
     }
   }
 
-  // Get metrics based on time period
   const getMetric = (wallet: Wallet, metric: string): number => {
     const suffix = timePeriod === 'all' ? '_all' : timePeriod === '30d' ? '_30d' : '_7d'
     return (wallet as any)[metric + suffix] || 0
   }
 
-  // Dynamic column name based on time period
   const getColumnName = (base: string) => {
     if (timePeriod === 'all') return `${base}_all`
     return timePeriod === '30d' ? `${base}_30d` : `${base}_7d`
@@ -335,11 +349,19 @@ export default function WalletTable({
     )
   }
 
+  const virtualRows = virtualizer.getVirtualItems()
+  const totalSize = virtualizer.getTotalSize()
+
   return (
-    <div className="glass rounded-xl">
-      <div className="overflow-x-auto">
+    <div className="glass rounded-xl overflow-hidden">
+      <div
+        ref={scrollContainerRef}
+        className="overflow-auto"
+        data-scroll-container
+        style={{ maxHeight: 'calc(100vh - 240px)' }}
+      >
         <table className="w-full">
-          <thead className="sticky top-14 z-20" style={{ background: 'var(--background)' }}>
+          <thead className="sticky top-0 z-20" style={{ background: 'var(--background)' }}>
             <tr className="border-b border-white/5">
               <th className="px-3 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
               {show('value') && <SortHeader column="balance" label="Value" filterType="money" />}
@@ -353,8 +375,14 @@ export default function WalletTable({
               {show('joined') && <SortHeader column="account_created_at" label="Joined" filterType="number" />}
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/[0.02]">
-            {wallets.map((wallet, index) => {
+          <tbody>
+            {/* Top spacer for virtual scroll */}
+            {virtualRows.length > 0 && virtualRows[0].start > 0 && (
+              <tr><td colSpan={99} style={{ height: virtualRows[0].start, padding: 0, border: 'none' }} /></tr>
+            )}
+            {virtualRows.map((virtualRow) => {
+              const wallet = wallets[virtualRow.index]
+              const index = virtualRow.index
               const pnl = getMetric(wallet, 'pnl')
               const roi = getMetric(wallet, 'roi')
               const drawdown = getMetric(wallet, 'drawdown')
@@ -370,7 +398,9 @@ export default function WalletTable({
               return (
                 <tr
                   key={wallet.address}
-                  className="group hover:bg-white/[0.02] transition-colors"
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  className="group hover:bg-white/[0.02] transition-colors border-b border-white/[0.02]"
                 >
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-2">
@@ -477,6 +507,30 @@ export default function WalletTable({
                 </tr>
               )
             })}
+            {/* Bottom spacer for virtual scroll */}
+            {virtualRows.length > 0 && (
+              <tr>
+                <td
+                  colSpan={99}
+                  style={{
+                    height: totalSize - (virtualRows[virtualRows.length - 1]?.end ?? 0),
+                    padding: 0,
+                    border: 'none',
+                  }}
+                />
+              </tr>
+            )}
+            {/* Loading indicator for infinite scroll */}
+            {isFetchingMore && (
+              <tr>
+                <td colSpan={99} className="py-4 text-center">
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="w-4 h-4 rounded-full border border-white/10 border-t-white/40 animate-spin" />
+                    <span className="text-xs text-gray-500">Loading more...</span>
+                  </div>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

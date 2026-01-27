@@ -21,14 +21,20 @@ interface ColumnFilter {
   max?: number
 }
 
+interface Cursor {
+  sortValue: string
+  address: string
+}
+
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<Wallet[]>([])
   const [stats, setStats] = useState<WalletStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isFetchingMore, setIsFetchingMore] = useState(false)
+  const [nextCursor, setNextCursor] = useState<Cursor | null>(null)
+  const [hasMore, setHasMore] = useState(true)
+  const [totalEstimate, setTotalEstimate] = useState(0)
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('30d')
-  const [page, setPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
-  const [totalWallets, setTotalWallets] = useState(0)
   const [sortBy, setSortBy] = useState('pnl_30d')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [columnFilters, setColumnFilters] = useState<Record<string, ColumnFilter>>({})
@@ -81,16 +87,13 @@ export default function WalletsPage() {
     let input = rawInput.trim()
     if (!input) return
 
-    // Extract address from Polymarket URL: polymarket.com/profile/0x...
     const profileMatch = input.match(/polymarket\.com\/profile\/(0x[a-fA-F0-9]{40})/i)
     if (profileMatch) {
       input = profileMatch[1]
     }
 
-    // Handle polymarket.com/@username or bare @username format
     const usernameMatch = input.match(/polymarket\.com\/@([^/?#]+)/i) || input.match(/^@([^/?#\s]+)$/i)
 
-    // Detect if input looks like a plain username (not a hex address)
     const isHexAddress = /^(0x)?[a-fA-F0-9]{40}$/.test(input)
     const isPlainUsername = !isHexAddress && !usernameMatch && !input.includes('polymarket.com') && !/^0x/i.test(input)
 
@@ -116,7 +119,6 @@ export default function WalletsPage() {
       setResolving(false)
     }
 
-    // Clean up: ensure it's a valid 0x address
     const addr = input.toLowerCase()
     const finalAddr = addr.startsWith('0x') ? addr : `0x${addr}`
     setAnalyzeAddress(finalAddr)
@@ -127,7 +129,6 @@ export default function WalletsPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchQuery)
-      setPage(1)
     }, 300)
     return () => clearTimeout(timer)
   }, [searchQuery])
@@ -148,44 +149,71 @@ export default function WalletsPage() {
     }
   }, [])
 
-  const fetchWallets = useCallback(async () => {
-    setLoading(true)
+  const fetchWallets = useCallback(async (cursor?: Cursor | null) => {
+    const isInitialLoad = !cursor
+    if (isInitialLoad) {
+      setLoading(true)
+    } else {
+      setIsFetchingMore(true)
+    }
+
     try {
       const params = new URLSearchParams({
         source: 'all',
         minBalance: '0',
         minWinRate: '0',
         period: timePeriod,
-        page: String(page),
         limit: '50',
         sortBy,
         sortDir,
         ...(debouncedSearch.trim() && { search: debouncedSearch.trim() }),
-        ...(Object.keys(columnFilters).length > 0 && { columnFilters: JSON.stringify(columnFilters) })
+        ...(Object.keys(columnFilters).length > 0 && { columnFilters: JSON.stringify(columnFilters) }),
+        ...(cursor && {
+          cursorSortValue: cursor.sortValue,
+          cursorAddress: cursor.address,
+        }),
       })
 
       const res = await fetch(`/api/wallets?${params}`)
       const data = await res.json()
 
       if (data.wallets) {
-        setWallets(data.wallets)
-        setTotalPages(data.totalPages || 1)
-        setTotalWallets(data.total || 0)
+        if (isInitialLoad) {
+          setWallets(data.wallets)
+        } else {
+          setWallets(prev => [...prev, ...data.wallets])
+        }
+        setNextCursor(data.nextCursor)
+        setHasMore(data.hasMore)
+        setTotalEstimate(data.totalEstimate || 0)
       }
     } catch (error) {
       console.error('Error fetching wallets:', error)
     } finally {
       setLoading(false)
+      setIsFetchingMore(false)
     }
-  }, [timePeriod, page, sortBy, sortDir, debouncedSearch, columnFilters])
+  }, [timePeriod, sortBy, sortDir, debouncedSearch, columnFilters])
+
+  // Reset and fetch from beginning when filters/sort/search change
+  useEffect(() => {
+    setWallets([])
+    setNextCursor(null)
+    setHasMore(true)
+    const container = document.querySelector('[data-scroll-container]')
+    if (container) container.scrollTop = 0
+    fetchWallets(null)
+  }, [fetchWallets])
 
   useEffect(() => {
     fetchStats()
   }, [fetchStats])
 
-  useEffect(() => {
-    fetchWallets()
-  }, [fetchWallets])
+  const loadMore = useCallback(() => {
+    if (!isFetchingMore && hasMore && nextCursor) {
+      fetchWallets(nextCursor)
+    }
+  }, [isFetchingMore, hasMore, nextCursor, fetchWallets])
 
   const handleSort = (column: string) => {
     if (sortBy === column) {
@@ -194,12 +222,10 @@ export default function WalletsPage() {
       setSortBy(column)
       setSortDir('desc')
     }
-    setPage(1)
   }
 
   const handleTimePeriodChange = (period: TimePeriod) => {
     setTimePeriod(period)
-    setPage(1)
     const getSuffix = (p: TimePeriod) => p === 'all' ? '_all' : p === '30d' ? '_30d' : '_7d'
     const newSuffix = getSuffix(period)
     const oldSuffix = getSuffix(timePeriod)
@@ -225,7 +251,6 @@ export default function WalletsPage() {
       }
       return { ...prev, [column]: filter }
     })
-    setPage(1)
   }
 
   const activeFilterCount = Object.keys(columnFilters).length
@@ -425,7 +450,10 @@ export default function WalletsPage() {
           </div>
 
           <div className="text-xs text-gray-600">
-            <span className="text-gray-400">{totalWallets.toLocaleString()}</span>
+            <span className="text-gray-400">{wallets.length.toLocaleString()}</span>
+            {totalEstimate > wallets.length && (
+              <span> of ~{totalEstimate.toLocaleString()}</span>
+            )}
             {' '}traders
           </div>
         </div>
@@ -450,6 +478,9 @@ export default function WalletsPage() {
       <WalletTable
         wallets={wallets}
         loading={loading}
+        isFetchingMore={isFetchingMore}
+        hasMore={hasMore}
+        onLoadMore={loadMore}
         timePeriod={timePeriod}
         onSort={handleSort}
         sortBy={sortBy}
@@ -459,43 +490,28 @@ export default function WalletsPage() {
         visibleColumns={visibleColumns}
       />
 
+      {/* Scroll status */}
+      {wallets.length > 0 && (
+        <div className="flex items-center justify-between mt-2 px-1">
+          <p className="text-[10px] text-gray-600">
+            Showing <span className="text-gray-400">{wallets.length.toLocaleString()}</span>
+            {totalEstimate > wallets.length && (
+              <> of ~<span className="text-gray-400">{totalEstimate.toLocaleString()}</span></>
+            )}
+            {' '}traders
+          </p>
+          {isFetchingMore && (
+            <p className="text-[10px] text-gray-500">Loading more...</p>
+          )}
+        </div>
+      )}
+
       {/* Analyze Wallet Modal */}
       <TraderDetailModal
         address={analyzeAddress}
         isOpen={showAnalyzeModal}
         onClose={() => { setShowAnalyzeModal(false); setAnalyzeAddress('') }}
       />
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 px-1">
-          <p className="text-[10px] text-gray-600">
-            Page <span className="text-gray-400">{page}</span> of <span className="text-gray-400">{totalPages}</span>
-          </p>
-          <div className="flex gap-1">
-            <button
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page === 1}
-              className="px-3 py-1.5 bg-white/[0.02] border border-white/5 rounded-lg text-[10px] text-gray-400 hover:bg-white/[0.05] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center gap-1"
-            >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Prev
-            </button>
-            <button
-              onClick={() => setPage(Math.min(totalPages, page + 1))}
-              disabled={page === totalPages}
-              className="px-3 py-1.5 bg-white/[0.02] border border-white/5 rounded-lg text-[10px] text-gray-400 hover:bg-white/[0.05] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center gap-1"
-            >
-              Next
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
