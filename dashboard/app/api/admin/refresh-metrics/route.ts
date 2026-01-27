@@ -7,7 +7,7 @@ import {
   getClosedPositions,
   parsePositions,
   parseClosedPositions,
-  fetchMarketCategories,
+  fetchEventCategories,
   getTopCategory,
 } from '@/lib/polymarket-api'
 import { TimePeriodMetrics } from '@/lib/types/trader'
@@ -340,13 +340,13 @@ export async function POST(request: NextRequest) {
       const metrics30d = calculatePeriodMetrics(closedPositions, 30, currentBalance)
       const metricsAll = calculatePeriodMetrics(closedPositions, 36500, currentBalance) // ~100 years = all time
 
-      // Fetch market categories for top category
-      const allConditionIds = [
-        ...closedPositions.map((p: any) => p.conditionId),
-        ...openPositions.map((p: any) => p.conditionId),
-      ]
-      const categoryMap = await fetchMarketCategories(allConditionIds)
-      const topCategory = getTopCategory(allConditionIds, categoryMap)
+      // Fetch event categories for top category
+      const allEventSlugs = [
+        ...rawPositions.map((p: any) => String(p.eventSlug || '')),
+        ...rawClosedPositions.map((p: any) => String(p.eventSlug || '')),
+      ].filter(Boolean)
+      const categoryMap = await fetchEventCategories(allEventSlugs)
+      const topCategory = getTopCategory(allEventSlugs, categoryMap)
 
       // Update database
       const { error: updateError } = await supabase.from('wallets').update({

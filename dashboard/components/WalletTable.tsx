@@ -9,6 +9,22 @@ interface ColumnFilter {
   max?: number
 }
 
+export type ColumnKey = 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'category' | 'joined'
+
+export const COLUMNS: { key: ColumnKey; label: string }[] = [
+  { key: 'value', label: 'Value' },
+  { key: 'winRate', label: 'Win Rate' },
+  { key: 'roi', label: 'ROI' },
+  { key: 'pnl', label: 'PnL' },
+  { key: 'active', label: 'Active' },
+  { key: 'total', label: 'Total' },
+  { key: 'dd', label: 'Drawdown' },
+  { key: 'category', label: 'Category' },
+  { key: 'joined', label: 'Joined' },
+]
+
+export const DEFAULT_VISIBLE: ColumnKey[] = ['value', 'winRate', 'roi', 'pnl', 'active', 'total', 'dd', 'category', 'joined']
+
 interface Props {
   wallets: Wallet[]
   loading: boolean
@@ -18,6 +34,7 @@ interface Props {
   sortDir?: 'asc' | 'desc'
   columnFilters?: Record<string, ColumnFilter>
   onColumnFilterChange?: (column: string, filter: ColumnFilter) => void
+  visibleColumns?: ColumnKey[]
 }
 
 function FilterPopover({
@@ -130,8 +147,10 @@ export default function WalletTable({
   sortBy,
   sortDir,
   columnFilters = {},
-  onColumnFilterChange
+  onColumnFilterChange,
+  visibleColumns = DEFAULT_VISIBLE,
 }: Props) {
+  const show = (key: ColumnKey) => visibleColumns.includes(key)
   const [openFilter, setOpenFilter] = useState<string | null>(null)
   const [selectedTrader, setSelectedTrader] = useState<{ address: string; username?: string } | null>(null)
 
@@ -295,15 +314,15 @@ export default function WalletTable({
           <thead>
             <tr className="border-b border-white/5">
               <th className="px-3 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
-              <SortHeader column="balance" label="Value" filterType="money" />
-              <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" />
-              <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" />
-              <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" />
-              <SortHeader column="active_positions" label="Active" align="center" filterType="number" />
-              <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" />
-              <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" />
-              <th className="px-3 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Category</th>
-              <SortHeader column="account_created_at" label="Joined" filterType="number" />
+              {show('value') && <SortHeader column="balance" label="Value" filterType="money" />}
+              {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" />}
+              {show('roi') && <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" />}
+              {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" />}
+              {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" />}
+              {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" />}
+              {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" />}
+              {show('category') && <th className="px-3 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Category</th>}
+              {show('joined') && <SortHeader column="account_created_at" label="Joined" filterType="number" />}
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.02]">
@@ -349,49 +368,67 @@ export default function WalletTable({
                       </a>
                     </div>
                   </td>
-                  <td className="px-3 py-2.5 text-right">
-                    <span className="text-gray-400 text-xs">{formatMoney(wallet.balance)}</span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right">
-                    <span className={`text-xs ${getWinRateColor(winRate)}`}>
-                      {formatPercentPlain(winRate)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right">
-                    <span className={`text-xs font-medium ${getPnlColor(roi)}`}>
-                      {formatPercent(roi)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right">
-                    <span className={`text-xs ${getPnlColor(pnl)}`}>
-                      {formatMoney(pnl)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-center">
-                    <span className="text-xs text-gray-400">
-                      {wallet.active_positions || 0}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-center">
-                    <span className="text-gray-500 text-xs">
-                      {getMetric(wallet, 'trade_count') || 0}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right">
-                    <span className={`text-xs ${getDrawdownColor(drawdown)}`}>
-                      {drawdown > 0 ? `${formatPercentPlain(drawdown)}` : '-'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-left">
-                    <span className="text-gray-500 text-xs truncate max-w-[100px] inline-block">
-                      {(wallet as any).top_category || '-'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right">
-                    <span className="text-gray-600 text-xs">
-                      {formatCreatedDate(wallet.account_created_at)}
-                    </span>
-                  </td>
+                  {show('value') && (
+                    <td className="px-3 py-2.5 text-right">
+                      <span className="text-gray-400 text-xs">{formatMoney(wallet.balance)}</span>
+                    </td>
+                  )}
+                  {show('winRate') && (
+                    <td className="px-3 py-2.5 text-right">
+                      <span className={`text-xs ${getWinRateColor(winRate)}`}>
+                        {formatPercentPlain(winRate)}
+                      </span>
+                    </td>
+                  )}
+                  {show('roi') && (
+                    <td className="px-3 py-2.5 text-right">
+                      <span className={`text-xs font-medium ${getPnlColor(roi)}`}>
+                        {formatPercent(roi)}
+                      </span>
+                    </td>
+                  )}
+                  {show('pnl') && (
+                    <td className="px-3 py-2.5 text-right">
+                      <span className={`text-xs ${getPnlColor(pnl)}`}>
+                        {formatMoney(pnl)}
+                      </span>
+                    </td>
+                  )}
+                  {show('active') && (
+                    <td className="px-3 py-2.5 text-center">
+                      <span className="text-xs text-gray-400">
+                        {wallet.active_positions || 0}
+                      </span>
+                    </td>
+                  )}
+                  {show('total') && (
+                    <td className="px-3 py-2.5 text-center">
+                      <span className="text-gray-500 text-xs">
+                        {getMetric(wallet, 'trade_count') || 0}
+                      </span>
+                    </td>
+                  )}
+                  {show('dd') && (
+                    <td className="px-3 py-2.5 text-right">
+                      <span className={`text-xs ${getDrawdownColor(drawdown)}`}>
+                        {drawdown > 0 ? `${formatPercentPlain(drawdown)}` : '-'}
+                      </span>
+                    </td>
+                  )}
+                  {show('category') && (
+                    <td className="px-3 py-2.5 text-left">
+                      <span className="text-gray-500 text-xs whitespace-nowrap">
+                        {(wallet as any).top_category || '-'}
+                      </span>
+                    </td>
+                  )}
+                  {show('joined') && (
+                    <td className="px-3 py-2.5 text-right">
+                      <span className="text-gray-600 text-xs">
+                        {formatCreatedDate(wallet.account_created_at)}
+                      </span>
+                    </td>
+                  )}
                 </tr>
               )
             })}

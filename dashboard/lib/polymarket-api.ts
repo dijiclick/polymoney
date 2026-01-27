@@ -614,59 +614,78 @@ export function calculateMetrics(
   }
 }
 
+// Top-level category tags to look for in event tags (in priority order)
+const TOP_LEVEL_CATEGORIES = new Set([
+  'Sports', 'Politics', 'Crypto', 'Science', 'Pop Culture',
+  'Tech', 'Business', 'Entertainment', 'Finance', 'World',
+  'Geopolitics', 'AI', 'Climate', 'Health',
+])
+
 /**
- * Fetch market categories from Gamma API for a list of conditionIds.
- * Returns a Map of conditionId -> category string.
- * Batches requests to avoid rate limiting.
+ * Extract the primary category from an event's tags array.
+ * Prefers broad top-level tags (Sports, Politics, Crypto, etc.)
+ * Falls back to the first tag if no top-level match.
  */
-export async function fetchMarketCategories(conditionIds: string[]): Promise<Map<string, string>> {
+function extractCategoryFromTags(tags: Array<{ label: string; slug?: string }>): string {
+  if (!tags || tags.length === 0) return ''
+  // Find the first top-level category tag
+  for (const tag of tags) {
+    if (TOP_LEVEL_CATEGORIES.has(tag.label)) return tag.label
+  }
+  // Fall back to first tag that isn't a generic tag
+  const filtered = tags.filter(t => t.label !== 'All' && t.label !== 'Featured')
+  return filtered.length > 0 ? filtered[0].label : tags[0].label
+}
+
+/**
+ * Fetch event categories from Gamma API for a list of event slugs.
+ * Returns a Map of eventSlug -> category string.
+ * Uses /events?slug=X&slug=Y&limit=100 to batch all slugs in one request.
+ */
+export async function fetchEventCategories(eventSlugs: string[]): Promise<Map<string, string>> {
   const categoryMap = new Map<string, string>()
-  const uniqueIds = [...new Set(conditionIds.filter(Boolean))]
+  const uniqueSlugs = [...new Set(eventSlugs.filter(Boolean))]
 
-  if (uniqueIds.length === 0) return categoryMap
+  if (uniqueSlugs.length === 0) return categoryMap
 
-  // Batch in groups of 5 to avoid rate limits
-  const BATCH_SIZE = 5
-  for (let i = 0; i < uniqueIds.length && i < 50; i += BATCH_SIZE) {
-    const batch = uniqueIds.slice(i, i + BATCH_SIZE)
-    const results = await Promise.all(
-      batch.map(async (cid) => {
-        try {
-          const res = await fetch(`${GAMMA_API_BASE}/markets?condition_id=${cid}`, {
-            signal: AbortSignal.timeout(5000),
-          })
-          if (!res.ok) return { cid, category: '' }
-          const data = await res.json()
-          const market = Array.isArray(data) ? data[0] : data
-          return { cid, category: market?.category || '' }
-        } catch {
-          return { cid, category: '' }
-        }
-      })
-    )
-    for (const { cid, category } of results) {
-      if (category) categoryMap.set(cid, category)
+  try {
+    const slugParams = uniqueSlugs.map(s => `slug=${encodeURIComponent(s)}`).join('&')
+    const res = await fetch(`${GAMMA_API_BASE}/events?limit=100&${slugParams}`, {
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!res.ok) return categoryMap
+    const events = await res.json()
+    if (!Array.isArray(events)) return categoryMap
+
+    for (const event of events) {
+      const slug = event.slug
+      if (slug) {
+        const category = extractCategoryFromTags(event.tags || [])
+        if (category) categoryMap.set(slug, category)
+      }
     }
+  } catch {
+    // Silently fail - category is non-critical
   }
 
   return categoryMap
 }
 
 /**
- * Determine the top (most traded) category from positions and a category map.
- * Returns the category with the most unique conditionIds.
+ * Determine the top (most traded) category from event slugs and a category map.
+ * Returns the category with the most unique events.
  */
 export function getTopCategory(
-  conditionIds: string[],
+  eventSlugs: string[],
   categoryMap: Map<string, string>
 ): string {
   const categoryCounts = new Map<string, number>()
-  const seenConditions = new Set<string>()
+  const seenSlugs = new Set<string>()
 
-  for (const cid of conditionIds) {
-    if (!cid || seenConditions.has(cid)) continue
-    seenConditions.add(cid)
-    const cat = categoryMap.get(cid)
+  for (const slug of eventSlugs) {
+    if (!slug || seenSlugs.has(slug)) continue
+    seenSlugs.add(slug)
+    const cat = categoryMap.get(slug)
     if (cat) {
       categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1)
     }

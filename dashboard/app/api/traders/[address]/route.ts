@@ -6,7 +6,7 @@ import {
   parsePositions,
   parseClosedPositions,
   isValidEthAddress,
-  fetchMarketCategories,
+  fetchEventCategories,
   getTopCategory,
 } from '@/lib/polymarket-api'
 import { TraderProfileResponse, TraderFetchError, TimePeriodMetrics } from '@/lib/types/trader'
@@ -177,13 +177,14 @@ export async function GET(
     const uniqueOpenMarkets = new Set(openPositions.map(p => p.conditionId).filter(Boolean)).size
     const uniqueMarkets = uniqueClosedMarkets
 
-    // Fetch market categories for top category calculation
-    const allConditionIds = [
-      ...closedPositions.map(p => p.conditionId),
-      ...openPositions.map(p => p.conditionId),
-    ]
-    const categoryMap = await fetchMarketCategories(allConditionIds)
-    const topCategory = getTopCategory(allConditionIds, categoryMap)
+    // Fetch event categories for top category calculation
+    // Extract eventSlugs from raw positions (available on both open and closed)
+    const allEventSlugs = [
+      ...rawPositions.map((p: any) => String(p.eventSlug || '')),
+      ...rawClosedPositions.map((p: any) => String(p.eventSlug || '')),
+    ].filter(Boolean)
+    const categoryMap = await fetchEventCategories(allEventSlugs)
+    const topCategory = getTopCategory(allEventSlugs, categoryMap)
 
     // 6. Update wallets table with fresh data (if wallet exists)
     if (dbWallet) {

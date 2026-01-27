@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Wallet, WalletFilter, TimePeriod } from '@/lib/supabase'
 import TimePeriodSelector from '@/components/TimePeriodSelector'
-import WalletTable from '@/components/WalletTable'
+import WalletTable, { ColumnKey, COLUMNS, DEFAULT_VISIBLE } from '@/components/WalletTable'
 import TraderDetailModal from '@/components/TraderDetailModal'
 
 interface WalletStats {
@@ -38,7 +38,44 @@ export default function WalletsPage() {
   const [showAnalyzeInput, setShowAnalyzeInput] = useState(false)
   const [showAnalyzeModal, setShowAnalyzeModal] = useState(false)
   const [resolving, setResolving] = useState(false)
+  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(DEFAULT_VISIBLE)
+  const [showColumnSettings, setShowColumnSettings] = useState(false)
+  const columnSettingsRef = useRef<HTMLDivElement>(null)
   const analyzeInputRef = useRef<HTMLInputElement>(null)
+
+  // Load column preferences from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('polymarket-visible-columns')
+      if (saved) {
+        const parsed = JSON.parse(saved) as ColumnKey[]
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setVisibleColumns(parsed)
+        }
+      }
+    } catch {}
+  }, [])
+
+  const toggleColumn = (key: ColumnKey) => {
+    setVisibleColumns(prev => {
+      const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+      if (next.length === 0) return prev // keep at least one
+      localStorage.setItem('polymarket-visible-columns', JSON.stringify(next))
+      return next
+    })
+  }
+
+  // Close column settings on outside click
+  useEffect(() => {
+    if (!showColumnSettings) return
+    const handleClick = (e: MouseEvent) => {
+      if (columnSettingsRef.current && !columnSettingsRef.current.contains(e.target as Node)) {
+        setShowColumnSettings(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showColumnSettings])
 
   const resolveAndAnalyze = async (rawInput: string) => {
     let input = rawInput.trim()
@@ -195,8 +232,6 @@ export default function WalletsPage() {
             value = wallet.balance
           } else if (column === 'active_positions') {
             value = wallet.active_positions
-          } else if (column === 'total_positions') {
-            value = wallet.total_positions
           } else {
             value = (wallet as any)[column] || 0
           }
@@ -365,6 +400,50 @@ export default function WalletsPage() {
             </button>
           )}
 
+          {/* Column Settings */}
+          <div className="relative" ref={columnSettingsRef}>
+            <button
+              onClick={() => setShowColumnSettings(!showColumnSettings)}
+              className={`px-2 py-1.5 bg-white/[0.02] border rounded-lg text-[10px] transition-all flex items-center gap-1.5 ${
+                showColumnSettings
+                  ? 'border-white/20 text-white'
+                  : visibleColumns.length < DEFAULT_VISIBLE.length
+                    ? 'border-blue-500/20 text-blue-400 hover:border-blue-500/30'
+                    : 'border-white/5 text-gray-500 hover:text-gray-400 hover:border-white/10'
+              }`}
+              title="Toggle columns"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 4h6M9 8h6M9 12h6M9 16h6M9 20h6" />
+              </svg>
+            </button>
+            {showColumnSettings && (
+              <div className="absolute top-full left-0 mt-2 z-50 bg-[#12121a] border border-white/10 rounded-lg shadow-2xl p-2 min-w-[160px]">
+                <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider px-2 py-1.5">Columns</div>
+                {COLUMNS.map(col => (
+                  <button
+                    key={col.key}
+                    onClick={() => toggleColumn(col.key)}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/5 transition-colors"
+                  >
+                    <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${
+                      visibleColumns.includes(col.key)
+                        ? 'bg-blue-500/20 border-blue-500/50'
+                        : 'border-white/10'
+                    }`}>
+                      {visibleColumns.includes(col.key) && (
+                        <svg className="w-2.5 h-2.5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </div>
+                    <span className={visibleColumns.includes(col.key) ? 'text-gray-300' : 'text-gray-600'}>{col.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="text-xs text-gray-600">
             <span className="text-gray-400">{filteredWallets.length.toLocaleString()}</span>
             {(activeFilterCount > 0 || searchQuery) && <span className="text-gray-600"> / {totalWallets.toLocaleString()}</span>}
@@ -398,6 +477,7 @@ export default function WalletsPage() {
         sortDir={sortDir}
         columnFilters={columnFilters}
         onColumnFilterChange={handleColumnFilterChange}
+        visibleColumns={visibleColumns}
       />
 
       {/* Analyze Wallet Modal */}

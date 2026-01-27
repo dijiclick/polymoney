@@ -332,7 +332,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                     {data.closedPositions && data.closedPositions.length > 0 ? (
                       data.closedPositions.map((position, index) => (
                         <div
-                          key={position.conditionId || index}
+                          key={`${position.conditionId}-${index}`}
                           className="bg-white/[0.02] rounded-lg p-3"
                         >
                           <div className="flex items-start justify-between gap-3">
