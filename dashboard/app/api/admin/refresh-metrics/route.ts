@@ -127,29 +127,35 @@ function groupPositionsIntoTrades(
 function calculateMaxDrawdown(
   closedPositions: { realizedPnl: number; resolvedAt?: string }[],
   initialBalance: number = 0,
-): number {
+): { percent: number; amount: number } {
   const sortedPositions = [...closedPositions]
     .filter(p => p.resolvedAt)
     .sort((a, b) => new Date(a.resolvedAt!).getTime() - new Date(b.resolvedAt!).getTime())
 
-  if (sortedPositions.length === 0) return 0
+  if (sortedPositions.length === 0) return { percent: 0, amount: 0 }
 
   let balance = initialBalance
   let maxBalance = initialBalance
   let maxDrawdownPercent = 0
+  let maxDrawdownAmount = 0
 
   for (const position of sortedPositions) {
     balance += position.realizedPnl
     if (balance > maxBalance) maxBalance = balance
     if (maxBalance > 0) {
       const drawdownPercent = ((maxBalance - balance) / maxBalance) * 100
+      const drawdownAmount = maxBalance - balance
       if (drawdownPercent > maxDrawdownPercent) {
         maxDrawdownPercent = drawdownPercent
+        maxDrawdownAmount = drawdownAmount
       }
     }
   }
 
-  return Math.min(Math.round(maxDrawdownPercent * 100) / 100, 100)
+  return {
+    percent: Math.min(Math.round(maxDrawdownPercent * 100) / 100, 100),
+    amount: Math.round(maxDrawdownAmount * 100) / 100,
+  }
 }
 
 /**
@@ -195,7 +201,7 @@ function calculatePeriodMetrics(
   const roi = volume > 0 ? (pnl / volume) * 100 : 0
   // Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
   const initialBalance = Math.max(currentBalance - pnl, currentBalance, 1)
-  const drawdown = calculateMaxDrawdown(periodPositions, initialBalance)
+  const drawdownResult = calculateMaxDrawdown(periodPositions, initialBalance)
 
   return {
     pnl: Math.round(pnl * 100) / 100,
@@ -203,7 +209,8 @@ function calculatePeriodMetrics(
     volume: Math.round(volume * 100) / 100,
     tradeCount,
     winRate: Math.round(winRate * 100) / 100,
-    drawdown,
+    drawdown: drawdownResult.percent,
+    drawdownAmount: drawdownResult.amount,
   }
 }
 
@@ -244,7 +251,7 @@ function calculatePolymarketMetrics(
   const winRateAll = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0
   // Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
   const drawdownBase = Math.max(currentBalance - totalPnl, currentBalance, 1)
-  const maxDrawdown = calculateMaxDrawdown(closedPositions, drawdownBase)
+  const maxDrawdownResult = calculateMaxDrawdown(closedPositions, drawdownBase)
 
   return {
     realizedPnl: Math.round(realizedPnl * 100) / 100,
@@ -257,7 +264,8 @@ function calculatePolymarketMetrics(
     lossCount,
     tradeCount,
     activeTradeCount,
-    maxDrawdown,
+    maxDrawdown: maxDrawdownResult.percent,
+    maxDrawdownAmount: maxDrawdownResult.amount,
   }
 }
 
@@ -386,6 +394,7 @@ export async function POST(request: NextRequest) {
         volume_all: metricsAll.volume,
         trade_count_all: metricsAll.tradeCount,
         drawdown_all: metricsAll.drawdown,
+        drawdown_amount_all: metricsAll.drawdownAmount,
         ...(topCategory && { top_category: topCategory }),
         metrics_updated_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),

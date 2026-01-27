@@ -443,9 +443,12 @@ export default function WalletTable({
                   {show('dd') && (
                     <td className="px-3 py-2.5 text-right">
                       {drawdown > 0 ? (
-                        <span className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded ${
-                          drawdown <= 10 ? 'bg-emerald-500/10' : drawdown <= 25 ? 'bg-amber-500/10' : 'bg-red-500/10'
-                        } ${getDrawdownColor(drawdown)}`}>
+                        <span
+                          className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded cursor-default ${
+                            drawdown <= 10 ? 'bg-emerald-500/10' : drawdown <= 25 ? 'bg-amber-500/10' : 'bg-red-500/10'
+                          } ${getDrawdownColor(drawdown)}`}
+                          title={`Max drawdown: ${formatMoney(wallet.drawdown_amount_all)}`}
+                        >
                           {formatPercentPlain(drawdown)}
                         </span>
                       ) : (

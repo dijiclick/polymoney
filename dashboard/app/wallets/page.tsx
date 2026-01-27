@@ -89,16 +89,22 @@ export default function WalletsPage() {
 
     // Handle polymarket.com/@username or bare @username format
     const usernameMatch = input.match(/polymarket\.com\/@([^/?#]+)/i) || input.match(/^@([^/?#\s]+)$/i)
-    if (usernameMatch) {
-      const username = usernameMatch[1]
+
+    // Detect if input looks like a plain username (not a hex address)
+    const isHexAddress = /^(0x)?[a-fA-F0-9]{40}$/.test(input)
+    const isPlainUsername = !isHexAddress && !usernameMatch && !input.includes('polymarket.com') && !/^0x/i.test(input)
+
+    const usernameToResolve = usernameMatch ? usernameMatch[1] : isPlainUsername ? input : null
+
+    if (usernameToResolve) {
       setResolving(true)
       try {
-        const res = await fetch(`/api/resolve-username?username=${encodeURIComponent(username)}`)
+        const res = await fetch(`/api/resolve-username?username=${encodeURIComponent(usernameToResolve)}`)
         const data = await res.json()
         if (data.address) {
           input = data.address
         } else {
-          alert(`Could not find wallet for username: @${username}`)
+          alert(`Could not find wallet for username: ${usernameToResolve}`)
           setResolving(false)
           return
         }

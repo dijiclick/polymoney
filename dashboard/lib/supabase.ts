@@ -132,6 +132,7 @@ export interface Wallet {
   volume_all: number       // total volume all-time
   trade_count_all: number  // total trades all-time
   drawdown_all: number     // max drawdown all-time (percentage)
+  drawdown_amount_all: number  // max drawdown all-time in dollar amount
   // ===== OVERALL/LEGACY METRICS (matches Polymarket profile) =====
   total_positions: number   // closed positions (all-time)
   active_positions: number  // currently open positions

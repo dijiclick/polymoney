@@ -37,6 +37,7 @@ export interface TimePeriodMetrics {
   tradeCount: number
   winRate: number
   drawdown?: number  // maximum peak-to-trough decline (%)
+  drawdownAmount?: number  // maximum peak-to-trough decline in dollars
   // Optional fields
   positionsResolved?: number  // positions resolved in this period
   winningPositions?: number

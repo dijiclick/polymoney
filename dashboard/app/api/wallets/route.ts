@@ -23,6 +23,7 @@ const VALID_SORT_COLUMNS = [
   'drawdown_7d',
   'drawdown_30d',
   'drawdown_all',
+  'drawdown_amount_all',
   // Overall/legacy metrics
   'overall_win_rate',
   'overall_pnl',
@@ -141,6 +142,7 @@ export async function GET(request: NextRequest) {
       volume_all: wallet.volume_all || 0,
       trade_count_all: wallet.trade_count_all || 0,
       drawdown_all: wallet.drawdown_all || 0,
+      drawdown_amount_all: wallet.drawdown_amount_all || 0,
       // ===== OVERALL/LEGACY METRICS =====
       total_positions: wallet.total_positions || 0,
       active_positions: wallet.active_positions || 0,
