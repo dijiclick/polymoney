@@ -87,6 +87,11 @@ class PolymarketDataAPI:
         # Default rate limiter for unknown endpoints
         self._default_limiter = EndpointRateLimiter(30)
 
+        # Per-endpoint locks: only one pagination sequence at a time per endpoint
+        self._endpoint_locks: dict[str, asyncio.Lock] = {
+            endpoint: asyncio.Lock() for endpoint in ENDPOINT_RATE_LIMITS
+        }
+
     async def __aenter__(self):
         self._session = aiohttp.ClientSession()
         return self
@@ -162,7 +167,22 @@ class PolymarketDataAPI:
         Fetch all pages of data using rate-limited parallel batching.
 
         Uses endpoint-specific batch sizes to respect rate limits.
+        Only one pagination sequence runs at a time per endpoint to prevent
+        multiple workers from overwhelming low-limit endpoints.
         """
+        lock = self._endpoint_locks.get(endpoint)
+        if lock:
+            async with lock:
+                return await self._fetch_all_pages_inner(endpoint, base_params, page_size)
+        return await self._fetch_all_pages_inner(endpoint, base_params, page_size)
+
+    async def _fetch_all_pages_inner(
+        self,
+        endpoint: str,
+        base_params: dict,
+        page_size: int = PAGE_SIZE
+    ) -> list[dict]:
+        """Inner pagination logic, called under endpoint lock."""
         all_data = []
         offset = 0
         batch_size = self._get_batch_size(endpoint)
