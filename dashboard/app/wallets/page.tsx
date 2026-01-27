@@ -282,7 +282,6 @@ export default function WalletsPage() {
           {/* Analyze Wallet */}
           {showAnalyzeInput ? (
             <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-600 font-mono">0x</span>
               <input
                 ref={analyzeInputRef}
                 type="text"
@@ -290,7 +289,14 @@ export default function WalletsPage() {
                 onChange={(e) => setAnalyzeAddress(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && analyzeAddress.trim()) {
-                    const addr = analyzeAddress.trim().toLowerCase()
+                    let input = analyzeAddress.trim()
+                    // Extract address from Polymarket URL: polymarket.com/profile/0x...
+                    const profileMatch = input.match(/polymarket\.com\/profile\/(0x[a-fA-F0-9]{40})/i)
+                    if (profileMatch) {
+                      input = profileMatch[1]
+                    }
+                    // Clean up: ensure it's a valid 0x address
+                    const addr = input.toLowerCase()
                     setAnalyzeAddress(addr.startsWith('0x') ? addr : `0x${addr}`)
                     setShowAnalyzeModal(true)
                     setShowAnalyzeInput(false)
@@ -300,8 +306,8 @@ export default function WalletsPage() {
                     setAnalyzeAddress('')
                   }
                 }}
-                placeholder="Paste wallet address..."
-                className="w-72 pl-8 pr-8 py-1.5 bg-white/[0.02] border border-blue-500/30 rounded-lg text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 transition-all font-mono"
+                placeholder="0x address or Polymarket profile URL..."
+                className="w-80 pl-3 pr-8 py-1.5 bg-white/[0.02] border border-blue-500/30 rounded-lg text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 transition-all font-mono"
                 autoFocus
               />
               <button
