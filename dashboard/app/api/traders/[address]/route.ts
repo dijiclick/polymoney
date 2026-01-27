@@ -6,6 +6,8 @@ import {
   parsePositions,
   parseClosedPositions,
   isValidEthAddress,
+  fetchMarketCategories,
+  getTopCategory,
 } from '@/lib/polymarket-api'
 import { TraderProfileResponse, TraderFetchError, TimePeriodMetrics } from '@/lib/types/trader'
 
@@ -175,9 +177,17 @@ export async function GET(
     const uniqueOpenMarkets = new Set(openPositions.map(p => p.conditionId).filter(Boolean)).size
     const uniqueMarkets = uniqueClosedMarkets
 
+    // Fetch market categories for top category calculation
+    const allConditionIds = [
+      ...closedPositions.map(p => p.conditionId),
+      ...openPositions.map(p => p.conditionId),
+    ]
+    const categoryMap = await fetchMarketCategories(allConditionIds)
+    const topCategory = getTopCategory(allConditionIds, categoryMap)
+
     // 6. Update wallets table with fresh data (if wallet exists)
     if (dbWallet) {
-      updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, uniqueOpenMarkets, uniqueClosedMarkets)
+      updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, uniqueOpenMarkets, uniqueClosedMarkets, topCategory)
     }
 
     // 7. Build response - all metrics from Polymarket
@@ -616,7 +626,8 @@ async function updateWalletMetrics(
   metrics7d: TimePeriodMetrics,
   metrics30d: TimePeriodMetrics,
   activePositionCount: number,
-  closedPositionCount: number
+  closedPositionCount: number,
+  topCategory?: string
 ) {
   try {
     await supabase.from('wallets').update({
@@ -646,6 +657,7 @@ async function updateWalletMetrics(
       overall_win_rate: polymarketMetrics.winRateAll,
       total_volume: polymarketMetrics.totalBought,
       total_trades: polymarketMetrics.tradeCount,
+      ...(topCategory && { top_category: topCategory }),
       metrics_updated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('address', address)

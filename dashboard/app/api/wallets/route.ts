@@ -134,6 +134,7 @@ export async function GET(request: NextRequest) {
       overall_win_rate: wallet.overall_win_rate || 0,
       total_volume: wallet.total_volume || 0,
       total_trades: wallet.total_trades || 0,
+      top_category: wallet.top_category || '',
     }))
 
     return NextResponse.json({

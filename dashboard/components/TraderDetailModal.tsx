@@ -30,12 +30,36 @@ interface ClosedPosition {
   isWin: boolean
 }
 
+interface TimePeriodMetrics {
+  pnl: number
+  roi: number
+  volume: number
+  tradeCount: number
+  winRate: number
+  drawdown: number
+}
+
+interface TraderMetrics {
+  portfolioValue: number
+  totalPnl: number
+  unrealizedPnl: number
+  realizedPnl: number
+  metrics7d: TimePeriodMetrics
+  metrics30d: TimePeriodMetrics
+  winRateAllTime: number
+  roiPercent: number
+  tradeCountAllTime: number
+  activePositions: number
+  maxDrawdown: number
+}
+
 interface TraderData {
   address: string
   username?: string
   positions: Position[]
   closedPositions?: ClosedPosition[]
   closedPositionsCount: number
+  metrics?: TraderMetrics
 }
 
 interface Props {
@@ -190,6 +214,48 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
             </div>
           ) : data ? (
             <>
+              {/* Metrics Summary */}
+              {data.metrics && (
+                <div className="px-5 pt-4 pb-3 border-b border-white/5">
+                  <div className="grid grid-cols-4 gap-3">
+                    <div>
+                      <p className="text-[10px] text-gray-600 uppercase tracking-wider">Portfolio</p>
+                      <p className="text-sm font-semibold text-white">{formatMoney(data.metrics.portfolioValue)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-600 uppercase tracking-wider">Total PnL</p>
+                      <p className={`text-sm font-semibold ${getPnlColor(data.metrics.totalPnl)}`}>{formatMoney(data.metrics.totalPnl)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-600 uppercase tracking-wider">ROI</p>
+                      <p className={`text-sm font-semibold ${getPnlColor(data.metrics.roiPercent)}`}>{formatPercent(data.metrics.roiPercent)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-600 uppercase tracking-wider">Win Rate</p>
+                      <p className="text-sm font-semibold text-white">{data.metrics.winRateAllTime.toFixed(1)}%</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-3 mt-3">
+                    <div>
+                      <p className="text-[10px] text-gray-600 uppercase tracking-wider">30d PnL</p>
+                      <p className={`text-xs font-medium ${getPnlColor(data.metrics.metrics30d.pnl)}`}>{formatMoney(data.metrics.metrics30d.pnl)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-600 uppercase tracking-wider">30d ROI</p>
+                      <p className={`text-xs font-medium ${getPnlColor(data.metrics.metrics30d.roi)}`}>{formatPercent(data.metrics.metrics30d.roi)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-600 uppercase tracking-wider">Drawdown</p>
+                      <p className={`text-xs font-medium ${data.metrics.maxDrawdown > 25 ? 'text-red-400' : data.metrics.maxDrawdown > 10 ? 'text-amber-400' : 'text-emerald-400'}`}>{data.metrics.maxDrawdown.toFixed(1)}%</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-600 uppercase tracking-wider">Trades</p>
+                      <p className="text-xs font-medium text-white">{data.metrics.tradeCountAllTime}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Tabs */}
               <div className="flex gap-1 px-5 pt-3 pb-3 border-b border-white/5">
                 <button

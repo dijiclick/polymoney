@@ -300,8 +300,9 @@ export default function WalletTable({
               <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" />
               <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" />
               <SortHeader column="active_positions" label="Active" align="center" filterType="number" />
-              <SortHeader column="total_positions" label="Total" align="center" filterType="number" />
+              <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" />
               <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" />
+              <th className="px-3 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Category</th>
               <SortHeader column="account_created_at" label="Joined" filterType="number" />
             </tr>
           </thead>
@@ -373,12 +374,17 @@ export default function WalletTable({
                   </td>
                   <td className="px-3 py-2.5 text-center">
                     <span className="text-gray-500 text-xs">
-                      {wallet.total_positions || 0}
+                      {getMetric(wallet, 'trade_count') || 0}
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-right">
                     <span className={`text-xs ${getDrawdownColor(drawdown)}`}>
                       {drawdown > 0 ? `${formatPercentPlain(drawdown)}` : '-'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-left">
+                    <span className="text-gray-500 text-xs truncate max-w-[100px] inline-block">
+                      {(wallet as any).top_category || '-'}
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-right">

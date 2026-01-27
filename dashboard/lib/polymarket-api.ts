@@ -615,6 +615,76 @@ export function calculateMetrics(
 }
 
 /**
+ * Fetch market categories from Gamma API for a list of conditionIds.
+ * Returns a Map of conditionId -> category string.
+ * Batches requests to avoid rate limiting.
+ */
+export async function fetchMarketCategories(conditionIds: string[]): Promise<Map<string, string>> {
+  const categoryMap = new Map<string, string>()
+  const uniqueIds = [...new Set(conditionIds.filter(Boolean))]
+
+  if (uniqueIds.length === 0) return categoryMap
+
+  // Batch in groups of 5 to avoid rate limits
+  const BATCH_SIZE = 5
+  for (let i = 0; i < uniqueIds.length && i < 50; i += BATCH_SIZE) {
+    const batch = uniqueIds.slice(i, i + BATCH_SIZE)
+    const results = await Promise.all(
+      batch.map(async (cid) => {
+        try {
+          const res = await fetch(`${GAMMA_API_BASE}/markets?condition_id=${cid}`, {
+            signal: AbortSignal.timeout(5000),
+          })
+          if (!res.ok) return { cid, category: '' }
+          const data = await res.json()
+          const market = Array.isArray(data) ? data[0] : data
+          return { cid, category: market?.category || '' }
+        } catch {
+          return { cid, category: '' }
+        }
+      })
+    )
+    for (const { cid, category } of results) {
+      if (category) categoryMap.set(cid, category)
+    }
+  }
+
+  return categoryMap
+}
+
+/**
+ * Determine the top (most traded) category from positions and a category map.
+ * Returns the category with the most unique conditionIds.
+ */
+export function getTopCategory(
+  conditionIds: string[],
+  categoryMap: Map<string, string>
+): string {
+  const categoryCounts = new Map<string, number>()
+  const seenConditions = new Set<string>()
+
+  for (const cid of conditionIds) {
+    if (!cid || seenConditions.has(cid)) continue
+    seenConditions.add(cid)
+    const cat = categoryMap.get(cid)
+    if (cat) {
+      categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1)
+    }
+  }
+
+  let topCategory = ''
+  let maxCount = 0
+  for (const [cat, count] of categoryCounts) {
+    if (count > maxCount) {
+      maxCount = count
+      topCategory = cat
+    }
+  }
+
+  return topCategory
+}
+
+/**
  * Validate Ethereum address format
  */
 export function isValidEthAddress(address: string): boolean {

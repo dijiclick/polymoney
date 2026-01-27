@@ -144,6 +144,7 @@ export interface Wallet {
   overall_win_rate: number  // total_wins / total_positions * 100
   total_volume: number      // all-time volume
   total_trades: number      // all-time trade count
+  top_category?: string     // most frequently traded market category
   metrics_updated_at?: string
   created_at: string
   updated_at: string
