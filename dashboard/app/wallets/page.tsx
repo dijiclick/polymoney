@@ -37,7 +37,49 @@ export default function WalletsPage() {
   const [analyzeAddress, setAnalyzeAddress] = useState('')
   const [showAnalyzeInput, setShowAnalyzeInput] = useState(false)
   const [showAnalyzeModal, setShowAnalyzeModal] = useState(false)
+  const [resolving, setResolving] = useState(false)
   const analyzeInputRef = useRef<HTMLInputElement>(null)
+
+  const resolveAndAnalyze = async (rawInput: string) => {
+    let input = rawInput.trim()
+    if (!input) return
+
+    // Extract address from Polymarket URL: polymarket.com/profile/0x...
+    const profileMatch = input.match(/polymarket\.com\/profile\/(0x[a-fA-F0-9]{40})/i)
+    if (profileMatch) {
+      input = profileMatch[1]
+    }
+
+    // Handle polymarket.com/@username or bare @username format
+    const usernameMatch = input.match(/polymarket\.com\/@([^/?#]+)/i) || input.match(/^@([^/?#\s]+)$/i)
+    if (usernameMatch) {
+      const username = usernameMatch[1]
+      setResolving(true)
+      try {
+        const res = await fetch(`/api/resolve-username?username=${encodeURIComponent(username)}`)
+        const data = await res.json()
+        if (data.address) {
+          input = data.address
+        } else {
+          alert(`Could not find wallet for username: @${username}`)
+          setResolving(false)
+          return
+        }
+      } catch {
+        alert('Failed to resolve username')
+        setResolving(false)
+        return
+      }
+      setResolving(false)
+    }
+
+    // Clean up: ensure it's a valid 0x address
+    const addr = input.toLowerCase()
+    const finalAddr = addr.startsWith('0x') ? addr : `0x${addr}`
+    setAnalyzeAddress(finalAddr)
+    setShowAnalyzeModal(true)
+    setShowAnalyzeInput(false)
+  }
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -288,27 +330,18 @@ export default function WalletsPage() {
                 value={analyzeAddress}
                 onChange={(e) => setAnalyzeAddress(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && analyzeAddress.trim()) {
-                    let input = analyzeAddress.trim()
-                    // Extract address from Polymarket URL: polymarket.com/profile/0x...
-                    const profileMatch = input.match(/polymarket\.com\/profile\/(0x[a-fA-F0-9]{40})/i)
-                    if (profileMatch) {
-                      input = profileMatch[1]
-                    }
-                    // Clean up: ensure it's a valid 0x address
-                    const addr = input.toLowerCase()
-                    setAnalyzeAddress(addr.startsWith('0x') ? addr : `0x${addr}`)
-                    setShowAnalyzeModal(true)
-                    setShowAnalyzeInput(false)
+                  if (e.key === 'Enter' && analyzeAddress.trim() && !resolving) {
+                    resolveAndAnalyze(analyzeAddress)
                   }
                   if (e.key === 'Escape') {
                     setShowAnalyzeInput(false)
                     setAnalyzeAddress('')
                   }
                 }}
-                placeholder="0x address or Polymarket profile URL..."
+                placeholder="0x address, @username, or profile URL..."
                 className="w-80 pl-3 pr-8 py-1.5 bg-white/[0.02] border border-blue-500/30 rounded-lg text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 transition-all font-mono"
                 autoFocus
+                disabled={resolving}
               />
               <button
                 onClick={() => { setShowAnalyzeInput(false); setAnalyzeAddress('') }}
@@ -369,7 +402,7 @@ export default function WalletsPage() {
 
       {/* Analyze Wallet Modal */}
       <TraderDetailModal
-        address={analyzeAddress.startsWith('0x') ? analyzeAddress : `0x${analyzeAddress}`}
+        address={analyzeAddress}
         isOpen={showAnalyzeModal}
         onClose={() => { setShowAnalyzeModal(false); setAnalyzeAddress('') }}
       />
