@@ -336,10 +336,10 @@ export default function WalletTable({
   }
 
   return (
-    <div className="glass rounded-xl overflow-hidden">
+    <div className="glass rounded-xl">
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead>
+          <thead className="sticky top-14 z-20" style={{ background: 'var(--background)' }}>
             <tr className="border-b border-white/5">
               <th className="px-3 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
               {show('value') && <SortHeader column="balance" label="Value" filterType="money" />}

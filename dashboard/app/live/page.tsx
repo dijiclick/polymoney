@@ -1,133 +1,98 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
-import TradeFeedTabs, { TabId } from '@/components/TradeFeedTabs'
-import UnifiedTradeFeed from '@/components/UnifiedTradeFeed'
-import TradeFilters from '@/components/TradeFilters'
-import { TradeFilter, supabase } from '@/lib/supabase'
+import { useState, useCallback, Suspense } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import { TradeFilter } from '@/lib/supabase'
+import { useLiveTrades } from '@/hooks/useLiveTrades'
+import LiveFeedHeader from '@/components/live/LiveFeedHeader'
+import LiveFilterBar from '@/components/live/LiveFilterBar'
+import TradeTable from '@/components/live/TradeTable'
+import TraderDetailPanel from '@/components/live/TraderDetailPanel'
+import TraderDetailEmpty from '@/components/live/TraderDetailEmpty'
 
-interface TradeStats {
-  totalTrades: number
-  activeTrades: number
-}
-
-export default function LiveTradePage() {
-  const [activeTab, setActiveTab] = useState<TabId>('all')
+function LiveFeedContent() {
   const [filter, setFilter] = useState<TradeFilter>({})
-  const [tradeStats, setTradeStats] = useState<TradeStats>({ totalTrades: 0, activeTrades: 0 })
-  const [isConnected, setIsConnected] = useState(true)
 
-  useEffect(() => {
-    async function fetchTradeStats() {
-      const { data } = await supabase
-        .from('wallets')
-        .select('total_trades, active_positions')
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const selectedAddress = searchParams.get('trader') || null
 
-      if (data) {
-        const totalTrades = data.reduce((sum, w) => sum + (w.total_trades || 0), 0)
-        const activeTrades = data.reduce((sum, w) => sum + (w.active_positions || 0), 0)
-        setTradeStats({ totalTrades, activeTrades })
-      }
+  const setSelectedTrader = useCallback((address: string | null) => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (address) {
+      params.set('trader', address)
+    } else {
+      params.delete('trader')
     }
+    router.replace(`/live?${params.toString()}`, { scroll: false })
+  }, [searchParams, router])
 
-    fetchTradeStats()
-
-    const walletSubscription = supabase
-      .channel('wallet_stats_channel')
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'wallets' },
-        () => fetchTradeStats()
-      )
-      .subscribe()
-
-    return () => {
-      walletSubscription.unsubscribe()
-    }
-  }, [])
-
-  const getEffectiveFilter = useCallback((): TradeFilter => {
-    if (activeTab === 'insider') {
-      return { ...filter, insidersOnly: true }
-    }
-    return filter
-  }, [activeTab, filter])
+  const {
+    trades,
+    isConnected,
+    isPaused,
+    tradeCount,
+    totalSeen,
+    setIsPaused,
+    clearTrades,
+  } = useLiveTrades({ filter, maxTrades: 200 })
 
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col">
-      {/* Header */}
-      <div className="mb-5">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold text-white mb-1">
-              Live Feed
-            </h1>
-            <p className="text-gray-600 text-xs">
-              Real-time trade monitoring
-            </p>
-          </div>
-
-          {/* Stats */}
-          <div className="flex items-center gap-2">
-            <div className="glass rounded-lg px-3 py-2">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-md bg-blue-500/10 flex items-center justify-center">
-                  <svg className="w-3 h-3 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-[9px] text-gray-600 uppercase tracking-wider">Total</p>
-                  <p className="text-sm font-semibold text-white">{tradeStats.totalTrades.toLocaleString()}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="glass rounded-lg px-3 py-2">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-md bg-emerald-500/10 flex items-center justify-center">
-                  <svg className="w-3 h-3 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-[9px] text-gray-600 uppercase tracking-wider">Active</p>
-                  <p className="text-sm font-semibold text-white">{tradeStats.activeTrades.toLocaleString()}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg ${isConnected ? 'bg-emerald-500/5 border border-emerald-500/10' : 'bg-red-500/5 border border-red-500/10'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
-              <span className={`text-[10px] font-medium ${isConnected ? 'text-emerald-400' : 'text-red-400'}`}>
-                {isConnected ? 'Live' : 'Offline'}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <TradeFeedTabs
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
+      {/* Minimal Header */}
+      <LiveFeedHeader
+        isConnected={isConnected}
+        tradeCount={tradeCount}
+        totalSeen={totalSeen}
+        isPaused={isPaused}
+        onTogglePause={() => setIsPaused(!isPaused)}
+        onClear={clearTrades}
       />
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-0 mt-3">
-        <TradeFilters
-          filter={filter}
-          onChange={setFilter}
-        />
+      {/* Filter Bar */}
+      <LiveFilterBar filter={filter} onChange={setFilter} />
 
-        <div className="flex-1 min-h-0">
-          <UnifiedTradeFeed
-            mode={activeTab === 'insider' ? 'insider' :
-                  activeTab === 'whales' ? 'whales' : 'all'}
-            filter={getEffectiveFilter()}
-            onConnectionChange={setIsConnected}
+      {/* Split Panel Layout */}
+      <div className="flex-1 flex gap-3 min-h-0">
+        {/* Left: Trade Feed */}
+        <div className={`transition-all duration-200 ${selectedAddress ? 'w-[60%]' : 'w-full xl:w-[60%]'}`}>
+          <TradeTable
+            trades={trades}
+            selectedAddress={selectedAddress}
+            onSelectTrader={(addr) => setSelectedTrader(addr)}
           />
+        </div>
+
+        {/* Right: Trader Detail or Empty State */}
+        <div className={`min-w-[340px] transition-all duration-200 ${
+          selectedAddress ? 'w-[40%]' : 'hidden xl:block w-[40%]'
+        }`}>
+          {selectedAddress ? (
+            <TraderDetailPanel
+              address={selectedAddress}
+              trades={trades}
+              onClose={() => setSelectedTrader(null)}
+            />
+          ) : (
+            <TraderDetailEmpty />
+          )}
         </div>
       </div>
     </div>
+  )
+}
+
+export default function LiveTradePage() {
+  return (
+    <Suspense fallback={
+      <div className="h-[calc(100vh-120px)] flex items-center justify-center">
+        <div className="relative w-8 h-8">
+          <div className="absolute inset-0 rounded-full border border-white/10"></div>
+          <div className="absolute inset-0 rounded-full border border-transparent border-t-white/40 animate-spin"></div>
+        </div>
+      </div>
+    }>
+      <LiveFeedContent />
+    </Suspense>
   )
 }

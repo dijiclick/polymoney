@@ -93,6 +93,22 @@ body {
   animation: fade-in 0.2s ease-out;
 }
 
+/* Trade flash animations */
+@keyframes trade-flash-buy {
+  0% { background-color: rgba(52, 211, 153, 0.08); }
+  100% { background-color: transparent; }
+}
+@keyframes trade-flash-sell {
+  0% { background-color: rgba(248, 113, 113, 0.08); }
+  100% { background-color: transparent; }
+}
+.animate-trade-flash-buy {
+  animation: trade-flash-buy 1.5s ease-out forwards;
+}
+.animate-trade-flash-sell {
+  animation: trade-flash-sell 1.5s ease-out forwards;
+}
+
 /* Glass effect */
 .glass {
   background: var(--surface);
