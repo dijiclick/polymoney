@@ -332,6 +332,7 @@ export async function POST(request: NextRequest) {
       const polymetrics = calculatePolymarketMetrics(closedPositions, allPositions, currentBalance)
       const metrics7d = calculatePeriodMetrics(closedPositions, 7, currentBalance)
       const metrics30d = calculatePeriodMetrics(closedPositions, 30, currentBalance)
+      const metricsAll = calculatePeriodMetrics(closedPositions, 36500, currentBalance) // ~100 years = all time
 
       // Update database
       const { error: updateError } = await supabase.from('wallets').update({
@@ -364,6 +365,13 @@ export async function POST(request: NextRequest) {
         overall_win_rate: polymetrics.winRateAll,
         total_volume: polymetrics.totalBought,
         total_trades: polymetrics.tradeCount,
+        // All-time period metrics
+        pnl_all: metricsAll.pnl,
+        roi_all: metricsAll.roi,
+        win_rate_all: metricsAll.winRate,
+        volume_all: metricsAll.volume,
+        trade_count_all: metricsAll.tradeCount,
+        drawdown_all: metricsAll.drawdown,
         metrics_updated_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }).eq('address', wallet.address)
