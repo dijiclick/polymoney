@@ -193,12 +193,12 @@ class TradeProcessor:
         """
         self._trades_processed += 1
 
-        # Wallet discovery threshold (lower to capture more wallets)
-        DISCOVERY_THRESHOLD_USD = 50
+        # Wallet discovery threshold
+        DISCOVERY_THRESHOLD_USD = 100
         # Trade storage threshold (higher to avoid database bloat)
         STORAGE_THRESHOLD_USD = 100
 
-        # Check for new wallet discovery (non-blocking, for trades >= $50)
+        # Check for new wallet discovery (non-blocking, for trades >= $100)
         if trade.usd_value >= DISCOVERY_THRESHOLD_USD and self._discovery_processor:
             await self._discovery_processor.check_and_queue(
                 trade.trader_address,

@@ -103,7 +103,7 @@ echo ============================================================
 echo    POLYMARKET WALLET ANALYZER
 echo ============================================================
 echo.
-echo    - Discovers wallets from live trades (>=$50)
+echo    - Discovers wallets from live trades (>=$100)
 echo    - Calculates metrics (PnL, ROI, Win Rate, Drawdown)
 echo    - 5 workers, 1-day re-analysis cooldown
 echo    - Stores to Supabase database

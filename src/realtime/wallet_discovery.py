@@ -1,7 +1,7 @@
 """
 Wallet discovery processor for live trade monitoring.
 
-Discovers new wallets from live trades >= $50 and fetches their trade history.
+Discovers new wallets from live trades >= $100 and fetches their trade history.
 Uses Polymarket Data API for all metrics calculation.
 """
 
@@ -21,7 +21,7 @@ class WalletDiscoveryProcessor:
     """
     Async processor that discovers new wallets from live trades.
 
-    When a trade >= $50 comes in from an unknown wallet:
+    When a trade >= $100 comes in from an unknown wallet:
     1. Queue the wallet for processing
     2. Fetch portfolio value and positions from Polymarket API
     3. Calculate 7d and 30d metrics (PnL, ROI, win rate, etc.)
@@ -544,8 +544,15 @@ class WalletDiscoveryProcessor:
         drawdown_base = initial_capital if initial_capital > 0 else total_bought
         max_drawdown = self._calculate_max_drawdown(closed_positions, drawdown_base)
 
-        # Count open positions
-        open_count = len([p for p in positions if float(p.get("currentValue", 0)) > 0])
+        # Count unique markets (conditionId), not raw position entries
+        # Each market has YES/NO outcomes, so raw len() double-counts
+        unique_closed_markets = len(set(
+            p.get("conditionId", "") for p in closed_positions if p.get("conditionId")
+        ))
+        unique_open_markets = len(set(
+            p.get("conditionId", "") for p in positions
+            if p.get("conditionId") and float(p.get("currentValue", 0)) > 0
+        ))
 
         return {
             "realized_pnl": round(realized_pnl, 2),
@@ -558,8 +565,8 @@ class WalletDiscoveryProcessor:
             "loss_count": loss_count,
             "trade_count": trade_count,
             "active_count": active_count,
-            "open_count": open_count,
-            "closed_count": len(closed_positions),
+            "open_count": unique_open_markets,
+            "closed_count": unique_closed_markets,
             "max_drawdown": max_drawdown,
         }
 
@@ -598,8 +605,15 @@ class WalletDiscoveryProcessor:
                 "trade_count": 0, "win_rate": 0, "drawdown": 0
             }
 
+        # Group by conditionId to count unique markets (not raw entries)
+        # Each market has YES/NO outcomes, raw count double-counts
+        market_pnl: dict[str, float] = {}
+        for p in period_positions:
+            cid = p.get("conditionId", "")
+            market_pnl[cid] = market_pnl.get(cid, 0) + float(p.get("realizedPnl", 0))
+
         # Calculate PnL
-        pnl = sum(float(p.get("realizedPnl", 0)) for p in period_positions)
+        pnl = sum(market_pnl.values())
 
         # Calculate volume
         volume = sum(
@@ -607,23 +621,24 @@ class WalletDiscoveryProcessor:
             for p in period_positions
         )
 
-        # Calculate win rate
-        wins = sum(1 for p in period_positions if float(p.get("realizedPnl", 0)) > 0)
-        win_rate = (wins / len(period_positions) * 100) if period_positions else 0
+        # Calculate win rate from unique markets
+        wins = sum(1 for v in market_pnl.values() if v > 0)
+        trade_count = len(market_pnl)
+        win_rate = (wins / trade_count * 100) if trade_count > 0 else 0
 
         # Calculate ROI for period
         roi = (pnl / volume * 100) if volume > 0 else 0
 
         # Calculate drawdown for period
-        total_pnl = sum(float(p.get("realizedPnl", 0)) for p in closed_positions)
-        initial_balance = max(current_balance - total_pnl, 1)
+        total_pnl_all = sum(float(p.get("realizedPnl", 0)) for p in closed_positions)
+        initial_balance = max(current_balance - total_pnl_all, 1)
         drawdown = self._calculate_max_drawdown(period_positions, initial_balance)
 
         return {
             "pnl": round(pnl, 2),
             "roi": round(roi, 2),
             "volume": round(volume, 2),
-            "trade_count": len(period_positions),
+            "trade_count": trade_count,
             "win_rate": round(win_rate, 2),
             "drawdown": drawdown,
         }

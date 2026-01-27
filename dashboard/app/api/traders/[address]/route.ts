@@ -172,7 +172,9 @@ export async function GET(
 
     // 6. Update wallets table with fresh data (if wallet exists)
     if (dbWallet) {
-      updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, openPositions.length, closedPositions.length)
+      const uniqueClosedMarkets = new Set(closedPositions.map(p => p.conditionId).filter(Boolean)).size
+      const uniqueOpenMarkets = new Set(openPositions.map(p => p.conditionId).filter(Boolean)).size
+      updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, uniqueOpenMarkets, uniqueClosedMarkets)
     }
 
     // Count unique markets
@@ -188,7 +190,7 @@ export async function GET(
       accountCreatedAt: dbWallet?.account_created_at,
       positions: openPositions,
       closedPositions: closedPositions,
-      closedPositionsCount: closedPositions.length,
+      closedPositionsCount: uniqueClosedMarkets,
       trades: [],
       metrics: {
         portfolioValue: dbWallet?.balance || 0,
@@ -198,7 +200,7 @@ export async function GET(
         metrics7d,
         metrics30d,
         avgTradeIntervalHours: 0,
-        activePositions: openPositions.length,
+        activePositions: uniqueOpenMarkets,
         winRate30d: metrics30d.winRate,
         winRateAllTime: polymarketMetrics.winRateAll,
         roiPercent: polymarketMetrics.roiAll,
@@ -209,7 +211,7 @@ export async function GET(
         positionConcentration: 0,
         maxPositionSize: 0,
         avgPositionSize: 0,
-        totalPositions: closedPositions.length + openPositions.length,
+        totalPositions: uniqueClosedMarkets + uniqueOpenMarkets,
         maxDrawdown: polymarketMetrics.maxDrawdown,
         tradeFrequency: metrics30d.tradeCount / 30,
         nightTradeRatio: 0,
@@ -442,9 +444,20 @@ function calculatePeriodMetrics(
   // Calculate volume (total bought)
   const volume = periodPositions.reduce((sum, p) => sum + (p.size * p.avgPrice), 0)
 
-  // Calculate win rate
-  const wins = periodPositions.filter(p => p.realizedPnl > 0).length
-  const winRate = periodPositions.length > 0 ? (wins / periodPositions.length) * 100 : 0
+  // Group by conditionId to count unique markets (not raw YES/NO entries)
+  const marketPnl = new Map<string, number>()
+  for (const p of periodPositions) {
+    const cid = p.conditionId || ''
+    marketPnl.set(cid, (marketPnl.get(cid) || 0) + p.realizedPnl)
+  }
+
+  // Calculate win rate based on unique markets
+  const tradeCount = marketPnl.size
+  let wins = 0
+  for (const pnlVal of marketPnl.values()) {
+    if (pnlVal > 0) wins++
+  }
+  const winRate = tradeCount > 0 ? (wins / tradeCount) * 100 : 0
 
   // ROI = Period PnL / Period Volume (capital deployed in this period)
   const roi = volume > 0 ? (pnl / volume) * 100 : 0
@@ -458,7 +471,7 @@ function calculatePeriodMetrics(
     pnl: Math.round(pnl * 100) / 100,
     roi: Math.round(roi * 100) / 100,
     volume: Math.round(volume * 100) / 100,
-    tradeCount: periodPositions.length,
+    tradeCount,
     winRate: Math.round(winRate * 100) / 100,
     drawdown,
   }

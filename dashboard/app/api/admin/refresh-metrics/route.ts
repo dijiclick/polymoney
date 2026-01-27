@@ -170,8 +170,21 @@ function calculatePeriodMetrics(
 
   const pnl = periodPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
   const volume = periodPositions.reduce((sum, p) => sum + (p.size * p.avgPrice), 0)
-  const wins = periodPositions.filter(p => p.realizedPnl > 0).length
-  const winRate = periodPositions.length > 0 ? (wins / periodPositions.length) * 100 : 0
+
+  // Group by conditionId to count unique markets (not raw YES/NO entries)
+  const marketPnl = new Map<string, number>()
+  for (const p of periodPositions) {
+    const cid = p.conditionId || ''
+    marketPnl.set(cid, (marketPnl.get(cid) || 0) + p.realizedPnl)
+  }
+
+  // Calculate win rate based on unique markets
+  const tradeCount = marketPnl.size
+  let wins = 0
+  for (const pnlVal of marketPnl.values()) {
+    if (pnlVal > 0) wins++
+  }
+  const winRate = tradeCount > 0 ? (wins / tradeCount) * 100 : 0
 
   // ROI = Period PnL / Period Volume (capital deployed in this period)
   const roi = volume > 0 ? (pnl / volume) * 100 : 0
@@ -183,7 +196,7 @@ function calculatePeriodMetrics(
     pnl: Math.round(pnl * 100) / 100,
     roi: Math.round(roi * 100) / 100,
     volume: Math.round(volume * 100) / 100,
-    tradeCount: periodPositions.length,
+    tradeCount,
     winRate: Math.round(winRate * 100) / 100,
     drawdown,
   }
@@ -340,8 +353,8 @@ export async function POST(request: NextRequest) {
         trade_count_30d: metrics30d.tradeCount,
         drawdown_30d: metrics30d.drawdown,
         // Overall metrics
-        total_positions: closedPositions.length,
-        active_positions: openPositions.length,
+        total_positions: new Set(closedPositions.map((p: any) => p.conditionId).filter(Boolean)).size,
+        active_positions: new Set(openPositions.map((p: any) => p.conditionId).filter(Boolean)).size,
         total_wins: polymetrics.winCount,
         total_losses: polymetrics.lossCount,
         realized_pnl: polymetrics.realizedPnl,

@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Wallet, WalletFilter, TimePeriod } from '@/lib/supabase'
 import TimePeriodSelector from '@/components/TimePeriodSelector'
 import WalletTable from '@/components/WalletTable'
+import TraderDetailModal from '@/components/TraderDetailModal'
 
 interface WalletStats {
   total: number
@@ -33,6 +34,10 @@ export default function WalletsPage() {
   const [columnFilters, setColumnFilters] = useState<Record<string, ColumnFilter>>({})
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [analyzeAddress, setAnalyzeAddress] = useState('')
+  const [showAnalyzeInput, setShowAnalyzeInput] = useState(false)
+  const [showAnalyzeModal, setShowAnalyzeModal] = useState(false)
+  const analyzeInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -274,6 +279,53 @@ export default function WalletsPage() {
             )}
           </div>
 
+          {/* Analyze Wallet */}
+          {showAnalyzeInput ? (
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-600 font-mono">0x</span>
+              <input
+                ref={analyzeInputRef}
+                type="text"
+                value={analyzeAddress}
+                onChange={(e) => setAnalyzeAddress(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && analyzeAddress.trim()) {
+                    const addr = analyzeAddress.trim().toLowerCase()
+                    setAnalyzeAddress(addr.startsWith('0x') ? addr : `0x${addr}`)
+                    setShowAnalyzeModal(true)
+                    setShowAnalyzeInput(false)
+                  }
+                  if (e.key === 'Escape') {
+                    setShowAnalyzeInput(false)
+                    setAnalyzeAddress('')
+                  }
+                }}
+                placeholder="Paste wallet address..."
+                className="w-72 pl-8 pr-8 py-1.5 bg-white/[0.02] border border-blue-500/30 rounded-lg text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 transition-all font-mono"
+                autoFocus
+              />
+              <button
+                onClick={() => { setShowAnalyzeInput(false); setAnalyzeAddress('') }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-600 hover:text-gray-400 transition-colors"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => { setShowAnalyzeInput(true); setTimeout(() => analyzeInputRef.current?.focus(), 50) }}
+              className="px-2.5 py-1.5 bg-white/[0.02] border border-white/5 rounded-lg text-[10px] text-gray-500 hover:text-blue-400 hover:border-blue-500/20 hover:bg-blue-500/5 transition-all flex items-center gap-1.5"
+              title="Analyze a specific wallet address"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+              </svg>
+              Analyze
+            </button>
+          )}
+
           <div className="text-xs text-gray-600">
             <span className="text-gray-400">{filteredWallets.length.toLocaleString()}</span>
             {(activeFilterCount > 0 || searchQuery) && <span className="text-gray-600"> / {totalWallets.toLocaleString()}</span>}
@@ -307,6 +359,13 @@ export default function WalletsPage() {
         sortDir={sortDir}
         columnFilters={columnFilters}
         onColumnFilterChange={handleColumnFilterChange}
+      />
+
+      {/* Analyze Wallet Modal */}
+      <TraderDetailModal
+        address={analyzeAddress.startsWith('0x') ? analyzeAddress : `0x${analyzeAddress}`}
+        isOpen={showAnalyzeModal}
+        onClose={() => { setShowAnalyzeModal(false); setAnalyzeAddress('') }}
       />
 
       {/* Pagination */}
