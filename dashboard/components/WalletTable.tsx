@@ -27,8 +27,8 @@ export const COLUMNS: { key: ColumnKey; label: string }[] = [
 
 export const DEFAULT_VISIBLE: ColumnKey[] = ['chart', 'roi', 'winRate', 'pnl', 'dd', 'active', 'total', 'value', 'category', 'joined']
 
-// Module-level cache for chart data
-const chartCache = new Map<string, { values: number[]; isPositive: boolean } | null>()
+// Module-level cache for raw positions data (not filtered by timeframe)
+const positionsCache = new Map<string, { resolvedAt?: string; realizedPnl: number }[] | null>()
 
 interface DayData {
   date: Date
@@ -36,45 +36,72 @@ interface DayData {
   cumPnl: number
 }
 
-function buildDayData(closedPositions: { resolvedAt?: string; realizedPnl: number }[]): DayData[] {
+function buildDayData(
+  closedPositions: { resolvedAt?: string; realizedPnl: number }[],
+  timePeriod: TimePeriod
+): { values: number[]; isPositive: boolean } | null {
   const withDates = closedPositions
     .filter(p => p.resolvedAt)
     .sort((a, b) => new Date(a.resolvedAt!).getTime() - new Date(b.resolvedAt!).getTime())
 
-  if (withDates.length === 0) return []
+  if (withDates.length === 0) return null
+
+  // Calculate cutoff based on timeframe
+  const now = Date.now()
+  let cutoff = 0
+  if (timePeriod === '7d') {
+    cutoff = now - 7 * 24 * 60 * 60 * 1000
+  } else if (timePeriod === '30d') {
+    cutoff = now - 30 * 24 * 60 * 60 * 1000
+  }
+  // 'all' = no cutoff
 
   const dayMap = new Map<string, { date: Date; dailyPnl: number }>()
+  let startingPnl = 0
+
   for (const p of withDates) {
     const d = new Date(p.resolvedAt!)
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    const existing = dayMap.get(key)
-    if (existing) {
-      existing.dailyPnl += p.realizedPnl
+    const ts = d.getTime()
+
+    if (cutoff > 0 && ts < cutoff) {
+      // Accumulate PnL before cutoff as starting point
+      startingPnl += p.realizedPnl
     } else {
-      dayMap.set(key, { date: d, dailyPnl: p.realizedPnl })
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const existing = dayMap.get(key)
+      if (existing) {
+        existing.dailyPnl += p.realizedPnl
+      } else {
+        dayMap.set(key, { date: d, dailyPnl: p.realizedPnl })
+      }
     }
   }
 
   const allDays = Array.from(dayMap.values()).sort((a, b) => a.date.getTime() - b.date.getTime())
 
-  let cum = 0
-  return allDays.map(day => {
+  if (allDays.length < 2) return null
+
+  let cum = startingPnl
+  const values = allDays.map(day => {
     cum += day.dailyPnl
-    return { date: day.date, dailyPnl: day.dailyPnl, cumPnl: Math.round(cum * 100) / 100 }
+    return Math.round(cum * 100) / 100
   })
+
+  const isPositive = values[values.length - 1] >= 0
+  return { values, isPositive }
 }
 
 // Inline mini sparkline chart
-function InlineMiniChart({ address }: { address: string }) {
-  const [chartData, setChartData] = useState<{ values: number[]; isPositive: boolean } | null | undefined>(
-    chartCache.has(address) ? chartCache.get(address) : undefined
+function InlineMiniChart({ address, timePeriod }: { address: string; timePeriod: TimePeriod }) {
+  const [positions, setPositions] = useState<{ resolvedAt?: string; realizedPnl: number }[] | null | undefined>(
+    positionsCache.has(address) ? positionsCache.get(address) : undefined
   )
   const [loading, setLoading] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const hasFetched = useRef(false)
 
   useEffect(() => {
-    if (hasFetched.current || chartData !== undefined) return
+    if (hasFetched.current || positions !== undefined) return
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -87,24 +114,16 @@ function InlineMiniChart({ address }: { address: string }) {
             .then(res => res.ok ? res.json() : null)
             .then(result => {
               if (result?.closedPositions) {
-                const dayData = buildDayData(result.closedPositions)
-                if (dayData.length >= 2) {
-                  const values = dayData.map(d => d.cumPnl)
-                  const isPositive = values[values.length - 1] >= 0
-                  chartCache.set(address, { values, isPositive })
-                  setChartData({ values, isPositive })
-                } else {
-                  chartCache.set(address, null)
-                  setChartData(null)
-                }
+                positionsCache.set(address, result.closedPositions)
+                setPositions(result.closedPositions)
               } else {
-                chartCache.set(address, null)
-                setChartData(null)
+                positionsCache.set(address, null)
+                setPositions(null)
               }
             })
             .catch(() => {
-              chartCache.set(address, null)
-              setChartData(null)
+              positionsCache.set(address, null)
+              setPositions(null)
             })
             .finally(() => setLoading(false))
         }
@@ -117,7 +136,10 @@ function InlineMiniChart({ address }: { address: string }) {
     }
 
     return () => observer.disconnect()
-  }, [address, chartData])
+  }, [address, positions])
+
+  // Build chart data based on current timeframe
+  const chartData = positions ? buildDayData(positions, timePeriod) : null
 
   const W = 80
   const H = 24
@@ -641,7 +663,7 @@ export default function WalletTable({
                   </td>
                   {show('chart') && (
                     <td className="px-1 py-2.5">
-                      <InlineMiniChart address={wallet.address} />
+                      <InlineMiniChart address={wallet.address} timePeriod={timePeriod} />
                     </td>
                   )}
                   {show('roi') && (
