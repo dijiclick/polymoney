@@ -71,7 +71,11 @@ export async function GET(request: NextRequest) {
         }
 
         const wallet = wallets[i]
-        const result = await refreshOneWallet(wallet)
+        const result = await refreshOneWallet({
+          address: wallet.address,
+          username: wallet.username ?? undefined,
+          balance: wallet.balance ?? undefined,
+        })
 
         if (result.success) {
           success++

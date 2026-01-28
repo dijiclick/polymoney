@@ -516,7 +516,7 @@ export default function WalletsPage() {
                   onClick={() => { setRefreshProgress(null); setRefreshDone(false) }}
                   className="px-2 py-1 text-[10px] text-gray-500 hover:text-gray-300 border border-white/10 rounded-md transition-colors"
                 >
-                  Dismiss
+                  Done
                 </button>
               )}
             </div>

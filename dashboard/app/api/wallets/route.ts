@@ -61,10 +61,10 @@ export async function GET(request: NextRequest) {
     // Validate sort column
     const safeSortBy = VALID_SORT_COLUMNS.includes(sortBy) ? sortBy : 'balance'
 
-    // Build query with estimated count (fast for large tables)
+    // Build query with exact count
     let query = supabase
       .from('wallets')
-      .select('*', { count: 'estimated' })
+      .select('*', { count: 'exact' })
 
     // Server-side search by username or address
     if (search) {

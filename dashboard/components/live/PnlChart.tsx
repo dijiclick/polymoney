@@ -15,14 +15,61 @@ export interface ClosedPosition {
   isWin: boolean
 }
 
-type Timeframe = '7d' | '30d' | 'all'
+type Timeframe = '1h' | '6h' | '1d' | '7d' | '30d' | 'all'
 type ChartMode = 'cumulative' | 'daily'
 
-interface DayData {
+interface IntervalData {
   date: Date
   key: string
-  dailyPnl: number
+  intervalPnl: number
   cumPnl: number
+}
+
+// Get grouping interval in milliseconds based on timeframe
+function getIntervalMs(tf: Timeframe): number {
+  switch (tf) {
+    case '1h': return 5 * 60 * 1000      // 5 min intervals
+    case '6h': return 30 * 60 * 1000     // 30 min intervals
+    case '1d': return 60 * 60 * 1000     // 1 hour intervals
+    default: return 24 * 60 * 60 * 1000  // daily
+  }
+}
+
+// Get cutoff time based on timeframe
+function getCutoffMs(tf: Timeframe): number {
+  const now = Date.now()
+  switch (tf) {
+    case '1h': return now - 60 * 60 * 1000
+    case '6h': return now - 6 * 60 * 60 * 1000
+    case '1d': return now - 24 * 60 * 60 * 1000
+    case '7d': return now - 7 * 24 * 60 * 60 * 1000
+    case '30d': return now - 30 * 24 * 60 * 60 * 1000
+    default: return 0
+  }
+}
+
+// Generate interval key for grouping
+function getIntervalKey(date: Date, tf: Timeframe): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  const h = String(date.getHours()).padStart(2, '0')
+  const min = date.getMinutes()
+
+  switch (tf) {
+    case '1h': {
+      const interval = Math.floor(min / 5) * 5
+      return `${y}-${m}-${d}T${h}:${String(interval).padStart(2, '0')}`
+    }
+    case '6h': {
+      const interval = Math.floor(min / 30) * 30
+      return `${y}-${m}-${d}T${h}:${String(interval).padStart(2, '0')}`
+    }
+    case '1d':
+      return `${y}-${m}-${d}T${h}:00`
+    default:
+      return `${y}-${m}-${d}`
+  }
 }
 
 function formatChartMoney(v: number) {
@@ -42,7 +89,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
   const hoverIndexRef = useRef<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  const dayData = useMemo((): DayData[] => {
+  const intervalData = useMemo((): IntervalData[] => {
     if (!closedPositions || closedPositions.length === 0) return []
 
     const withDates = closedPositions
@@ -51,34 +98,31 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
 
     if (withDates.length === 0) return []
 
-    const now = Date.now()
-    const cutoff = timeframe === '7d' ? now - 7 * 86400000
-      : timeframe === '30d' ? now - 30 * 86400000
-      : 0
+    const cutoff = getCutoffMs(timeframe)
 
-    const dayMap = new Map<string, { date: Date; dailyPnl: number }>()
+    const intervalMap = new Map<string, { date: Date; intervalPnl: number }>()
     for (const p of withDates) {
       const d = new Date(p.resolvedAt!)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      const existing = dayMap.get(key)
+      const key = getIntervalKey(d, timeframe)
+      const existing = intervalMap.get(key)
       if (existing) {
-        existing.dailyPnl += p.realizedPnl
+        existing.intervalPnl += p.realizedPnl
       } else {
-        dayMap.set(key, { date: d, dailyPnl: p.realizedPnl })
+        intervalMap.set(key, { date: d, intervalPnl: p.realizedPnl })
       }
     }
 
-    const allDays = Array.from(dayMap.entries())
+    const allIntervals = Array.from(intervalMap.entries())
       .sort((a, b) => a[1].date.getTime() - b[1].date.getTime())
 
     let startingPnl = 0
-    const filtered: DayData[] = []
+    const filtered: IntervalData[] = []
 
-    for (const [key, day] of allDays) {
-      if (cutoff > 0 && day.date.getTime() < cutoff) {
-        startingPnl += day.dailyPnl
+    for (const [key, interval] of allIntervals) {
+      if (cutoff > 0 && interval.date.getTime() < cutoff) {
+        startingPnl += interval.intervalPnl
       } else {
-        filtered.push({ ...day, key, cumPnl: 0 })
+        filtered.push({ ...interval, key, cumPnl: 0 })
       }
     }
 
@@ -86,7 +130,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
 
     let cum = startingPnl
     for (const d of filtered) {
-      cum += d.dailyPnl
+      cum += d.intervalPnl
       d.cumPnl = Math.round(cum * 100) / 100
     }
 
@@ -99,14 +143,14 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
   const PR = 56
   const PY = 16
 
-  const MIN_PX_PER_DAY_LINE = 16
-  const MIN_PX_PER_DAY_BAR = 24
+  const MIN_PX_PER_INTERVAL_LINE = 16
+  const MIN_PX_PER_INTERVAL_BAR = 24
 
   const W = useMemo(() => {
-    const minPx = chartMode === 'daily' ? MIN_PX_PER_DAY_BAR : MIN_PX_PER_DAY_LINE
-    const needed = dayData.length * minPx + PX + PR
+    const minPx = chartMode === 'daily' ? MIN_PX_PER_INTERVAL_BAR : MIN_PX_PER_INTERVAL_LINE
+    const needed = intervalData.length * minPx + PX + PR
     return Math.max(BASE_W, needed)
-  }, [dayData.length, chartMode])
+  }, [intervalData.length, chartMode])
 
   const isScrollable = W > BASE_W
 
@@ -114,19 +158,30 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
     if (isScrollable && scrollRef.current) {
       scrollRef.current.scrollLeft = scrollRef.current.scrollWidth
     }
-  }, [isScrollable, dayData, chartMode])
+  }, [isScrollable, intervalData, chartMode])
+
+  // Format x-axis label based on timeframe
+  const formatXAxisLabel = useCallback((date: Date) => {
+    if (timeframe === '1h' || timeframe === '6h') {
+      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+    }
+    if (timeframe === '1d') {
+      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+    }
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }, [timeframe])
 
   const xAxisTicks = useMemo(() => {
-    if (dayData.length === 0) return []
+    if (intervalData.length === 0) return []
 
-    const tMin = dayData[0].date.getTime()
-    const tMax = dayData[dayData.length - 1].date.getTime()
+    const tMin = intervalData[0].date.getTime()
+    const tMax = intervalData[intervalData.length - 1].date.getTime()
     const tRange = tMax - tMin
     if (tRange === 0) {
-      return [{ pct: 50, label: dayData[0].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }]
+      return [{ pct: 50, label: formatXAxisLabel(intervalData[0].date) }]
     }
 
-    const count = Math.min(isScrollable ? Math.max(8, Math.floor(W / 100)) : 6, dayData.length)
+    const count = Math.min(isScrollable ? Math.max(8, Math.floor(W / 100)) : 6, intervalData.length)
     const ticks: { pct: number; label: string }[] = []
     for (let i = 0; i < count; i++) {
       const t = tMin + (tRange * i) / (count - 1)
@@ -134,21 +189,21 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
       const pxFromLeft = PX + pctInner * (W - PX - PR)
       const pct = (pxFromLeft / W) * 100
       const d = new Date(t)
-      const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-      ticks.push({ pct, label })
+      ticks.push({ pct, label: formatXAxisLabel(d) })
     }
     return ticks
-  }, [dayData, W, isScrollable])
+  }, [intervalData, W, isScrollable, formatXAxisLabel])
 
   const lineChart = useMemo(() => {
-    if (dayData.length === 0) return null
+    if (intervalData.length === 0) return null
 
-    const points = [...dayData]
-    const anchor: DayData = {
-      date: new Date(points[0].date.getTime() - 86400000),
+    const points = [...intervalData]
+    const anchorOffset = getIntervalMs(timeframe)
+    const anchor: IntervalData = {
+      date: new Date(points[0].date.getTime() - anchorOffset),
       key: '',
-      dailyPnl: 0,
-      cumPnl: dayData[0].cumPnl - dayData[0].dailyPnl,
+      intervalPnl: 0,
+      cumPnl: intervalData[0].cumPnl - intervalData[0].intervalPnl,
     }
     points.unshift(anchor)
 
@@ -170,29 +225,29 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
     const zeroY = PY + (1 - (0 - min) / range) * (H - 2 * PY)
 
     return { points, xs, ys, linePath, areaPath, min, max, zeroY }
-  }, [dayData, W])
+  }, [intervalData, timeframe, W])
 
   const barChart = useMemo(() => {
-    if (dayData.length === 0) return null
+    if (intervalData.length === 0) return null
 
-    const values = dayData.map(d => d.dailyPnl)
+    const values = intervalData.map(d => d.intervalPnl)
     const maxVal = Math.max(...values, 0)
     const minVal = Math.min(...values, 0)
     const range = maxVal - minVal || 1
 
-    const tMin = dayData[0].date.getTime()
-    const tMax = dayData[dayData.length - 1].date.getTime()
+    const tMin = intervalData[0].date.getTime()
+    const tMax = intervalData[intervalData.length - 1].date.getTime()
     const tRange = tMax - tMin || 1
 
-    const barW = Math.max(3, Math.min(14, (W - PX - PR) / dayData.length * 0.6))
+    const barW = Math.max(3, Math.min(14, (W - PX - PR) / intervalData.length * 0.6))
     const zeroY = PY + (1 - (0 - minVal) / range) * (H - 2 * PY)
 
-    const bars = dayData.map((d) => {
-      const x = dayData.length === 1
+    const bars = intervalData.map((d) => {
+      const x = intervalData.length === 1
         ? (PX + W - PR) / 2
         : PX + ((d.date.getTime() - tMin) / tRange) * (W - PX - PR)
-      const valY = PY + (1 - (d.dailyPnl - minVal) / range) * (H - 2 * PY)
-      const isPos = d.dailyPnl >= 0
+      const valY = PY + (1 - (d.intervalPnl - minVal) / range) * (H - 2 * PY)
+      const isPos = d.intervalPnl >= 0
       return {
         x: x - barW / 2,
         y: isPos ? valY : zeroY,
@@ -204,7 +259,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
     })
 
     return { bars, zeroY, minVal, maxVal }
-  }, [dayData, W])
+  }, [intervalData, W])
 
   const yAxisTicks = useMemo(() => {
     const TICK_COUNT = 5
@@ -262,7 +317,28 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
     setHoverIndex(null)
   }, [])
 
-  const lastCumPnl = dayData.length > 0 ? dayData[dayData.length - 1].cumPnl : 0
+  const lastCumPnl = intervalData.length > 0 ? intervalData[intervalData.length - 1].cumPnl : 0
+
+  // Get the appropriate label for the current timeframe
+  const getIntervalLabel = useCallback(() => {
+    if (timeframe === '1h' || timeframe === '6h') return '5min PnL'
+    if (timeframe === '1d') return 'Hourly PnL'
+    return 'Daily PnL'
+  }, [timeframe])
+
+  // Format date/time for display based on timeframe
+  const formatDisplayDate = useCallback((date: Date) => {
+    if (timeframe === '1h' || timeframe === '6h' || timeframe === '1d') {
+      return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      })
+    }
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }, [timeframe])
 
   const displayInfo = useMemo(() => {
     if (chartMode === 'cumulative') {
@@ -272,13 +348,13 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
       }
       return { value: lastCumPnl, date: null, label: 'Cumulative PnL' }
     } else {
-      if (hoverIndex !== null && dayData[hoverIndex]) {
-        const d = dayData[hoverIndex]
-        return { value: d.dailyPnl, date: d.date, label: 'Daily PnL' }
+      if (hoverIndex !== null && intervalData[hoverIndex]) {
+        const d = intervalData[hoverIndex]
+        return { value: d.intervalPnl, date: d.date, label: getIntervalLabel() }
       }
-      return { value: lastCumPnl, date: null, label: 'Daily PnL' }
+      return { value: lastCumPnl, date: null, label: getIntervalLabel() }
     }
-  }, [chartMode, hoverIndex, lineChart, dayData, lastCumPnl])
+  }, [chartMode, hoverIndex, lineChart, intervalData, lastCumPnl, getIntervalLabel])
 
   // Fullscreen escape handler
   useEffect(() => {
@@ -316,7 +392,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
           </p>
           <p className="text-[10px] text-gray-500 tabular-nums mt-0.5 h-[14px]">
             {displayInfo.date
-              ? displayInfo.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              ? formatDisplayDate(displayInfo.date)
               : '\u00A0'}
           </p>
         </div>
@@ -339,7 +415,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
               className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
                 chartMode === 'daily' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'
               }`}
-              title="Daily PnL"
+              title="Interval PnL"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <line x1="2" y1="11" x2="2" y2="5" />
@@ -351,11 +427,11 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
           </div>
 
           <div className="flex gap-0.5 bg-white/[0.03] rounded-md p-0.5">
-            {(['7d', '30d', 'all'] as Timeframe[]).map(tf => (
+            {(['1h', '6h', '1d', '7d', '30d', 'all'] as Timeframe[]).map(tf => (
               <button
                 key={tf}
                 onClick={() => setTimeframe(tf)}
-                className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                className={`px-1.5 py-1 rounded text-[10px] font-medium transition-colors ${
                   timeframe === tf ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'
                 }`}
               >
@@ -376,7 +452,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
         </div>
       </div>
 
-      {dayData.length > 0 ? (
+      {intervalData.length > 0 ? (
         <div
           ref={scrollRef}
           className={isScrollable ? 'overflow-x-auto' : ''}
@@ -530,7 +606,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
               </p>
               <p className="text-[11px] text-gray-500 tabular-nums mt-0.5 h-[16px]">
                 {displayInfo.date
-                  ? displayInfo.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                  ? formatDisplayDate(displayInfo.date)
                   : '\u00A0'}
               </p>
             </div>
@@ -553,7 +629,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
                   className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
                     chartMode === 'daily' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'
                   }`}
-                  title="Daily PnL"
+                  title="Interval PnL"
                 >
                   <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                     <line x1="2" y1="11" x2="2" y2="5" />
@@ -565,11 +641,11 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
               </div>
 
               <div className="flex gap-0.5 bg-white/[0.03] rounded-md p-0.5">
-                {(['7d', '30d', 'all'] as Timeframe[]).map(tf => (
+                {(['1h', '6h', '1d', '7d', '30d', 'all'] as Timeframe[]).map(tf => (
                   <button
                     key={tf}
                     onClick={() => setTimeframe(tf)}
-                    className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                    className={`px-2 py-1.5 rounded text-xs font-medium transition-colors ${
                       timeframe === tf ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'
                     }`}
                   >
@@ -592,7 +668,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
 
           {/* Fullscreen chart */}
           <div className="flex-1 px-6 pb-6 min-h-0">
-            {dayData.length > 0 ? (
+            {intervalData.length > 0 ? (
               <div className="h-full flex flex-col">
                 <div className="flex-1 min-h-0 relative">
                   <svg

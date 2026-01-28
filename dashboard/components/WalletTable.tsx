@@ -4,16 +4,16 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Wallet, TimePeriod } from '@/lib/supabase'
 import TraderDetailModal from './TraderDetailModal'
-import TraderHoverCard from './live/TraderHoverCard'
 
 interface ColumnFilter {
   min?: number
   max?: number
 }
 
-export type ColumnKey = 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'category' | 'joined'
+export type ColumnKey = 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'category' | 'joined'
 
 export const COLUMNS: { key: ColumnKey; label: string }[] = [
+  { key: 'chart', label: 'Chart' },
   { key: 'roi', label: 'ROI' },
   { key: 'winRate', label: 'Win Rate' },
   { key: 'pnl', label: 'PnL' },
@@ -25,7 +25,143 @@ export const COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'joined', label: 'Joined' },
 ]
 
-export const DEFAULT_VISIBLE: ColumnKey[] = ['roi', 'winRate', 'pnl', 'dd', 'active', 'total', 'value', 'category', 'joined']
+export const DEFAULT_VISIBLE: ColumnKey[] = ['chart', 'roi', 'winRate', 'pnl', 'dd', 'active', 'total', 'value', 'category', 'joined']
+
+// Module-level cache for chart data
+const chartCache = new Map<string, { values: number[]; isPositive: boolean } | null>()
+
+interface DayData {
+  date: Date
+  dailyPnl: number
+  cumPnl: number
+}
+
+function buildDayData(closedPositions: { resolvedAt?: string; realizedPnl: number }[]): DayData[] {
+  const withDates = closedPositions
+    .filter(p => p.resolvedAt)
+    .sort((a, b) => new Date(a.resolvedAt!).getTime() - new Date(b.resolvedAt!).getTime())
+
+  if (withDates.length === 0) return []
+
+  const dayMap = new Map<string, { date: Date; dailyPnl: number }>()
+  for (const p of withDates) {
+    const d = new Date(p.resolvedAt!)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const existing = dayMap.get(key)
+    if (existing) {
+      existing.dailyPnl += p.realizedPnl
+    } else {
+      dayMap.set(key, { date: d, dailyPnl: p.realizedPnl })
+    }
+  }
+
+  const allDays = Array.from(dayMap.values()).sort((a, b) => a.date.getTime() - b.date.getTime())
+
+  let cum = 0
+  return allDays.map(day => {
+    cum += day.dailyPnl
+    return { date: day.date, dailyPnl: day.dailyPnl, cumPnl: Math.round(cum * 100) / 100 }
+  })
+}
+
+// Inline mini sparkline chart
+function InlineMiniChart({ address }: { address: string }) {
+  const [chartData, setChartData] = useState<{ values: number[]; isPositive: boolean } | null | undefined>(
+    chartCache.has(address) ? chartCache.get(address) : undefined
+  )
+  const [loading, setLoading] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const hasFetched = useRef(false)
+
+  useEffect(() => {
+    if (hasFetched.current || chartData !== undefined) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !hasFetched.current) {
+          hasFetched.current = true
+          observer.disconnect()
+
+          setLoading(true)
+          fetch(`/api/traders/${address}?refresh=false`)
+            .then(res => res.ok ? res.json() : null)
+            .then(result => {
+              if (result?.closedPositions) {
+                const dayData = buildDayData(result.closedPositions)
+                if (dayData.length >= 2) {
+                  const values = dayData.map(d => d.cumPnl)
+                  const isPositive = values[values.length - 1] >= 0
+                  chartCache.set(address, { values, isPositive })
+                  setChartData({ values, isPositive })
+                } else {
+                  chartCache.set(address, null)
+                  setChartData(null)
+                }
+              } else {
+                chartCache.set(address, null)
+                setChartData(null)
+              }
+            })
+            .catch(() => {
+              chartCache.set(address, null)
+              setChartData(null)
+            })
+            .finally(() => setLoading(false))
+        }
+      },
+      { threshold: 0.1 }
+    )
+
+    if (containerRef.current) {
+      observer.observe(containerRef.current)
+    }
+
+    return () => observer.disconnect()
+  }, [address, chartData])
+
+  const W = 80
+  const H = 24
+
+  if (loading) {
+    return (
+      <div ref={containerRef} className="w-20 h-6 flex items-center justify-center">
+        <div className="w-3 h-3 rounded-full border border-white/10 border-t-white/30 animate-spin" />
+      </div>
+    )
+  }
+
+  if (!chartData || chartData.values.length < 2) {
+    return <div ref={containerRef} className="w-20 h-6 flex items-center justify-center text-[9px] text-gray-600">-</div>
+  }
+
+  const { values, isPositive } = chartData
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const range = max - min || 1
+
+  const points = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * W
+    const y = H - 2 - ((v - min) / range) * (H - 4)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+
+  const strokeColor = isPositive ? '#34d399' : '#f87171'
+
+  return (
+    <div ref={containerRef} className="w-20 h-6">
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>
+        <polyline
+          points={points}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  )
+}
 
 interface TrackedWalletMeta {
   last_refreshed_at: string | null
@@ -278,6 +414,19 @@ export default function WalletTable({
     }
   }
 
+  const getShortCategory = (category: string) => {
+    switch (category) {
+      case 'Pop Culture': return 'Pop'
+      case 'Entertainment': return 'Ent'
+      case 'Politics': return 'Pol'
+      case 'Geopolitics': return 'Geo'
+      case 'Finance': return 'Fin'
+      case 'Business': return 'Biz'
+      case 'Science': return 'Sci'
+      default: return category
+    }
+  }
+
   const formatRelativeTime = (dateStr: string | null | undefined) => {
     if (!dateStr) return 'never'
     const diff = Date.now() - new Date(dateStr).getTime()
@@ -403,6 +552,7 @@ export default function WalletTable({
           <thead className="sticky top-0 z-20" style={{ background: 'var(--background)' }}>
             <tr className="border-b border-white/5">
               <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
+              {show('chart') && <th className="px-1 py-2.5 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-20">Chart</th>}
               {show('roi') && <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" />}
               {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" />}
               {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" />}
@@ -410,7 +560,7 @@ export default function WalletTable({
               {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" />}
               {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" />}
               {show('value') && <SortHeader column="balance" label="Value" filterType="money" />}
-              {show('category') && <th className="px-3 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Category</th>}
+              {show('category') && <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider w-16">Cat</th>}
               {show('joined') && <SortHeader column="account_created_at" label="Joined" filterType="number" />}
               {trackMode && (
                 <>
@@ -472,7 +622,6 @@ export default function WalletTable({
                         </button>
                       )}
                       <div className="flex flex-col min-w-0">
-                        <TraderHoverCard address={wallet.address}>
                           <a
                             href={`https://polymarket.com/profile/${wallet.address}`}
                             target="_blank"
@@ -484,13 +633,17 @@ export default function WalletTable({
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                             </svg>
                           </a>
-                        </TraderHoverCard>
                         {wallet.metrics_updated_at && (
                           <span className="text-[9px] text-gray-600 leading-tight">{formatRelativeTime(wallet.metrics_updated_at)}</span>
                         )}
                       </div>
                     </div>
                   </td>
+                  {show('chart') && (
+                    <td className="px-1 py-2.5">
+                      <InlineMiniChart address={wallet.address} />
+                    </td>
+                  )}
                   {show('roi') && (
                     <td className="px-3 py-2.5 text-right">
                       <span className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded ${
@@ -554,13 +707,13 @@ export default function WalletTable({
                     </td>
                   )}
                   {show('category') && (
-                    <td className="px-3 py-2.5 text-left">
+                    <td className="px-2 py-2.5 text-left w-16">
                       {(wallet as any).top_category ? (
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full border whitespace-nowrap ${getCategoryStyle((wallet as any).top_category)}`}>
-                          {(wallet as any).top_category}
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded border ${getCategoryStyle((wallet as any).top_category)}`}>
+                          {getShortCategory((wallet as any).top_category)}
                         </span>
                       ) : (
-                        <span className="text-gray-600 text-xs">-</span>
+                        <span className="text-gray-600 text-[9px]">-</span>
                       )}
                     </td>
                   )}
