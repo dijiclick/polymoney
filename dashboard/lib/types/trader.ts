@@ -15,6 +15,7 @@ export interface PolymarketPosition {
   cashPnl: number
   percentPnl: number
   endDate?: string
+  redeemable?: boolean  // True if position is resolved and can be redeemed
 }
 
 export interface PolymarketClosedPosition {
@@ -141,6 +142,7 @@ export interface RawPolymarketPosition {
   outcomeIndex?: number
   title?: string
   slug?: string
+  redeemable?: boolean  // True if market resolved and position can be redeemed
 }
 
 export interface RawPolymarketClosedPosition {

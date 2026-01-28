@@ -124,20 +124,25 @@ export async function GET(
 
     // Parse all positions from APIs
     const allPositions = parsePositions(rawPositions)
-    // /closed-positions returns ALL resolved positions (both wins and losses)
+    // IMPORTANT: /closed-positions only returns WINNING positions (where outcome paid out)
+    // Losing positions appear in /positions with redeemable=true and cashPnl < 0
     const apiClosedPositions = parseClosedPositions(rawClosedPositions)
 
     console.log(`[${address}] Raw positions: ${rawPositions.length}, Raw closed: ${rawClosedPositions.length}`)
-    console.log(`[${address}] Parsed positions: ${allPositions.length}, API closed: ${apiClosedPositions.length}`)
+    console.log(`[${address}] Parsed positions: ${allPositions.length}, API closed (wins): ${apiClosedPositions.length}`)
 
     // Separate open positions (currentValue > 0) from resolved positions (currentValue = 0)
     const openPositions = allPositions.filter(p => p.currentValue > 0)
 
-    // Find resolved positions from /positions that aren't in /closed-positions
-    // This can happen if there's a delay in the API or for edge cases
-    const apiClosedConditionIds = new Set(apiClosedPositions.map(p => p.conditionId))
-    const additionalResolved = allPositions
-      .filter(p => p.currentValue === 0 && !apiClosedConditionIds.has(p.conditionId))
+    // Find UNREDEEMED LOSSES from /positions API
+    // These are positions where:
+    // - currentValue = 0 (position is resolved)
+    // - redeemable = true (market has ended, position can be redeemed for $0)
+    // - cashPnl < 0 (it's a losing position)
+    // Note: We don't filter by conditionId because a user could have both a win and loss
+    // on the same market if they hedged (bet on both outcomes)
+    const unredeemedLosses = allPositions
+      .filter(p => p.currentValue === 0 && p.redeemable === true && p.cashPnl < 0)
       .map(p => ({
         conditionId: p.conditionId,
         title: p.title,
@@ -147,11 +152,13 @@ export async function GET(
         finalPrice: 0,
         realizedPnl: p.cashPnl,
         resolvedAt: p.endDate,
-        isWin: p.cashPnl > 0,
+        isWin: false,
       }))
 
-    // Combine API closed positions with any additional resolved ones
-    const closedPositions = [...apiClosedPositions, ...additionalResolved]
+    console.log(`[${address}] Unredeemed losses found: ${unredeemedLosses.length}`)
+
+    // Combine API closed positions (wins) with unredeemed losses
+    const closedPositions = [...apiClosedPositions, ...unredeemedLosses]
       .sort((a, b) => {
         // Sort by resolved date if available, newest first
         const dateA = a.resolvedAt ? new Date(a.resolvedAt).getTime() : 0
@@ -159,7 +166,7 @@ export async function GET(
         return dateB - dateA
       })
 
-    console.log(`[${address}] Open: ${openPositions.length}, Closed: ${closedPositions.length}`)
+    console.log(`[${address}] Open: ${openPositions.length}, Total Closed (wins+losses): ${closedPositions.length}`)
 
     // Get current balance for ROI calculation
     const currentBalance = dbWallet?.balance || 0
@@ -168,7 +175,8 @@ export async function GET(
     // Trade counting: hedged positions (same market, different outcomes) = 1 trade
     // ROI = Account ROI = Total PnL / Initial Balance
     // Max Drawdown = calculated from closed positions chronologically
-    const polymarketMetrics = calculatePolymarketMetrics(closedPositions, allPositions, currentBalance)
+    // Note: Pass openPositions (not allPositions) to avoid double-counting resolved losses
+    const polymarketMetrics = calculatePolymarketMetrics(closedPositions, openPositions, currentBalance)
 
     // Calculate period-based metrics (7d and 30d) from closed positions
     const metrics7d = calculatePeriodMetrics(closedPositions, 7, currentBalance)
@@ -543,7 +551,7 @@ function calculateMaxDrawdown(
  */
 function calculatePolymarketMetrics(
   closedPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; realizedPnl: number; isWin: boolean; resolvedAt?: string }[],
-  allPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; cashPnl: number; currentValue: number }[],
+  openPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; cashPnl: number; currentValue: number }[],
   currentBalance: number = 0
 ): {
   realizedPnl: number
@@ -560,7 +568,9 @@ function calculatePolymarketMetrics(
   maxDrawdownAmount: number
 } {
   // Group positions into trades
-  const trades = groupPositionsIntoTrades(closedPositions, allPositions)
+  // closedPositions = resolved wins + unredeemed losses
+  // openPositions = active/unresolved positions only
+  const trades = groupPositionsIntoTrades(closedPositions, openPositions)
 
   // Calculate metrics from trades
   let realizedPnl = 0

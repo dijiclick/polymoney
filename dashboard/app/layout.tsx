@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import Link from 'next/link'
 import ThemeProvider from '@/components/ThemeProvider'
 import ThemeToggle from '@/components/ThemeToggle'
+import ServerStatusButton from '@/components/ServerStatusButton'
 import './globals.css'
 
 const inter = Inter({ subsets: ['latin'] })
@@ -80,7 +81,10 @@ export default function RootLayout({
                   </div>
                 </div>
 
-                <ThemeToggle />
+                <div className="flex items-center gap-1">
+                  <ServerStatusButton />
+                  <ThemeToggle />
+                </div>
               </div>
             </div>
           </nav>

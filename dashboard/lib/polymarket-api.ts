@@ -386,6 +386,7 @@ export function parsePositions(rawPositions: RawPolymarketPosition[]): Polymarke
     cashPnl: parseFloat(pos.cashPnl || '0'),
     percentPnl: parseFloat(pos.percentPnl || '0'),
     endDate: pos.endDate,
+    redeemable: pos.redeemable,  // Preserve redeemable flag for resolved position detection
   }))
 }
 
