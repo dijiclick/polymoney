@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, Suspense } from 'react'
+import { useState, useCallback, useEffect, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { TradeFilter } from '@/lib/supabase'
 import { useLiveTrades } from '@/hooks/useLiveTrades'
@@ -36,6 +36,68 @@ function LiveFeedContent() {
     setIsPaused,
     clearTrades,
   } = useLiveTrades({ filter, maxTrades: 200 })
+
+  // Auto-refresh stale wallets seen in the live feed (>1 day old metrics)
+  const checkedAddresses = useRef(new Set<string>())
+  const pendingAddresses = useRef(new Set<string>())
+  const refreshQueue = useRef<string[]>([])
+  const isProcessing = useRef(false)
+
+  // Collect new addresses from incoming trades
+  useEffect(() => {
+    for (const trade of trades) {
+      const addr = trade.trader_address
+      if (!checkedAddresses.current.has(addr)) {
+        checkedAddresses.current.add(addr)
+        pendingAddresses.current.add(addr)
+      }
+    }
+  }, [trades])
+
+  // Batch check pending addresses every 5 seconds
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (pendingAddresses.current.size === 0) return
+
+      const batch = Array.from(pendingAddresses.current)
+      pendingAddresses.current.clear()
+
+      try {
+        const res = await fetch('/api/wallets/check-stale', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: batch }),
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        if (data.stale && data.stale.length > 0) {
+          refreshQueue.current.push(...data.stale)
+          processRefreshQueue()
+        }
+      } catch {
+        // Silently ignore
+      }
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  // Process refresh queue sequentially
+  const processRefreshQueue = useCallback(async () => {
+    if (isProcessing.current) return
+    isProcessing.current = true
+
+    while (refreshQueue.current.length > 0) {
+      const addr = refreshQueue.current.shift()!
+      try {
+        await fetch(`/api/admin/refresh-metrics?address=${addr}`, { method: 'POST' })
+      } catch {
+        // Continue with next
+      }
+    }
+
+    isProcessing.current = false
+  }, [])
 
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col">
