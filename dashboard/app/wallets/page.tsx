@@ -26,6 +26,15 @@ interface Cursor {
   address: string
 }
 
+interface RefreshProgress {
+  total: number
+  current: number
+  success: number
+  failed: number
+  address?: string
+  username?: string
+}
+
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<Wallet[]>([])
   const [stats, setStats] = useState<WalletStats | null>(null)
@@ -47,8 +56,56 @@ export default function WalletsPage() {
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(DEFAULT_VISIBLE)
   const [showColumnSettings, setShowColumnSettings] = useState(false)
   const [trackedAddresses, setTrackedAddresses] = useState<Set<string>>(new Set())
+  const [refreshProgress, setRefreshProgress] = useState<RefreshProgress | null>(null)
+  const [refreshDone, setRefreshDone] = useState(false)
+  const eventSourceRef = useRef<EventSource | null>(null)
   const columnSettingsRef = useRef<HTMLDivElement>(null)
   const analyzeInputRef = useRef<HTMLInputElement>(null)
+
+  const startRefreshAll = useCallback(() => {
+    if (eventSourceRef.current) return // already running
+    setRefreshProgress(null)
+    setRefreshDone(false)
+
+    const es = new EventSource('/api/admin/refresh-stream')
+    eventSourceRef.current = es
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'start') {
+          setRefreshProgress({ total: data.total, current: 0, success: 0, failed: 0 })
+        } else if (data.type === 'progress') {
+          setRefreshProgress({
+            total: data.total,
+            current: data.current,
+            success: data.success,
+            failed: data.failed,
+            address: data.address,
+            username: data.username,
+          })
+        } else if (data.type === 'done' || data.type === 'error' || data.type === 'aborted') {
+          setRefreshDone(true)
+          es.close()
+          eventSourceRef.current = null
+        }
+      } catch {}
+    }
+
+    es.onerror = () => {
+      setRefreshDone(true)
+      es.close()
+      eventSourceRef.current = null
+    }
+  }, [])
+
+  const stopRefreshAll = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+      setRefreshDone(true)
+    }
+  }, [])
 
   // Load column preferences from localStorage
   useEffect(() => {
@@ -284,6 +341,23 @@ export default function WalletsPage() {
     fetchStats()
   }, [fetchStats])
 
+  // Reload data when refresh-all stream completes
+  useEffect(() => {
+    if (refreshDone) {
+      fetchWallets(null)
+      fetchStats()
+    }
+  }, [refreshDone]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cleanup EventSource on unmount
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close()
+      }
+    }
+  }, [])
+
   const loadMore = useCallback(() => {
     if (!isFetchingMore && hasMore && nextCursor) {
       fetchWallets(nextCursor)
@@ -401,6 +475,65 @@ export default function WalletsPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Refresh All Progress */}
+      {refreshProgress && (
+        <div className="glass rounded-xl p-4 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              {!refreshDone ? (
+                <div className="w-4 h-4 rounded-full border-2 border-transparent border-t-blue-400 animate-spin" />
+              ) : (
+                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+              <span className="text-sm font-medium text-white">
+                {refreshDone ? 'Refresh Complete' : 'Refreshing All Wallets'}
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-emerald-400">{refreshProgress.success} ok</span>
+                {refreshProgress.failed > 0 && (
+                  <span className="text-red-400">{refreshProgress.failed} failed</span>
+                )}
+                <span className="text-gray-500">
+                  {refreshProgress.current} / {refreshProgress.total}
+                </span>
+              </div>
+              {!refreshDone ? (
+                <button
+                  onClick={stopRefreshAll}
+                  className="px-2 py-1 text-[10px] text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-md transition-colors"
+                >
+                  Stop
+                </button>
+              ) : (
+                <button
+                  onClick={() => { setRefreshProgress(null); setRefreshDone(false) }}
+                  className="px-2 py-1 text-[10px] text-gray-500 hover:text-gray-300 border border-white/10 rounded-md transition-colors"
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+          </div>
+          {/* Progress bar */}
+          <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-300 ${refreshDone ? 'bg-emerald-500' : 'bg-blue-500'}`}
+              style={{ width: `${refreshProgress.total > 0 ? (refreshProgress.current / refreshProgress.total) * 100 : 0}%` }}
+            />
+          </div>
+          {/* Current wallet */}
+          {!refreshDone && refreshProgress.address && (
+            <p className="text-[10px] text-gray-600 mt-1.5 font-mono truncate">
+              {refreshProgress.username || refreshProgress.address}
+            </p>
+          )}
         </div>
       )}
 
@@ -523,6 +656,23 @@ export default function WalletsPage() {
               </div>
             )}
           </div>
+
+          {/* Refresh All */}
+          <button
+            onClick={startRefreshAll}
+            disabled={!!refreshProgress && !refreshDone}
+            className={`px-2.5 py-1.5 bg-white/[0.02] border rounded-lg text-[10px] transition-all flex items-center gap-1.5 ${
+              refreshProgress && !refreshDone
+                ? 'border-blue-500/20 text-blue-400 opacity-50 cursor-not-allowed'
+                : 'border-white/5 text-gray-500 hover:text-blue-400 hover:border-blue-500/20 hover:bg-blue-500/5'
+            }`}
+            title="Re-analyze all wallets"
+          >
+            <svg className={`w-3.5 h-3.5 ${refreshProgress && !refreshDone ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh All
+          </button>
 
           <div className="text-xs text-gray-600">
             <span className="text-gray-400">{wallets.length.toLocaleString()}</span>

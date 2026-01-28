@@ -1,0 +1,357 @@
+import { createClient } from '@supabase/supabase-js'
+import {
+  getProfile,
+  getPortfolioValue,
+  getPositions,
+  getClosedPositions,
+  parsePositions,
+  parseClosedPositions,
+  fetchEventCategories,
+  getTopCategory,
+} from '@/lib/polymarket-api'
+import { TimePeriodMetrics } from '@/lib/types/trader'
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+
+export function getServiceSupabase() {
+  return createClient(supabaseUrl, supabaseServiceKey)
+}
+
+// --- Calculation helpers ---
+
+interface Trade {
+  conditionId: string
+  totalPnl: number
+  totalBought: number
+  isResolved: boolean
+  outcomes: Set<string>
+}
+
+function groupPositionsIntoTrades(
+  closedPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; realizedPnl: number }[],
+  openPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; cashPnl: number; currentValue: number }[]
+): Trade[] {
+  const marketGroups = new Map<string, {
+    outcomes: Map<string, { pnl: number; bought: number; isResolved: boolean }[]>
+  }>()
+
+  for (const pos of closedPositions) {
+    const outcome = pos.outcome || 'unknown'
+    if (!marketGroups.has(pos.conditionId)) {
+      marketGroups.set(pos.conditionId, { outcomes: new Map() })
+    }
+    const group = marketGroups.get(pos.conditionId)!
+    if (!group.outcomes.has(outcome)) {
+      group.outcomes.set(outcome, [])
+    }
+    group.outcomes.get(outcome)!.push({
+      pnl: pos.realizedPnl,
+      bought: pos.size * pos.avgPrice,
+      isResolved: true,
+    })
+  }
+
+  for (const pos of openPositions) {
+    const outcome = pos.outcome || 'unknown'
+    const isResolvedNotRedeemed = pos.currentValue === 0
+    if (!marketGroups.has(pos.conditionId)) {
+      marketGroups.set(pos.conditionId, { outcomes: new Map() })
+    }
+    const group = marketGroups.get(pos.conditionId)!
+    if (!group.outcomes.has(outcome)) {
+      group.outcomes.set(outcome, [])
+    }
+    group.outcomes.get(outcome)!.push({
+      pnl: pos.cashPnl,
+      bought: pos.size * pos.avgPrice,
+      isResolved: isResolvedNotRedeemed,
+    })
+  }
+
+  const trades: Trade[] = []
+
+  for (const [conditionId, group] of marketGroups) {
+    const outcomeKeys = Array.from(group.outcomes.keys())
+
+    if (outcomeKeys.length > 1) {
+      let totalPnl = 0
+      let totalBought = 0
+      let isResolved = false
+      const outcomes = new Set<string>()
+
+      for (const [outcome, entries] of group.outcomes) {
+        outcomes.add(outcome)
+        for (const entry of entries) {
+          totalPnl += entry.pnl
+          totalBought += entry.bought
+          if (entry.isResolved) isResolved = true
+        }
+      }
+
+      trades.push({ conditionId, totalPnl, totalBought, isResolved, outcomes })
+    } else {
+      const outcome = outcomeKeys[0]
+      const entries = group.outcomes.get(outcome)!
+
+      for (const entry of entries) {
+        trades.push({
+          conditionId,
+          totalPnl: entry.pnl,
+          totalBought: entry.bought,
+          isResolved: entry.isResolved,
+          outcomes: new Set([outcome]),
+        })
+      }
+    }
+  }
+
+  return trades
+}
+
+function calculateMaxDrawdown(
+  closedPositions: { realizedPnl: number; resolvedAt?: string }[],
+  initialBalance: number = 0,
+): { percent: number; amount: number } {
+  const sortedPositions = [...closedPositions]
+    .filter(p => p.resolvedAt)
+    .sort((a, b) => new Date(a.resolvedAt!).getTime() - new Date(b.resolvedAt!).getTime())
+
+  if (sortedPositions.length === 0) return { percent: 0, amount: 0 }
+
+  let balance = initialBalance
+  let maxBalance = initialBalance
+  let maxDrawdownPercent = 0
+  let maxDrawdownAmount = 0
+
+  for (const position of sortedPositions) {
+    balance += position.realizedPnl
+    if (balance > maxBalance) maxBalance = balance
+    if (maxBalance > 0) {
+      const drawdownPercent = ((maxBalance - balance) / maxBalance) * 100
+      const drawdownAmount = maxBalance - balance
+      if (drawdownPercent > maxDrawdownPercent) {
+        maxDrawdownPercent = drawdownPercent
+        maxDrawdownAmount = drawdownAmount
+      }
+    }
+  }
+
+  return {
+    percent: Math.min(Math.round(maxDrawdownPercent * 100) / 100, 100),
+    amount: Math.round(maxDrawdownAmount * 100) / 100,
+  }
+}
+
+function calculatePeriodMetrics(
+  closedPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; realizedPnl: number; isWin: boolean; resolvedAt?: string }[],
+  days: number,
+  currentBalance: number = 0
+): TimePeriodMetrics {
+  const cutoffDate = new Date()
+  cutoffDate.setDate(cutoffDate.getDate() - days)
+  const cutoffMs = cutoffDate.getTime()
+
+  const periodPositions = closedPositions.filter(p => {
+    if (!p.resolvedAt) return false
+    return new Date(p.resolvedAt).getTime() >= cutoffMs
+  })
+
+  if (periodPositions.length === 0) {
+    return { pnl: 0, roi: 0, volume: 0, tradeCount: 0, winRate: 0, drawdown: 0 }
+  }
+
+  const pnl = periodPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
+  const volume = periodPositions.reduce((sum, p) => sum + (p.size * p.avgPrice), 0)
+
+  const marketPnl = new Map<string, number>()
+  for (const p of periodPositions) {
+    const cid = p.conditionId || ''
+    marketPnl.set(cid, (marketPnl.get(cid) || 0) + p.realizedPnl)
+  }
+
+  const tradeCount = marketPnl.size
+  let wins = 0
+  for (const pnlVal of marketPnl.values()) {
+    if (pnlVal > 0) wins++
+  }
+  const winRate = tradeCount > 0 ? (wins / tradeCount) * 100 : 0
+
+  const roi = volume > 0 ? (pnl / volume) * 100 : 0
+  const initialBalance = Math.max(currentBalance - pnl, currentBalance, 1)
+  const drawdownResult = calculateMaxDrawdown(periodPositions, initialBalance)
+
+  return {
+    pnl: Math.round(pnl * 100) / 100,
+    roi: Math.round(roi * 100) / 100,
+    volume: Math.round(volume * 100) / 100,
+    tradeCount,
+    winRate: Math.round(winRate * 100) / 100,
+    drawdown: drawdownResult.percent,
+    drawdownAmount: drawdownResult.amount,
+  }
+}
+
+function calculatePolymarketMetrics(
+  closedPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; realizedPnl: number; isWin: boolean; resolvedAt?: string }[],
+  allPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; cashPnl: number; currentValue: number }[],
+  currentBalance: number = 0
+) {
+  const trades = groupPositionsIntoTrades(closedPositions, allPositions)
+
+  let realizedPnl = 0
+  let unrealizedPnl = 0
+  let totalBoughtResolved = 0
+  let winCount = 0
+  let lossCount = 0
+  let activeTradeCount = 0
+
+  for (const trade of trades) {
+    if (trade.isResolved) {
+      realizedPnl += trade.totalPnl
+      totalBoughtResolved += trade.totalBought
+      if (trade.totalPnl > 0) winCount++
+      else lossCount++
+    } else {
+      unrealizedPnl += trade.totalPnl
+      activeTradeCount++
+    }
+  }
+
+  const totalPnl = realizedPnl + unrealizedPnl
+  const tradeCount = winCount + lossCount
+  const roiAll = totalBoughtResolved > 0 ? (totalPnl / totalBoughtResolved) * 100 : 0
+  const winRateAll = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0
+  const drawdownBase = Math.max(currentBalance - totalPnl, currentBalance, 1)
+  const maxDrawdownResult = calculateMaxDrawdown(closedPositions, drawdownBase)
+
+  return {
+    realizedPnl: Math.round(realizedPnl * 100) / 100,
+    unrealizedPnl: Math.round(unrealizedPnl * 100) / 100,
+    totalPnl: Math.round(totalPnl * 100) / 100,
+    totalBought: Math.round(totalBoughtResolved * 100) / 100,
+    roiAll: Math.round(roiAll * 100) / 100,
+    winRateAll: Math.round(winRateAll * 100) / 100,
+    winCount,
+    lossCount,
+    tradeCount,
+    activeTradeCount,
+    maxDrawdown: maxDrawdownResult.percent,
+    maxDrawdownAmount: maxDrawdownResult.amount,
+  }
+}
+
+// --- Per-wallet refresh function ---
+
+export interface RefreshResult {
+  address: string
+  username?: string
+  success: boolean
+  error?: string
+}
+
+export async function refreshOneWallet(
+  wallet: { address: string; username?: string; balance?: number }
+): Promise<RefreshResult> {
+  const supabase = getServiceSupabase()
+
+  try {
+    const [profile, portfolioValue, rawPositions, rawClosedPositions] = await Promise.all([
+      getProfile(wallet.address).catch(() => ({})),
+      getPortfolioValue(wallet.address).catch(() => wallet.balance || 0),
+      getPositions(wallet.address).catch(() => []),
+      getClosedPositions(wallet.address).catch(() => []),
+    ])
+
+    const allPositions = parsePositions(rawPositions)
+    const apiClosedPositions = parseClosedPositions(rawClosedPositions)
+
+    const openPositions = allPositions.filter(p => p.currentValue > 0)
+    const apiClosedConditionIds = new Set(apiClosedPositions.map(p => p.conditionId))
+    const additionalResolved = allPositions
+      .filter(p => p.currentValue === 0 && !apiClosedConditionIds.has(p.conditionId))
+      .map(p => ({
+        conditionId: p.conditionId,
+        title: p.title,
+        outcome: p.outcome,
+        size: p.size,
+        avgPrice: p.avgPrice,
+        finalPrice: 0,
+        realizedPnl: p.cashPnl,
+        resolvedAt: p.endDate,
+        isWin: p.cashPnl > 0,
+      }))
+
+    const closedPositions = [...apiClosedPositions, ...additionalResolved]
+      .sort((a, b) => {
+        const dateA = a.resolvedAt ? new Date(a.resolvedAt).getTime() : 0
+        const dateB = b.resolvedAt ? new Date(b.resolvedAt).getTime() : 0
+        return dateB - dateA
+      })
+
+    const currentBalance = portfolioValue || wallet.balance || 0
+    const polymetrics = calculatePolymarketMetrics(closedPositions, allPositions, currentBalance)
+    const metrics7d = calculatePeriodMetrics(closedPositions, 7, currentBalance)
+    const metrics30d = calculatePeriodMetrics(closedPositions, 30, currentBalance)
+    const metricsAll = calculatePeriodMetrics(closedPositions, 36500, currentBalance)
+
+    const allEventSlugs = [
+      ...rawPositions.map((p: any) => String(p.eventSlug || '')),
+      ...rawClosedPositions.map((p: any) => String(p.eventSlug || '')),
+    ].filter(Boolean)
+    const categoryMap = await fetchEventCategories(allEventSlugs)
+    const topCategory = getTopCategory(allEventSlugs, categoryMap)
+
+    const { error: updateError } = await supabase.from('wallets').update({
+      username: (profile as any).name || (profile as any).pseudonym || wallet.username,
+      account_created_at: (profile as any).createdAt,
+      balance: portfolioValue,
+      pnl_7d: metrics7d.pnl,
+      roi_7d: metrics7d.roi,
+      win_rate_7d: metrics7d.winRate,
+      volume_7d: metrics7d.volume,
+      trade_count_7d: metrics7d.tradeCount,
+      drawdown_7d: metrics7d.drawdown,
+      pnl_30d: metrics30d.pnl,
+      roi_30d: metrics30d.roi,
+      win_rate_30d: metrics30d.winRate,
+      volume_30d: metrics30d.volume,
+      trade_count_30d: metrics30d.tradeCount,
+      drawdown_30d: metrics30d.drawdown,
+      total_positions: new Set(closedPositions.map((p: any) => p.conditionId).filter(Boolean)).size,
+      active_positions: new Set(openPositions.map((p: any) => p.conditionId).filter(Boolean)).size,
+      total_wins: polymetrics.winCount,
+      total_losses: polymetrics.lossCount,
+      realized_pnl: polymetrics.realizedPnl,
+      unrealized_pnl: polymetrics.unrealizedPnl,
+      overall_pnl: polymetrics.totalPnl,
+      overall_roi: polymetrics.roiAll,
+      overall_win_rate: polymetrics.winRateAll,
+      total_volume: polymetrics.totalBought,
+      total_trades: polymetrics.tradeCount,
+      pnl_all: metricsAll.pnl,
+      roi_all: metricsAll.roi,
+      win_rate_all: metricsAll.winRate,
+      volume_all: metricsAll.volume,
+      trade_count_all: metricsAll.tradeCount,
+      drawdown_all: metricsAll.drawdown,
+      drawdown_amount_all: metricsAll.drawdownAmount,
+      ...(topCategory && { top_category: topCategory }),
+      metrics_updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('address', wallet.address)
+
+    if (updateError) {
+      return { address: wallet.address, username: wallet.username, success: false, error: updateError.message }
+    }
+
+    return { address: wallet.address, username: wallet.username, success: true }
+  } catch (err) {
+    return {
+      address: wallet.address,
+      username: wallet.username,
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error',
+    }
+  }
+}
