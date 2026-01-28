@@ -54,3 +54,10 @@ Thumbs.db
 
 # Claude
 .claude/
+
+# Analysis files
+*.html
+*.docx
+
+# Supabase temp
+supabase/.temp/
