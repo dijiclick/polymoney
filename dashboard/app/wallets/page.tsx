@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Wallet, WalletFilter, TimePeriod } from '@/lib/supabase'
 import TimePeriodSelector from '@/components/TimePeriodSelector'
 import WalletTable, { ColumnKey, COLUMNS, DEFAULT_VISIBLE } from '@/components/WalletTable'
-import TraderDetailModal from '@/components/TraderDetailModal'
 
 interface WalletStats {
   total: number
@@ -51,7 +50,7 @@ export default function WalletsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [analyzeAddress, setAnalyzeAddress] = useState('')
   const [showAnalyzeInput, setShowAnalyzeInput] = useState(false)
-  const [showAnalyzeModal, setShowAnalyzeModal] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
   const [resolving, setResolving] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(DEFAULT_VISIBLE)
   const [showColumnSettings, setShowColumnSettings] = useState(false)
@@ -179,9 +178,23 @@ export default function WalletsPage() {
 
     const addr = input.toLowerCase()
     const finalAddr = addr.startsWith('0x') ? addr : `0x${addr}`
-    setAnalyzeAddress(finalAddr)
-    setShowAnalyzeModal(true)
     setShowAnalyzeInput(false)
+    setAnalyzeAddress('')
+    setAnalyzing(true)
+
+    try {
+      const params = new URLSearchParams({ refresh: 'true' })
+      if (usernameToResolve) params.set('username', usernameToResolve)
+      const res = await fetch(`/api/traders/${finalAddr}?${params}`)
+      if (!res.ok) throw new Error('Failed to analyze wallet')
+      // Refresh wallet list to show the new/updated entry
+      await fetchWallets(null)
+    } catch (error) {
+      console.error('Error analyzing wallet:', error)
+      alert('Failed to analyze wallet')
+    } finally {
+      setAnalyzing(false)
+    }
   }
 
   useEffect(() => {
@@ -570,7 +583,12 @@ export default function WalletsPage() {
           </div>
 
           {/* Analyze Wallet */}
-          {showAnalyzeInput ? (
+          {analyzing ? (
+            <div className="flex items-center gap-2 px-2.5 py-1.5 bg-blue-500/5 border border-blue-500/20 rounded-lg">
+              <div className="w-3.5 h-3.5 rounded-full border border-transparent border-t-blue-400 animate-spin" />
+              <span className="text-[10px] text-blue-400">Analyzing...</span>
+            </div>
+          ) : showAnalyzeInput ? (
             <div className="relative">
               <input
                 ref={analyzeInputRef}
@@ -733,12 +751,6 @@ export default function WalletsPage() {
         </div>
       )}
 
-      {/* Analyze Wallet Modal */}
-      <TraderDetailModal
-        address={analyzeAddress}
-        isOpen={showAnalyzeModal}
-        onClose={() => { setShowAnalyzeModal(false); setAnalyzeAddress('') }}
-      />
     </div>
   )
 }

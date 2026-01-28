@@ -347,13 +347,17 @@ export default function WalletTable({
     overscan: 15,
   })
 
+  // Keep a stable ref to virtualizer so measureRef doesn't change identity each render
+  const virtualizerRef = useRef(virtualizer)
+  virtualizerRef.current = virtualizer
+
   // Defer measureElement to avoid flushSync-during-render warning
   const measureRef = useCallback((node: HTMLElement | null) => {
     if (!node) return
     requestAnimationFrame(() => {
-      virtualizer.measureElement(node)
+      virtualizerRef.current.measureElement(node)
     })
-  }, [virtualizer])
+  }, [])
 
   // Infinite scroll: trigger loadMore when near bottom
   useEffect(() => {

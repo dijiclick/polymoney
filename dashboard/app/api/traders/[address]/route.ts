@@ -196,9 +196,54 @@ export async function GET(
     const categoryMap = await fetchEventCategories(allEventSlugs)
     const topCategory = getTopCategory(allEventSlugs, categoryMap)
 
-    // 6. Update wallets table with fresh data (if wallet exists)
+    // 6. Save metrics to database (update existing or insert new wallet)
+    const usernameParam = request.nextUrl.searchParams.get('username')
     if (dbWallet) {
       updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, uniqueOpenMarkets, uniqueClosedMarkets, topCategory)
+    } else {
+      // Insert new wallet for manually analyzed addresses
+      try {
+        await supabase.from('wallets').insert({
+          address,
+          source: 'live',
+          balance: 0,
+          ...(usernameParam && { username: usernameParam }),
+          pnl_7d: metrics7d.pnl,
+          roi_7d: metrics7d.roi,
+          win_rate_7d: metrics7d.winRate,
+          volume_7d: metrics7d.volume,
+          trade_count_7d: metrics7d.tradeCount,
+          drawdown_7d: metrics7d.drawdown,
+          pnl_30d: metrics30d.pnl,
+          roi_30d: metrics30d.roi,
+          win_rate_30d: metrics30d.winRate,
+          volume_30d: metrics30d.volume,
+          trade_count_30d: metrics30d.tradeCount,
+          drawdown_30d: metrics30d.drawdown,
+          pnl_all: polymarketMetrics.realizedPnl,
+          roi_all: polymarketMetrics.roiAll,
+          win_rate_all: polymarketMetrics.winRateAll,
+          volume_all: polymarketMetrics.totalBought,
+          trade_count_all: polymarketMetrics.tradeCount,
+          drawdown_all: polymarketMetrics.maxDrawdown,
+          drawdown_amount_all: polymarketMetrics.maxDrawdownAmount,
+          total_positions: uniqueClosedMarkets,
+          active_positions: uniqueOpenMarkets,
+          total_wins: polymarketMetrics.winCount,
+          total_losses: polymarketMetrics.lossCount,
+          realized_pnl: polymarketMetrics.realizedPnl,
+          unrealized_pnl: polymarketMetrics.unrealizedPnl,
+          overall_pnl: polymarketMetrics.totalPnl,
+          overall_roi: polymarketMetrics.roiAll,
+          overall_win_rate: polymarketMetrics.winRateAll,
+          total_volume: polymarketMetrics.totalBought,
+          total_trades: polymarketMetrics.tradeCount,
+          ...(topCategory && { top_category: topCategory }),
+          metrics_updated_at: new Date().toISOString(),
+        })
+      } catch (error) {
+        console.error('Error inserting new wallet:', error)
+      }
     }
 
     // 7. Build response - all metrics from Polymarket
@@ -206,7 +251,7 @@ export async function GET(
       source: dbWallet ? 'mixed' : 'live',
       dataFreshness: 'fresh',
       address,
-      username: dbWallet?.username,
+      username: dbWallet?.username || usernameParam || undefined,
       profileImage: undefined,
       accountCreatedAt: dbWallet?.account_created_at,
       positions: openPositions,
