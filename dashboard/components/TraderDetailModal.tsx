@@ -285,12 +285,17 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                                 </span>
                               </div>
                             </div>
-                            <div className="text-right">
+                            <div className="flex-shrink-0 text-right">
                               <p className={`text-xs ${getPnlColor(position.realizedPnl || 0)}`}>
+                                {position.size > 0 && position.avgPrice > 0 && (
+                                  <span className={`text-[10px] ${getPnlColor(position.realizedPnl || 0)} mr-1`}>
+                                    ({(position.realizedPnl || 0) >= 0 ? '+' : ''}{((position.realizedPnl / (position.size * position.avgPrice)) * 100).toFixed(1)}%)
+                                  </span>
+                                )}
                                 {formatMoney(position.realizedPnl || 0)}
                               </p>
                               {position.resolvedAt && (
-                                <p className="text-[10px] text-gray-400 mt-0.5">
+                                <p className="text-[10px] text-gray-500 mt-1">
                                   {new Date(position.resolvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                                 </p>
                               )}

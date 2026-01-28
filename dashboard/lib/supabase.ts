@@ -18,6 +18,14 @@ export interface WatchlistEntry {
   added_at: string
 }
 
+export interface TrackedWallet {
+  id: number
+  address: string
+  update_interval_hours: number
+  last_refreshed_at: string | null
+  added_at: string
+}
+
 // Live Trade Monitoring Types
 export interface LiveTrade {
   id: number

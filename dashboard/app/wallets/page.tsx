@@ -46,6 +46,7 @@ export default function WalletsPage() {
   const [resolving, setResolving] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(DEFAULT_VISIBLE)
   const [showColumnSettings, setShowColumnSettings] = useState(false)
+  const [trackedAddresses, setTrackedAddresses] = useState<Set<string>>(new Set())
   const columnSettingsRef = useRef<HTMLDivElement>(null)
   const analyzeInputRef = useRef<HTMLInputElement>(null)
 
@@ -149,6 +150,76 @@ export default function WalletsPage() {
     }
   }, [])
 
+  const checkTrackedBatch = useCallback(async (addresses: string[]) => {
+    if (addresses.length === 0) return
+    try {
+      const res = await fetch('/api/tracked-wallets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'check_batch', addresses })
+      })
+      if (!res.ok) return // table may not exist yet
+      const data = await res.json()
+      if (data.tracked) {
+        setTrackedAddresses(prev => {
+          const next = new Set(prev)
+          for (const addr of data.tracked) next.add(addr)
+          return next
+        })
+      }
+    } catch {
+      // Silently ignore - tracked_wallets table may not exist yet
+    }
+  }, [])
+
+  const handleToggleTrack = useCallback(async (address: string) => {
+    const isTracked = trackedAddresses.has(address)
+    // Optimistic update
+    setTrackedAddresses(prev => {
+      const next = new Set(prev)
+      if (isTracked) {
+        next.delete(address)
+      } else {
+        next.add(address)
+      }
+      return next
+    })
+
+    try {
+      const res = await fetch('/api/tracked-wallets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: isTracked ? 'remove' : 'add',
+          address
+        })
+      })
+      if (!res.ok) {
+        // Revert on failure
+        setTrackedAddresses(prev => {
+          const next = new Set(prev)
+          if (isTracked) {
+            next.add(address)
+          } else {
+            next.delete(address)
+          }
+          return next
+        })
+      }
+    } catch {
+      // Revert on failure
+      setTrackedAddresses(prev => {
+        const next = new Set(prev)
+        if (isTracked) {
+          next.add(address)
+        } else {
+          next.delete(address)
+        }
+        return next
+      })
+    }
+  }, [trackedAddresses])
+
   const fetchWallets = useCallback(async (cursor?: Cursor | null) => {
     const isInitialLoad = !cursor
     if (isInitialLoad) {
@@ -180,8 +251,12 @@ export default function WalletsPage() {
       if (data.wallets) {
         if (isInitialLoad) {
           setWallets(data.wallets)
+          // Check which of these wallets are tracked
+          checkTrackedBatch(data.wallets.map((w: any) => w.address))
         } else {
           setWallets(prev => [...prev, ...data.wallets])
+          // Check newly loaded wallets
+          checkTrackedBatch(data.wallets.map((w: any) => w.address))
         }
         setNextCursor(data.nextCursor)
         setHasMore(data.hasMore)
@@ -488,6 +563,8 @@ export default function WalletsPage() {
         columnFilters={columnFilters}
         onColumnFilterChange={handleColumnFilterChange}
         visibleColumns={visibleColumns}
+        trackedAddresses={trackedAddresses}
+        onToggleTrack={handleToggleTrack}
       />
 
       {/* Scroll status */}

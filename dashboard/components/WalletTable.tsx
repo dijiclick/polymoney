@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Wallet, TimePeriod } from '@/lib/supabase'
 import TraderDetailModal from './TraderDetailModal'
+import TraderHoverCard from './live/TraderHoverCard'
 
 interface ColumnFilter {
   min?: number
@@ -13,18 +14,23 @@ interface ColumnFilter {
 export type ColumnKey = 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'category' | 'joined'
 
 export const COLUMNS: { key: ColumnKey; label: string }[] = [
-  { key: 'value', label: 'Value' },
-  { key: 'winRate', label: 'Win Rate' },
   { key: 'roi', label: 'ROI' },
+  { key: 'winRate', label: 'Win Rate' },
   { key: 'pnl', label: 'PnL' },
+  { key: 'dd', label: 'Drawdown' },
   { key: 'active', label: 'Active' },
   { key: 'total', label: 'Total' },
-  { key: 'dd', label: 'Drawdown' },
+  { key: 'value', label: 'Value' },
   { key: 'category', label: 'Category' },
   { key: 'joined', label: 'Joined' },
 ]
 
-export const DEFAULT_VISIBLE: ColumnKey[] = ['value', 'winRate', 'roi', 'pnl', 'active', 'total', 'dd', 'category', 'joined']
+export const DEFAULT_VISIBLE: ColumnKey[] = ['roi', 'winRate', 'pnl', 'dd', 'active', 'total', 'value', 'category', 'joined']
+
+interface TrackedWalletMeta {
+  last_refreshed_at: string | null
+  added_at: string
+}
 
 interface Props {
   wallets: Wallet[]
@@ -39,6 +45,13 @@ interface Props {
   columnFilters?: Record<string, ColumnFilter>
   onColumnFilterChange?: (column: string, filter: ColumnFilter) => void
   visibleColumns?: ColumnKey[]
+  // Track feature props
+  trackedAddresses?: Set<string>
+  onToggleTrack?: (address: string) => void
+  trackMode?: boolean
+  trackedWalletMeta?: Map<string, TrackedWalletMeta>
+  onRemoveTracked?: (address: string) => void
+  refreshingAddresses?: Set<string>
 }
 
 function FilterPopover({
@@ -156,6 +169,12 @@ export default function WalletTable({
   columnFilters = {},
   onColumnFilterChange,
   visibleColumns = DEFAULT_VISIBLE,
+  trackedAddresses,
+  onToggleTrack,
+  trackMode = false,
+  trackedWalletMeta,
+  onRemoveTracked,
+  refreshingAddresses,
 }: Props) {
   const show = (key: ColumnKey) => visibleColumns.includes(key)
   const [openFilter, setOpenFilter] = useState<string | null>(null)
@@ -166,9 +185,17 @@ export default function WalletTable({
   const virtualizer = useVirtualizer({
     count: wallets.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 44,
+    estimateSize: () => 48,
     overscan: 15,
   })
+
+  // Defer measureElement to avoid flushSync-during-render warning
+  const measureRef = useCallback((node: HTMLElement | null) => {
+    if (!node) return
+    requestAnimationFrame(() => {
+      virtualizer.measureElement(node)
+    })
+  }, [virtualizer])
 
   // Infinite scroll: trigger loadMore when near bottom
   useEffect(() => {
@@ -249,6 +276,18 @@ export default function WalletTable({
       case 'World': case 'Geopolitics': return 'bg-amber-500/10 text-amber-400 border-amber-500/20'
       default: return 'bg-white/5 text-gray-400 border-white/10'
     }
+  }
+
+  const formatRelativeTime = (dateStr: string | null | undefined) => {
+    if (!dateStr) return 'never'
+    const diff = Date.now() - new Date(dateStr).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    const hours = Math.floor(mins / 60)
+    if (hours < 24) return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    return `${days}d ago`
   }
 
   const getMetric = (wallet: Wallet, metric: string): number => {
@@ -363,16 +402,22 @@ export default function WalletTable({
         <table className="w-full">
           <thead className="sticky top-0 z-20" style={{ background: 'var(--background)' }}>
             <tr className="border-b border-white/5">
-              <th className="px-3 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
-              {show('value') && <SortHeader column="balance" label="Value" filterType="money" />}
-              {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" />}
+              <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
               {show('roi') && <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" />}
+              {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" />}
               {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" />}
+              {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" />}
               {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" />}
               {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" />}
-              {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" />}
+              {show('value') && <SortHeader column="balance" label="Value" filterType="money" />}
               {show('category') && <th className="px-3 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Category</th>}
               {show('joined') && <SortHeader column="account_created_at" label="Joined" filterType="number" />}
+              {trackMode && (
+                <>
+                  <th className="px-3 py-2.5 text-right text-gray-500 font-medium text-[11px] uppercase tracking-wider">Updated</th>
+                  <th className="px-3 py-2.5 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-10"></th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -399,34 +444,60 @@ export default function WalletTable({
                 <tr
                   key={wallet.address}
                   data-index={virtualRow.index}
-                  ref={virtualizer.measureElement}
+                  ref={measureRef}
                   className="group hover:bg-white/[0.02] transition-colors border-b border-white/[0.02]"
                 >
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-2">
+                  <td className="px-2 py-2.5 max-w-[160px]">
+                    <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => setSelectedTrader({ address: wallet.address, username: wallet.username })}
-                        className="w-6 h-6 rounded-md bg-white/[0.03] hover:bg-white/[0.08] flex items-center justify-center text-[10px] font-medium text-gray-500 hover:text-white transition-all cursor-pointer"
+                        className="w-5 h-5 rounded-md bg-white/[0.03] hover:bg-white/[0.08] flex-shrink-0 flex items-center justify-center text-[9px] font-medium text-gray-500 hover:text-white transition-all cursor-pointer"
                         title="View details"
                       >
                         {index + 1}
                       </button>
-                      <a
-                        href={`https://polymarket.com/profile/${wallet.address}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-gray-300 hover:text-white transition-colors flex items-center gap-1"
-                      >
-                        {getDisplayName(wallet)}
-                        <svg className="w-2.5 h-2.5 opacity-0 group-hover:opacity-50 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
-                      </a>
+                      {onToggleTrack && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onToggleTrack(wallet.address) }}
+                          className={`flex-shrink-0 p-0.5 rounded transition-all ${
+                            trackedAddresses?.has(wallet.address)
+                              ? 'text-amber-400 hover:text-amber-300'
+                              : 'text-gray-600 opacity-0 group-hover:opacity-100 hover:text-amber-400'
+                          }`}
+                          title={trackedAddresses?.has(wallet.address) ? 'Untrack wallet' : 'Track wallet'}
+                        >
+                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill={trackedAddresses?.has(wallet.address) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+                          </svg>
+                        </button>
+                      )}
+                      <div className="flex flex-col min-w-0">
+                        <TraderHoverCard address={wallet.address}>
+                          <a
+                            href={`https://polymarket.com/profile/${wallet.address}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-gray-300 hover:text-white transition-colors flex items-center gap-1 truncate"
+                          >
+                            <span className="truncate">{getDisplayName(wallet)}</span>
+                            <svg className="w-2.5 h-2.5 flex-shrink-0 opacity-0 group-hover:opacity-50 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                          </a>
+                        </TraderHoverCard>
+                        {wallet.metrics_updated_at && (
+                          <span className="text-[9px] text-gray-600 leading-tight">{formatRelativeTime(wallet.metrics_updated_at)}</span>
+                        )}
+                      </div>
                     </div>
                   </td>
-                  {show('value') && (
+                  {show('roi') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className="text-gray-300 text-xs tabular-nums font-medium">{formatMoney(wallet.balance)}</span>
+                      <span className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                        roi > 0 ? 'bg-emerald-500/10' : roi < 0 ? 'bg-red-500/10' : ''
+                      } ${getPnlColor(roi)}`}>
+                        {formatPercent(roi)}
+                      </span>
                     </td>
                   )}
                   {show('winRate') && (
@@ -438,35 +509,12 @@ export default function WalletTable({
                       </span>
                     </td>
                   )}
-                  {show('roi') && (
-                    <td className="px-3 py-2.5 text-right">
-                      <span className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded ${
-                        roi > 0 ? 'bg-emerald-500/10' : roi < 0 ? 'bg-red-500/10' : ''
-                      } ${getPnlColor(roi)}`}>
-                        {formatPercent(roi)}
-                      </span>
-                    </td>
-                  )}
                   {show('pnl') && (
                     <td className="px-3 py-2.5 text-right">
                       <span className={`text-xs tabular-nums inline-block px-1.5 py-0.5 rounded ${
                         pnl > 0 ? 'bg-emerald-500/10' : pnl < 0 ? 'bg-red-500/10' : ''
                       } ${getPnlColor(pnl)}`}>
                         {formatMoney(pnl)}
-                      </span>
-                    </td>
-                  )}
-                  {show('active') && (
-                    <td className="px-3 py-2.5 text-center">
-                      <span className={`text-xs tabular-nums ${(wallet.active_positions || 0) > 0 ? 'text-gray-300' : 'text-gray-600'}`}>
-                        {wallet.active_positions || 0}
-                      </span>
-                    </td>
-                  )}
-                  {show('total') && (
-                    <td className="px-3 py-2.5 text-center">
-                      <span className="text-gray-400 text-xs tabular-nums">
-                        {getMetric(wallet, 'trade_count') || 0}
                       </span>
                     </td>
                   )}
@@ -484,6 +532,25 @@ export default function WalletTable({
                       ) : (
                         <span className="text-xs text-gray-600">-</span>
                       )}
+                    </td>
+                  )}
+                  {show('active') && (
+                    <td className="px-3 py-2.5 text-center">
+                      <span className={`text-xs tabular-nums ${(wallet.active_positions || 0) > 0 ? 'text-gray-300' : 'text-gray-600'}`}>
+                        {wallet.active_positions || 0}
+                      </span>
+                    </td>
+                  )}
+                  {show('total') && (
+                    <td className="px-3 py-2.5 text-center">
+                      <span className="text-gray-400 text-xs tabular-nums">
+                        {getMetric(wallet, 'trade_count') || 0}
+                      </span>
+                    </td>
+                  )}
+                  {show('value') && (
+                    <td className="px-3 py-2.5 text-right">
+                      <span className="text-gray-300 text-xs tabular-nums font-medium">{formatMoney(wallet.balance)}</span>
                     </td>
                   )}
                   {show('category') && (
@@ -504,6 +571,36 @@ export default function WalletTable({
                       </span>
                     </td>
                   )}
+                  {trackMode && trackedWalletMeta && (() => {
+                    const meta = trackedWalletMeta.get(wallet.address)
+                    const isRefreshing = refreshingAddresses?.has(wallet.address)
+                    return (
+                      <>
+                        <td className="px-3 py-2.5 text-right">
+                          <span className={`text-xs tabular-nums ${meta?.last_refreshed_at ? 'text-gray-400' : 'text-gray-600'}`}>
+                            {formatRelativeTime(meta?.last_refreshed_at)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          {isRefreshing ? (
+                            <div className="inline-flex items-center justify-center w-5 h-5">
+                              <div className="w-3.5 h-3.5 rounded-full border border-white/10 border-t-white/40 animate-spin" />
+                            </div>
+                          ) : (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onRemoveTracked?.(wallet.address) }}
+                              className="p-1 text-gray-600 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors"
+                              title="Remove from tracking"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          )}
+                        </td>
+                      </>
+                    )
+                  })()}
                 </tr>
               )
             })}

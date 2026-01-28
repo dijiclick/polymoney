@@ -312,10 +312,15 @@ export default function TraderDetailPanel({ address, trades, onClose }: TraderDe
                           </div>
                           <div className="text-right flex-shrink-0">
                             <p className={`text-[11px] tabular-nums ${getPnlColor(pos.realizedPnl || 0)}`}>
+                              {pos.size > 0 && pos.avgPrice > 0 && (
+                                <span className={`text-[9px] ${getPnlColor(pos.realizedPnl || 0)} mr-1`}>
+                                  ({(pos.realizedPnl || 0) >= 0 ? '+' : ''}{((pos.realizedPnl / (pos.size * pos.avgPrice)) * 100).toFixed(1)}%)
+                                </span>
+                              )}
                               {formatMoney(pos.realizedPnl || 0)}
                             </p>
                             {pos.resolvedAt && (
-                              <p className="text-[9px] text-gray-400 mt-0.5">
+                              <p className="text-[9px] text-gray-500 mt-1">
                                 {new Date(pos.resolvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                               </p>
                             )}

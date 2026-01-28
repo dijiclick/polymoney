@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { LiveTrade } from '@/lib/supabase'
+import TraderHoverCard from './TraderHoverCard'
 
 interface TradeRowProps {
   trade: LiveTrade
@@ -103,9 +104,11 @@ export default function TradeRow({ trade, isSelected, isNew, onSelect }: TradeRo
       {/* Trader */}
       <div className="w-[130px] flex-shrink-0 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-300 truncate font-medium">
-            {trade.trader_username || formatAddress(trade.trader_address)}
-          </span>
+          <TraderHoverCard address={trade.trader_address}>
+            <span className="text-xs text-gray-300 truncate font-medium cursor-default">
+              {trade.trader_username || formatAddress(trade.trader_address)}
+            </span>
+          </TraderHoverCard>
           {/* Hover actions */}
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <button onClick={copyAddress} className="p-0.5 hover:bg-white/10 rounded" title="Copy address">
