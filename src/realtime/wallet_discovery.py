@@ -268,6 +268,7 @@ class WalletDiscoveryProcessor:
             self._api.get_closed_positions(address),
             self._api.get_total_balance(address),
             self._api.get_profile(address),
+            self._api.get_activity(address),
         ]
 
         results = await asyncio.gather(*api_tasks, return_exceptions=True)
@@ -279,6 +280,7 @@ class WalletDiscoveryProcessor:
         else:
             portfolio_value, usdc_cash = 0, 0
         profile = results[3] if not isinstance(results[3], Exception) else {}
+        activity = results[4] if not isinstance(results[4], Exception) else []
 
         if not positions and not closed_positions:
             logger.debug(f"No positions found for {address[:10]}...")
@@ -315,6 +317,21 @@ class WalletDiscoveryProcessor:
         diff_win_rate_all = self._calculate_diff_win_rate(closed_positions)
         avg_trades_per_day = self._calculate_avg_trades_per_day(closed_positions)
         median_profit_pct = self._calculate_median_profit_pct(closed_positions)
+
+        # Bot detection from activity trades
+        is_bot = self._calculate_is_bot(activity)
+
+        # Top category from event slugs
+        all_event_slugs = []
+        for p in positions:
+            slug = p.get("eventSlug") or p.get("slug") or ""
+            if slug:
+                all_event_slugs.append(slug)
+        for p in closed_positions:
+            slug = p.get("eventSlug") or p.get("slug") or ""
+            if slug:
+                all_event_slugs.append(slug)
+        top_category = await self._fetch_top_category(all_event_slugs)
 
         # Copy Score uses 30d metrics for recency
         copy_score = self._calculate_copy_score(
@@ -378,7 +395,8 @@ class WalletDiscoveryProcessor:
             "weekly_profit_rate": weekly_profit_rate,
             "copy_score": copy_score,
             "avg_trades_per_day": avg_trades_per_day,
-            "is_bot": False,  # Not calculated here (no bot scorer in this pipeline)
+            "is_bot": is_bot,
+            "top_category": top_category,
             "median_profit_pct": median_profit_pct,
             "metrics_updated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -1042,6 +1060,204 @@ class WalletDiscoveryProcessor:
         final_score = raw_score * confidence
 
         return min(round(final_score), 100)
+
+    @staticmethod
+    def _calculate_is_bot(activity: list[dict]) -> bool:
+        """
+        Calculate bot likelihood from activity trades.
+        Returns True if bot score >= 60.
+
+        Uses 5 indicators matching the TypeScript implementation:
+        - Trade frequency (0-25 pts)
+        - Low time variance (0-25 pts)
+        - Night trading ratio (0-20 pts)
+        - Consistent position sizing (0-15 pts)
+        - Short hold duration (0-15 pts)
+        """
+        import math
+
+        # Filter to only TRADE type activities
+        trades = [a for a in activity if a.get("type") == "TRADE"]
+        if len(trades) < 5:
+            return False
+
+        score = 0
+
+        # Extract timestamps and values
+        timestamps = []
+        usd_values = []
+        for t in trades:
+            ts = t.get("timestamp")
+            if ts is not None:
+                try:
+                    timestamps.append(int(ts) if not isinstance(ts, int) else ts)
+                except (ValueError, TypeError):
+                    pass
+            usd = t.get("usdcSize")
+            if usd is not None:
+                try:
+                    val = float(usd)
+                    if val > 0:
+                        usd_values.append(val)
+                except (ValueError, TypeError):
+                    pass
+
+        # 1. Trade frequency (trades per active day)
+        trade_days = set()
+        hours_of_day = []
+        for ts in timestamps:
+            if ts > 0:
+                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                trade_days.add(dt.strftime("%Y-%m-%d"))
+                hours_of_day.append(dt.hour + dt.minute / 60)
+
+        if trade_days:
+            freq = len(trades) / len(trade_days)
+            if freq >= 50:
+                score += 25
+            elif freq >= 20:
+                score += 20
+            elif freq >= 10:
+                score += 15
+            elif freq >= 5:
+                score += 8
+
+        # 2. Low time variance (circular variance of hour-of-day)
+        if len(hours_of_day) >= 5:
+            sin_sum = sum(math.sin((h / 24) * 2 * math.pi) for h in hours_of_day)
+            cos_sum = sum(math.cos((h / 24) * 2 * math.pi) for h in hours_of_day)
+            n = len(hours_of_day)
+            r = math.sqrt((sin_sum / n) ** 2 + (cos_sum / n) ** 2)
+            circular_variance_hours = (1 - r) * 12
+            if circular_variance_hours <= 0.5:
+                score += 25
+            elif circular_variance_hours <= 1:
+                score += 20
+            elif circular_variance_hours <= 2:
+                score += 15
+            elif circular_variance_hours <= 4:
+                score += 8
+
+        # 3. Night trading ratio (% between 1-6 AM UTC)
+        if hours_of_day:
+            night_trades = sum(1 for h in hours_of_day if 1 <= h < 6)
+            night_ratio = (night_trades / len(hours_of_day)) * 100
+            if night_ratio >= 40:
+                score += 20
+            elif night_ratio >= 30:
+                score += 15
+            elif night_ratio >= 20:
+                score += 10
+            elif night_ratio >= 10:
+                score += 5
+
+        # 4. Consistent position sizing (coefficient of variation)
+        if len(usd_values) >= 5:
+            mean_size = sum(usd_values) / len(usd_values)
+            if mean_size > 0:
+                std_size = math.sqrt(
+                    sum((s - mean_size) ** 2 for s in usd_values) / len(usd_values)
+                )
+                cv = (std_size / mean_size) * 100
+                if cv <= 10:
+                    score += 15
+                elif cv <= 20:
+                    score += 12
+                elif cv <= 30:
+                    score += 8
+                elif cv <= 50:
+                    score += 4
+
+        # 5. Short hold duration (avg time between consecutive trades)
+        sorted_ts = sorted(ts for ts in timestamps if ts > 0)
+        if len(sorted_ts) >= 2:
+            total_interval = sum(
+                sorted_ts[i] - sorted_ts[i - 1] for i in range(1, len(sorted_ts))
+            )
+            avg_interval_hours = (total_interval / (len(sorted_ts) - 1)) / 3600
+            if avg_interval_hours <= 2:
+                score += 15
+            elif avg_interval_hours <= 6:
+                score += 12
+            elif avg_interval_hours <= 12:
+                score += 8
+            elif avg_interval_hours <= 24:
+                score += 4
+
+        return min(100, score) >= 60
+
+    async def _fetch_top_category(self, event_slugs: list[str]) -> str | None:
+        """
+        Fetch event categories from Gamma API and return the most common one.
+
+        Batches slugs into chunks of 20 to avoid URL length limits.
+        """
+        if not self._api:
+            return None
+
+        unique_slugs = list(set(s for s in event_slugs if s))
+        if not unique_slugs:
+            return None
+
+        import aiohttp
+        from collections import Counter
+
+        CHUNK_SIZE = 20
+        category_counts: Counter = Counter()
+
+        try:
+            await self._api._ensure_session()
+
+            chunks = [
+                unique_slugs[i:i + CHUNK_SIZE]
+                for i in range(0, len(unique_slugs), CHUNK_SIZE)
+            ]
+
+            for chunk in chunks:
+                try:
+                    slug_params = "&".join(
+                        f"slug={s}" for s in chunk
+                    )
+                    url = f"https://gamma-api.polymarket.com/events?limit={len(chunk)}&{slug_params}"
+
+                    async with self._api._session.get(
+                        url,
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as response:
+                        if response.status != 200:
+                            continue
+                        events = await response.json()
+                        if not isinstance(events, list):
+                            continue
+
+                        for event in events:
+                            slug = event.get("slug")
+                            tags = event.get("tags") or []
+                            if slug and tags:
+                                # Extract category from tags
+                                category = None
+                                if isinstance(tags, list):
+                                    for tag in tags:
+                                        label = tag.get("label", "") if isinstance(tag, dict) else str(tag)
+                                        if label and label not in ("All", "Featured"):
+                                            category = label
+                                            break
+                                    if not category and tags:
+                                        first = tags[0]
+                                        category = first.get("label", "") if isinstance(first, dict) else str(first)
+                                if category:
+                                    # Count for each position with this slug
+                                    slug_count = event_slugs.count(slug)
+                                    category_counts[category] += slug_count
+                except Exception:
+                    continue
+
+            if category_counts:
+                return category_counts.most_common(1)[0][0]
+        except Exception as e:
+            logger.debug(f"Error fetching categories: {e}")
+
+        return None
 
     def refresh_cache(self, address: str) -> None:
         """Add an address to the known wallets cache."""
