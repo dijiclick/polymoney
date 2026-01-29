@@ -4,8 +4,11 @@ import {
   getPositions,
   getClosedPositions,
   getActivity,
+  getProfile,
+  getPortfolioValue,
   parsePositions,
   parseClosedPositions,
+  parseTrades,
   isValidEthAddress,
   fetchEventCategories,
   getTopCategory,
@@ -131,10 +134,12 @@ export async function GET(
 
   // 5. Fetch live data from Polymarket API
   try {
-    const [rawPositions, rawClosedPositions, rawActivity] = await Promise.all([
+    const [rawPositions, rawClosedPositions, rawActivity, profile, portfolioValue] = await Promise.all([
       getPositions(address).catch(() => []),
       getClosedPositions(address).catch(() => []),
-      getActivity(address).catch(() => []),
+      getActivity(address, 5000, 90).catch(() => []),
+      getProfile(address).catch(() => ({})),
+      getPortfolioValue(address).catch(() => 0),
     ])
 
     // Parse all positions from APIs
@@ -184,8 +189,8 @@ export async function GET(
 
     console.log(`[${address}] Open: ${openPositions.length}, Total Closed (wins+losses): ${closedPositions.length}`)
 
-    // Get current balance for ROI calculation
-    const currentBalance = dbWallet?.balance || 0
+    // Get current balance for ROI calculation (prefer live portfolio value)
+    const currentBalance = portfolioValue || dbWallet?.balance || 0
 
     // Calculate all metrics from Polymarket positions data
     // Trade counting: hedged positions (same market, different outcomes) = 1 trade
@@ -194,9 +199,15 @@ export async function GET(
     // Note: Pass openPositions (not allPositions) to avoid double-counting resolved losses
     const polymarketMetrics = calculatePolymarketMetrics(closedPositions, openPositions, currentBalance)
 
-    // Calculate period-based metrics (7d and 30d) from closed positions
+    // Calculate period-based metrics (7d, 30d, and all-time) from closed positions
     const metrics7d = calculatePeriodMetrics(closedPositions, 7, currentBalance)
     const metrics30d = calculatePeriodMetrics(closedPositions, 30, currentBalance)
+    const metricsAll = calculatePeriodMetrics(closedPositions, 36500, currentBalance)
+
+    // Bot detection from activity trades
+    const activityTrades = parseTrades(rawActivity)
+    const botScore = calculateBotScore(activityTrades)
+    const isBot = botScore >= 60
 
     // Count unique markets
     const uniqueClosedMarkets = new Set(closedPositions.map(p => p.conditionId).filter(Boolean)).size
@@ -245,15 +256,16 @@ export async function GET(
     // 7. Save metrics to database (update existing or insert new wallet)
     const usernameParam = request.nextUrl.searchParams.get('username')
     if (dbWallet) {
-      updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, uniqueOpenMarkets, uniqueClosedMarkets, topCategory, copyMetrics)
+      updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, metricsAll, uniqueOpenMarkets, uniqueClosedMarkets, topCategory, copyMetrics, currentBalance, isBot, profile)
     } else if (polymarketMetrics.tradeCount >= 15) {
       // Insert new wallet only if it has enough trades
       try {
         await supabase.from('wallets').insert({
           address,
           source: 'live',
-          balance: 0,
-          ...(usernameParam && { username: usernameParam }),
+          balance: currentBalance,
+          username: (profile as any).name || (profile as any).pseudonym || usernameParam || undefined,
+          account_created_at: (profile as any).createdAt || undefined,
           pnl_7d: metrics7d.pnl,
           roi_7d: metrics7d.roi,
           win_rate_7d: metrics7d.winRate,
@@ -266,13 +278,13 @@ export async function GET(
           volume_30d: metrics30d.volume,
           trade_count_30d: metrics30d.tradeCount,
           drawdown_30d: metrics30d.drawdown,
-          pnl_all: polymarketMetrics.realizedPnl,
-          roi_all: polymarketMetrics.roiAll,
-          win_rate_all: polymarketMetrics.winRateAll,
-          volume_all: polymarketMetrics.totalBought,
-          trade_count_all: polymarketMetrics.tradeCount,
-          drawdown_all: polymarketMetrics.maxDrawdown,
-          drawdown_amount_all: polymarketMetrics.maxDrawdownAmount,
+          pnl_all: metricsAll.pnl,
+          roi_all: metricsAll.roi,
+          win_rate_all: metricsAll.winRate,
+          volume_all: metricsAll.volume,
+          trade_count_all: metricsAll.tradeCount,
+          drawdown_all: metricsAll.drawdown,
+          drawdown_amount_all: metricsAll.drawdownAmount,
           total_positions: uniqueClosedMarkets,
           active_positions: uniqueOpenMarkets,
           total_wins: polymarketMetrics.winCount,
@@ -285,6 +297,8 @@ export async function GET(
           total_volume: polymarketMetrics.totalBought,
           total_trades: polymarketMetrics.tradeCount,
           ...(topCategory && { top_category: topCategory }),
+          // Bot detection
+          is_bot: isBot,
           // Copy-trade metrics
           profit_factor_30d: profitFactor30d,
           profit_factor_all: profitFactorAll,
@@ -306,15 +320,15 @@ export async function GET(
       source: dbWallet ? 'mixed' : 'live',
       dataFreshness: 'fresh',
       address,
-      username: dbWallet?.username || usernameParam || undefined,
-      profileImage: undefined,
-      accountCreatedAt: dbWallet?.account_created_at,
+      username: (profile as any).name || (profile as any).pseudonym || dbWallet?.username || usernameParam || undefined,
+      profileImage: (profile as any).profileImage || undefined,
+      accountCreatedAt: (profile as any).createdAt || dbWallet?.account_created_at,
       positions: openPositions,
       closedPositions: closedPositions,
       closedPositionsCount: uniqueClosedMarkets,
       trades: [],
       metrics: {
-        portfolioValue: dbWallet?.balance || 0,
+        portfolioValue: currentBalance,
         totalPnl: polymarketMetrics.totalPnl,
         unrealizedPnl: polymarketMetrics.unrealizedPnl,
         realizedPnl: polymarketMetrics.realizedPnl,
@@ -414,6 +428,21 @@ export async function GET(
           maxDrawdown: dbWallet.drawdown_all || 0,
           tradeFrequency: (dbWallet.trade_count_30d || 0) / 30,
           nightTradeRatio: 0,
+        },
+        copyScore: dbWallet.copy_score || 0,
+        copyMetrics: {
+          profitFactor30d: dbWallet.profit_factor_30d || 0,
+          profitFactorAll: dbWallet.profit_factor_all || 0,
+          diffWinRate30d: dbWallet.diff_win_rate_30d || 0,
+          diffWinRateAll: dbWallet.diff_win_rate_all || 0,
+          weeklyProfitRate: dbWallet.weekly_profit_rate || 0,
+          avgTradesPerDay: dbWallet.avg_trades_per_day || 0,
+          edgeTrend: (dbWallet.roi_30d || 0) > 0
+            ? Math.round(((dbWallet.roi_7d || 0) / dbWallet.roi_30d) * 100) / 100
+            : 0,
+          calmarRatio: (dbWallet.drawdown_30d || 0) > 0
+            ? Math.round(((dbWallet.roi_30d || 0) / dbWallet.drawdown_30d) * 100) / 100
+            : (dbWallet.roi_30d || 0) > 0 ? 5.0 : 0,
         },
         scores: undefined,
         isNewlyFetched: false,
@@ -988,6 +1017,90 @@ function calculateCopyScore(params: {
   return Math.min(Math.round(rawScore * confidence), 100)
 }
 
+/**
+ * Calculate bot score from parsed activity trades.
+ * Score 0-100, threshold >= 60 = likely bot.
+ */
+function calculateBotScore(
+  trades: { timestamp: number; size: number; price: number; usdValue: number; side: 'BUY' | 'SELL' }[]
+): number {
+  if (trades.length < 5) return 0
+
+  let score = 0
+
+  // 1. Trade frequency (0-25 points) — trades per active day
+  const tradeDays = new Set<string>()
+  for (const t of trades) {
+    if (t.timestamp > 0) tradeDays.add(new Date(t.timestamp * 1000).toISOString().slice(0, 10))
+  }
+  const freq = tradeDays.size > 0 ? trades.length / tradeDays.size : 0
+  if (freq >= 50) score += 25
+  else if (freq >= 20) score += 20
+  else if (freq >= 10) score += 15
+  else if (freq >= 5) score += 8
+
+  // 2. Low time variance (0-25 points) — circular variance of hour-of-day
+  const hoursOfDay: number[] = []
+  for (const t of trades) {
+    if (t.timestamp > 0) {
+      const d = new Date(t.timestamp * 1000)
+      hoursOfDay.push(d.getUTCHours() + d.getUTCMinutes() / 60)
+    }
+  }
+  if (hoursOfDay.length >= 5) {
+    let sinSum = 0, cosSum = 0
+    for (const h of hoursOfDay) {
+      const angle = (h / 24) * 2 * Math.PI
+      sinSum += Math.sin(angle)
+      cosSum += Math.cos(angle)
+    }
+    const R = Math.sqrt((sinSum / hoursOfDay.length) ** 2 + (cosSum / hoursOfDay.length) ** 2)
+    const circularVarianceHours = (1 - R) * 12
+    if (circularVarianceHours <= 0.5) score += 25
+    else if (circularVarianceHours <= 1) score += 20
+    else if (circularVarianceHours <= 2) score += 15
+    else if (circularVarianceHours <= 4) score += 8
+  }
+
+  // 3. Night trading ratio (0-20 points) — % of trades between 1am-6am UTC
+  const nightTrades = hoursOfDay.filter(h => h >= 1 && h < 6).length
+  const nightRatio = hoursOfDay.length > 0 ? (nightTrades / hoursOfDay.length) * 100 : 0
+  if (nightRatio >= 40) score += 20
+  else if (nightRatio >= 30) score += 15
+  else if (nightRatio >= 20) score += 10
+  else if (nightRatio >= 10) score += 5
+
+  // 4. Consistent position sizing (0-15 points) — coefficient of variation %
+  const sizes = trades.filter(t => t.usdValue > 0).map(t => t.usdValue)
+  if (sizes.length >= 5) {
+    const sizeMean = sizes.reduce((a, b) => a + b, 0) / sizes.length
+    if (sizeMean > 0) {
+      const sizeStd = Math.sqrt(sizes.reduce((sum, s) => sum + (s - sizeMean) ** 2, 0) / sizes.length)
+      const cv = (sizeStd / sizeMean) * 100
+      if (cv <= 10) score += 15
+      else if (cv <= 20) score += 12
+      else if (cv <= 30) score += 8
+      else if (cv <= 50) score += 4
+    }
+  }
+
+  // 5. Short hold duration proxy (0-15 points) — avg time between consecutive trades
+  const sortedTimestamps = trades.map(t => t.timestamp).filter(t => t > 0).sort((a, b) => a - b)
+  if (sortedTimestamps.length >= 2) {
+    let totalInterval = 0
+    for (let i = 1; i < sortedTimestamps.length; i++) {
+      totalInterval += sortedTimestamps[i] - sortedTimestamps[i - 1]
+    }
+    const avgIntervalHours = (totalInterval / (sortedTimestamps.length - 1)) / 3600
+    if (avgIntervalHours <= 2) score += 15
+    else if (avgIntervalHours <= 6) score += 12
+    else if (avgIntervalHours <= 12) score += 8
+    else if (avgIntervalHours <= 24) score += 4
+  }
+
+  return Math.min(100, score)
+}
+
 async function updateWalletMetrics(
   address: string,
   polymarketMetrics: {
@@ -1006,6 +1119,7 @@ async function updateWalletMetrics(
   },
   metrics7d: TimePeriodMetrics,
   metrics30d: TimePeriodMetrics,
+  metricsAll: TimePeriodMetrics,
   activePositionCount: number,
   closedPositionCount: number,
   topCategory?: string,
@@ -1018,10 +1132,20 @@ async function updateWalletMetrics(
     copyScore: number
     avgTradesPerDay: number
     medianProfitPct: number | null
-  }
+  },
+  currentBalance?: number,
+  isBot?: boolean,
+  profile?: any,
 ) {
   try {
     await supabase.from('wallets').update({
+      // Profile info
+      ...(profile && (profile.name || profile.pseudonym) && {
+        username: profile.name || profile.pseudonym,
+      }),
+      ...(profile?.createdAt && { account_created_at: profile.createdAt }),
+      // Balance
+      ...(currentBalance != null && currentBalance > 0 && { balance: currentBalance }),
       // 7-day metrics
       pnl_7d: metrics7d.pnl,
       roi_7d: metrics7d.roi,
@@ -1036,6 +1160,14 @@ async function updateWalletMetrics(
       volume_30d: metrics30d.volume,
       trade_count_30d: metrics30d.tradeCount,
       drawdown_30d: metrics30d.drawdown,
+      // All-time period metrics
+      pnl_all: metricsAll.pnl,
+      roi_all: metricsAll.roi,
+      win_rate_all: metricsAll.winRate,
+      volume_all: metricsAll.volume,
+      trade_count_all: metricsAll.tradeCount,
+      drawdown_all: metricsAll.drawdown,
+      drawdown_amount_all: metricsAll.drawdownAmount,
       // Overall metrics
       total_positions: closedPositionCount,
       active_positions: activePositionCount,
@@ -1048,9 +1180,9 @@ async function updateWalletMetrics(
       overall_win_rate: polymarketMetrics.winRateAll,
       total_volume: polymarketMetrics.totalBought,
       total_trades: polymarketMetrics.tradeCount,
-      drawdown_all: polymarketMetrics.maxDrawdown,
-      drawdown_amount_all: polymarketMetrics.maxDrawdownAmount,
       ...(topCategory && { top_category: topCategory }),
+      // Bot detection
+      ...(isBot != null && { is_bot: isBot }),
       // Copy-trade metrics
       ...(copyMetrics && {
         profit_factor_30d: copyMetrics.profitFactor30d,

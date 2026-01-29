@@ -19,7 +19,7 @@ export const COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'winRate', label: 'Win Rate' },
   { key: 'pnl', label: 'PnL' },
   { key: 'dd', label: 'Drawdown' },
-  { key: 'medianProfit', label: 'Avg %/Trade' },
+  { key: 'medianProfit', label: 'Med %/Trade' },
   { key: 'active', label: 'Active' },
   { key: 'total', label: 'Total' },
   { key: 'value', label: 'Value' },
@@ -618,7 +618,7 @@ export default function WalletTable({
               {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" />}
               {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" />}
               {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" />}
-              {show('medianProfit') && <SortHeader column="median_profit_pct" label="Avg %/T" filterType="percent" />}
+              {show('medianProfit') && <SortHeader column="median_profit_pct" label="Med %/T" filterType="percent" />}
               {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" />}
               {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" />}
               {show('value') && <SortHeader column="balance" label="Value" filterType="money" />}
