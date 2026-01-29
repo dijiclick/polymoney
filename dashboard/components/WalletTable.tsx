@@ -61,15 +61,13 @@ function buildDayData(
   // 'all' = no cutoff
 
   const dayMap = new Map<string, { date: Date; dailyPnl: number }>()
-  let startingPnl = 0
 
   for (const p of withDates) {
     const d = new Date(p.resolvedAt!)
     const ts = d.getTime()
 
     if (cutoff > 0 && ts < cutoff) {
-      // Accumulate PnL before cutoff as starting point
-      startingPnl += p.realizedPnl
+      // Skip positions before the selected period
     } else {
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       const existing = dayMap.get(key)
@@ -85,7 +83,7 @@ function buildDayData(
 
   if (allDays.length < 2) return null
 
-  let cum = startingPnl
+  let cum = 0
   const values = allDays.map(day => {
     cum += day.dailyPnl
     return Math.round(cum * 100) / 100

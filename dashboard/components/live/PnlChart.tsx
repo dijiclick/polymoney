@@ -115,12 +115,11 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
     const allIntervals = Array.from(intervalMap.entries())
       .sort((a, b) => a[1].date.getTime() - b[1].date.getTime())
 
-    let startingPnl = 0
     const filtered: IntervalData[] = []
 
     for (const [key, interval] of allIntervals) {
       if (cutoff > 0 && interval.date.getTime() < cutoff) {
-        startingPnl += interval.intervalPnl
+        // Skip positions before the selected period
       } else {
         filtered.push({ ...interval, key, cumPnl: 0 })
       }
@@ -128,7 +127,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
 
     if (filtered.length === 0) return []
 
-    let cum = startingPnl
+    let cum = 0
     for (const d of filtered) {
       cum += d.intervalPnl
       d.cumPnl = Math.round(cum * 100) / 100

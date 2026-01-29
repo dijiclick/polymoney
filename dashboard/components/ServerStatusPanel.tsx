@@ -63,9 +63,11 @@ interface ServerStatusPanelProps {
   onRefresh: () => void
   onToggleWalletDiscovery?: () => void
   isTogglingDiscovery?: boolean
+  onResetDatabase?: () => void
+  isResettingDatabase?: boolean
 }
 
-export default function ServerStatusPanel({ health, isLoading, error, onRefresh, onToggleWalletDiscovery, isTogglingDiscovery }: ServerStatusPanelProps) {
+export default function ServerStatusPanel({ health, isLoading, error, onRefresh, onToggleWalletDiscovery, isTogglingDiscovery, onResetDatabase, isResettingDatabase }: ServerStatusPanelProps) {
   const overall = health?.overall || 'down'
   const oCfg = overallConfig[isLoading ? 'healthy' : (error ? 'down' : overall)]
 
@@ -160,6 +162,20 @@ export default function ServerStatusPanel({ health, isLoading, error, onRefresh,
                 : undefined}
               extra={`Latency: ${health.services.supabase.detail}`}
             />
+
+            {/* Reset Database */}
+            <div className="flex items-center justify-between py-1.5 pl-10 pr-1">
+              <span className="text-[10px] text-gray-500">Reset Data</span>
+              <button
+                onClick={onResetDatabase}
+                disabled={isResettingDatabase}
+                className={`text-[10px] font-medium px-2 py-0.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors ${
+                  isResettingDatabase ? 'opacity-50 cursor-wait' : 'cursor-pointer'
+                }`}
+              >
+                {isResettingDatabase ? 'Deleting...' : 'Delete All'}
+              </button>
+            </div>
           </>
         ) : null}
       </div>
