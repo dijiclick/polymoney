@@ -39,21 +39,79 @@ interface TraderData {
   }
 }
 
+interface WalletData {
+  address: string
+  username?: string
+  copy_score?: number
+  profit_factor_30d?: number
+  profit_factor_all?: number
+  diff_win_rate_30d?: number
+  diff_win_rate_all?: number
+  weekly_profit_rate?: number
+  avg_trades_per_day?: number
+  roi_7d?: number
+  roi_30d?: number
+  drawdown_30d?: number
+  balance?: number
+  overall_pnl?: number
+  overall_roi?: number
+  overall_win_rate?: number
+  total_positions?: number
+  active_positions?: number
+  drawdown_all?: number
+  [key: string]: any
+}
+
 interface Props {
   address: string
   username?: string
+  walletData?: WalletData
   isOpen: boolean
   onClose: () => void
 }
 
 // ── Main Modal ───────────────────────────────────────────────────────
 
-export default function TraderDetailModal({ address, username, isOpen, onClose }: Props) {
+export default function TraderDetailModal({ address, username, walletData, isOpen, onClose }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<TraderData | null>(null)
   const [activeTab, setActiveTab] = useState<'open' | 'closed'>('open')
   const [mounted, setMounted] = useState(false)
+
+  // Build instant data from wallet table row (available immediately)
+  const instantData: TraderData | null = walletData ? {
+    address: walletData.address,
+    username: walletData.username,
+    positions: [],
+    closedPositionsCount: walletData.total_positions || 0,
+    metrics: {
+      portfolioValue: walletData.balance || 0,
+      totalPnl: walletData.overall_pnl || 0,
+      winRateAllTime: walletData.overall_win_rate || 0,
+      roiPercent: walletData.overall_roi || 0,
+      activePositions: walletData.active_positions || 0,
+      maxDrawdown: walletData.drawdown_all || 0,
+    },
+    copyScore: walletData.copy_score || 0,
+    copyMetrics: {
+      profitFactor30d: walletData.profit_factor_30d || 0,
+      profitFactorAll: walletData.profit_factor_all || 0,
+      diffWinRate30d: walletData.diff_win_rate_30d || 0,
+      diffWinRateAll: walletData.diff_win_rate_all || 0,
+      weeklyProfitRate: walletData.weekly_profit_rate || 0,
+      avgTradesPerDay: walletData.avg_trades_per_day || 0,
+      edgeTrend: (walletData.roi_30d || 0) > 0
+        ? Math.round(((walletData.roi_7d || 0) / walletData.roi_30d!) * 100) / 100
+        : 0,
+      calmarRatio: (walletData.drawdown_30d || 0) > 0
+        ? Math.round(((walletData.roi_30d || 0) / walletData.drawdown_30d!) * 100) / 100
+        : (walletData.roi_30d || 0) > 0 ? 5.0 : 0,
+    },
+  } : null
+
+  // Show instant data immediately, then replace with full API data
+  const displayData = data || instantData
 
   useEffect(() => {
     setMounted(true)
@@ -62,6 +120,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
 
   useEffect(() => {
     if (isOpen && address) {
+      setData(null)
       fetchTraderData()
     }
   }, [isOpen, address])
@@ -86,7 +145,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/traders/${address}?refresh=true`)
+      const res = await fetch(`/api/traders/${address}`)
       if (!res.ok) throw new Error('Failed to fetch trader data')
       const result = await res.json()
       setData(result)
@@ -168,7 +227,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
 
         {/* Content */}
         <div className="overflow-y-auto max-h-[calc(100vh-56px)] md:max-h-[calc(95vh-56px)]">
-          {loading ? (
+          {!displayData && loading ? (
             <div className="flex flex-col items-center justify-center py-16">
               <div className="relative w-8 h-8">
                 <div className="absolute inset-0 rounded-full border border-white/10"></div>
@@ -176,7 +235,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
               </div>
               <p className="text-gray-600 mt-3 text-xs">Loading...</p>
             </div>
-          ) : error ? (
+          ) : error && !displayData ? (
             <div className="flex flex-col items-center justify-center py-16">
               <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center mb-3">
                 <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -191,11 +250,11 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                 Retry
               </button>
             </div>
-          ) : data ? (
+          ) : displayData ? (
             <>
               {/* Copy Score Banner */}
               {(() => {
-                const score = Math.round(data.copyScore || 0)
+                const score = Math.round(displayData.copyScore || 0)
                 let scoreBg: string, scoreText: string, scoreLabel: string
                 if (score >= 80) {
                   scoreBg = 'from-amber-500/20 to-amber-600/10 border-amber-500/30'
@@ -224,34 +283,34 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                           <span className={`text-sm font-medium ${scoreText} opacity-70`}>{scoreLabel}</span>
                         </div>
                       </div>
-                      {data.copyMetrics && (
+                      {displayData.copyMetrics && (
                         <div className="sm:text-right space-y-1">
                           <div className="flex items-center gap-2 md:gap-3 flex-wrap">
                             <div className="text-center">
                               <p className="text-[9px] text-gray-600 uppercase">Profit F.</p>
-                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{data.copyMetrics.profitFactor30d.toFixed(1)}</p>
+                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{displayData.copyMetrics.profitFactor30d.toFixed(1)}</p>
                             </div>
                             <div className="text-center">
                               <p className="text-[9px] text-gray-600 uppercase">Calmar</p>
-                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{data.copyMetrics.calmarRatio.toFixed(1)}</p>
+                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{displayData.copyMetrics.calmarRatio.toFixed(1)}</p>
                             </div>
                             <div className="text-center">
                               <p className="text-[9px] text-gray-600 uppercase">Weekly</p>
-                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{data.copyMetrics.weeklyProfitRate.toFixed(0)}%</p>
+                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{displayData.copyMetrics.weeklyProfitRate.toFixed(0)}%</p>
                             </div>
                             <div className="text-center">
                               <p className="text-[9px] text-gray-600 uppercase">Edge</p>
-                              <p className={`text-xs font-semibold tabular-nums ${data.copyMetrics.edgeTrend >= 1 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {data.copyMetrics.edgeTrend.toFixed(2)}x
+                              <p className={`text-xs font-semibold tabular-nums ${displayData.copyMetrics.edgeTrend >= 1 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {displayData.copyMetrics.edgeTrend.toFixed(2)}x
                               </p>
                             </div>
                             <div className="text-center">
                               <p className="text-[9px] text-gray-600 uppercase">Diff WR</p>
-                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{data.copyMetrics.diffWinRate30d.toFixed(1)}%</p>
+                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{displayData.copyMetrics.diffWinRate30d.toFixed(1)}%</p>
                             </div>
                           </div>
                           <p className="text-[9px] text-gray-600">
-                            {data.copyMetrics.avgTradesPerDay.toFixed(1)} trades/day
+                            {displayData.copyMetrics.avgTradesPerDay.toFixed(1)} trades/day
                           </p>
                         </div>
                       )}
@@ -260,8 +319,22 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                 )
               })()}
 
-              {/* PnL Chart */}
-              <PnlChart closedPositions={data.closedPositions || []} />
+              {/* PnL Chart — shows loading spinner while positions load */}
+              {displayData.closedPositions && displayData.closedPositions.length > 0 ? (
+                <PnlChart closedPositions={displayData.closedPositions} />
+              ) : loading ? (
+                <div className="flex flex-col items-center justify-center py-8">
+                  <div className="relative w-6 h-6">
+                    <div className="absolute inset-0 rounded-full border border-white/10"></div>
+                    <div className="absolute inset-0 rounded-full border border-transparent border-t-white/40 animate-spin"></div>
+                  </div>
+                  <p className="text-gray-600 mt-2 text-[10px]">Loading chart...</p>
+                </div>
+              ) : (
+                <div className="px-4 py-6 text-center">
+                  <p className="text-xs text-gray-600">No position history for chart</p>
+                </div>
+              )}
 
               {/* Divider */}
               <div className="border-t border-white/5" />
@@ -276,7 +349,8 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                       : 'text-gray-500 hover:text-gray-300'
                   }`}
                 >
-                  Open ({data.positions?.length || 0})
+                  Open ({displayData.positions?.length || 0})
+                  {loading && !data && <span className="ml-1 text-gray-600">...</span>}
                 </button>
                 <button
                   onClick={() => setActiveTab('closed')}
@@ -286,7 +360,8 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
                       : 'text-gray-500 hover:text-gray-300'
                   }`}
                 >
-                  Closed ({data.closedPositions?.length || data.closedPositionsCount || 0})
+                  Closed ({displayData.closedPositions?.length || displayData.closedPositionsCount || 0})
+                  {loading && !data && <span className="ml-1 text-gray-600">...</span>}
                 </button>
               </div>
 
@@ -294,8 +369,10 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
               <div className="p-3 md:p-5">
                 {activeTab === 'open' && (
                   <div className="space-y-2">
-                    {data.positions && data.positions.length > 0 ? (
-                      data.positions.map((position, index) => (
+                    {loading && !data ? (
+                      <div className="text-center py-8 text-gray-600 text-xs">Loading positions...</div>
+                    ) : displayData.positions && displayData.positions.length > 0 ? (
+                      displayData.positions.map((position, index) => (
                         <div
                           key={`${position.conditionId}-${position.outcome}-${index}`}
                           className="bg-white/[0.02] rounded-lg p-3 hover:bg-white/[0.04] transition-colors"
@@ -339,8 +416,8 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
 
                 {activeTab === 'closed' && (
                   <div className="space-y-2">
-                    {data.closedPositions && data.closedPositions.length > 0 ? (
-                      data.closedPositions.map((position, index) => (
+                    {displayData.closedPositions && displayData.closedPositions.length > 0 ? (
+                      displayData.closedPositions.map((position, index) => (
                         <div
                           key={`${position.conditionId}-${index}`}
                           className="bg-white/[0.02] rounded-lg p-3"

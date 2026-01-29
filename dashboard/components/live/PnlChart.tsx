@@ -81,7 +81,7 @@ function formatChartMoney(v: number) {
 }
 
 export default function PnlChart({ closedPositions }: { closedPositions: ClosedPosition[] }) {
-  const [timeframe, setTimeframe] = useState<Timeframe>('all')
+  const [timeframe, setTimeframe] = useState<Timeframe>('30d')
   const [chartMode, setChartMode] = useState<ChartMode>('cumulative')
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)

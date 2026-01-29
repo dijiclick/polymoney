@@ -349,7 +349,7 @@ export default function WalletTable({
 }: Props) {
   const show = (key: ColumnKey) => visibleColumns.includes(key)
   const [openFilter, setOpenFilter] = useState<string | null>(null)
-  const [selectedTrader, setSelectedTrader] = useState<{ address: string; username?: string } | null>(null)
+  const [selectedTrader, setSelectedTrader] = useState<Wallet | null>(null)
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
@@ -684,7 +684,7 @@ export default function WalletTable({
                   <td className="px-2 py-2.5 max-w-[160px]">
                     <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() => setSelectedTrader({ address: wallet.address, username: wallet.username })}
+                        onClick={() => setSelectedTrader(wallet)}
                         className="w-5 h-5 rounded-md bg-white/[0.03] hover:bg-white/[0.08] flex-shrink-0 flex items-center justify-center text-[9px] font-medium text-gray-500 hover:text-white transition-all cursor-pointer"
                         title="View details"
                       >
@@ -927,6 +927,7 @@ export default function WalletTable({
       <TraderDetailModal
         address={selectedTrader?.address || ''}
         username={selectedTrader?.username}
+        walletData={selectedTrader || undefined}
         isOpen={!!selectedTrader}
         onClose={() => setSelectedTrader(null)}
       />
