@@ -461,7 +461,7 @@ class WalletDiscoveryProcessor:
             condition_id = pos.get("conditionId", "")
             outcome = pos.get("outcome", "unknown")
             pnl = float(pos.get("realizedPnl", 0))
-            bought = float(pos.get("initialValue", 0)) or (float(pos.get("size", 0)) * float(pos.get("avgPrice", 0)))
+            bought = float(pos.get("totalBought", 0)) or float(pos.get("initialValue", 0)) or (float(pos.get("size", 0)) * float(pos.get("avgPrice", 0)))
 
             if condition_id not in market_groups:
                 market_groups[condition_id] = {"outcomes": {}}
@@ -483,7 +483,7 @@ class WalletDiscoveryProcessor:
             condition_id = pos.get("conditionId", "")
             outcome = pos.get("outcome", "unknown")
             pnl = float(pos.get("cashPnl", 0))
-            bought = float(pos.get("initialValue", 0)) or (float(pos.get("size", 0)) * float(pos.get("avgPrice", 0)))
+            bought = float(pos.get("totalBought", 0)) or float(pos.get("initialValue", 0)) or (float(pos.get("size", 0)) * float(pos.get("avgPrice", 0)))
 
             if condition_id not in market_groups:
                 market_groups[condition_id] = {"outcomes": {}}
@@ -735,7 +735,7 @@ class WalletDiscoveryProcessor:
 
         # Calculate volume
         volume = sum(
-            float(p.get("initialValue", 0)) or (float(p.get("size", 0)) * float(p.get("avgPrice", 0)))
+            float(p.get("totalBought", 0)) or float(p.get("initialValue", 0)) or (float(p.get("size", 0)) * float(p.get("avgPrice", 0)))
             for p in period_positions
         )
 
@@ -906,7 +906,13 @@ class WalletDiscoveryProcessor:
 
         for pos in closed_positions:
             realized_pnl = float(pos.get("realizedPnl", 0))
-            initial_value = float(pos.get("initialValue", 0))
+            # Try totalBought first (newer API format), then initialValue, then size*avgPrice
+            initial_value = 0
+            total_bought = pos.get("totalBought")
+            if total_bought is not None:
+                initial_value = float(total_bought)
+            if initial_value <= 0:
+                initial_value = float(pos.get("initialValue", 0))
             if initial_value <= 0:
                 size = float(pos.get("size", 0))
                 avg_price = float(pos.get("avgPrice", 0))
