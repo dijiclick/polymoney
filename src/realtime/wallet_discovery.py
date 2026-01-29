@@ -697,8 +697,9 @@ class WalletDiscoveryProcessor:
         win_rate_all = (win_count / trade_count * 100) if trade_count > 0 else 0
 
         # Calculate max drawdown
-        # Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
-        drawdown_base = max(current_balance - realized_pnl - unrealized_pnl, current_balance, 1)
+        # Include volume-based floor for high-frequency traders with low current balance
+        avg_trade_size = total_bought / trade_count if trade_count > 0 else 0
+        drawdown_base = max(current_balance - realized_pnl - unrealized_pnl, current_balance, avg_trade_size * 3, 1)
         max_drawdown = self._calculate_max_drawdown(closed_positions, drawdown_base)
 
         # Count unique markets (conditionId), not raw position entries
@@ -836,8 +837,10 @@ class WalletDiscoveryProcessor:
             roi = 0
 
         # Calculate drawdown for period
-        # Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
-        initial_balance = max(current_balance - pnl, current_balance, 1)
+        # Use volume-based floor to handle high-frequency traders with low
+        # current balance (e.g., profits withdrawn, capital rotated rapidly)
+        avg_position_size = volume / trade_count if trade_count > 0 else 0
+        initial_balance = max(current_balance - pnl, current_balance, avg_position_size * 3, 1)
         drawdown = self._calculate_max_drawdown(period_positions, initial_balance)
 
         return {

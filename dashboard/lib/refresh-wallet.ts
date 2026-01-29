@@ -188,7 +188,8 @@ function calculatePeriodMetrics(
   } else {
     roi = 0
   }
-  const initialBalance = Math.max(currentBalance - pnl, currentBalance, 1)
+  const avgPositionSize = tradeCount > 0 ? volume / tradeCount : 0
+  const initialBalance = Math.max(currentBalance - pnl, currentBalance, avgPositionSize * 3, 1)
   const drawdownResult = calculateMaxDrawdown(periodPositions, initialBalance)
 
   return {
@@ -243,7 +244,8 @@ function calculatePolymarketMetrics(
     roiAll = 0
   }
   const winRateAll = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0
-  const drawdownBase = Math.max(currentBalance - totalPnl, currentBalance, 1)
+  const avgTradeSize = tradeCount > 0 ? totalBoughtResolved / tradeCount : 0
+  const drawdownBase = Math.max(currentBalance - totalPnl, currentBalance, avgTradeSize * 3, 1)
   const maxDrawdownResult = calculateMaxDrawdown(closedPositions, drawdownBase)
 
   return {

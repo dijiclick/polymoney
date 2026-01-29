@@ -669,8 +669,12 @@ function calculatePeriodMetrics(
     roi = 0
   }
 
-  // Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
-  const initialBalance = Math.max(currentBalance - pnl, currentBalance, 1)
+  // Estimate the starting balance for the drawdown equity curve.
+  // Use the average position size * 3 as a floor to handle cases where
+  // currentBalance is tiny relative to trading volume (e.g., profits withdrawn,
+  // capital rotated rapidly in high-frequency trading).
+  const avgPositionSize = tradeCount > 0 ? volume / tradeCount : 0
+  const initialBalance = Math.max(currentBalance - pnl, currentBalance, avgPositionSize * 3, 1)
   const drawdownResult = calculateMaxDrawdown(periodPositions, initialBalance)
 
   return {
@@ -801,8 +805,10 @@ function calculatePolymarketMetrics(
   // Win rate from resolved trades
   const winRateAll = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0
 
-  // Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
-  const drawdownBase = Math.max(currentBalance - totalPnl, currentBalance, 1)
+  // Estimate the starting balance for drawdown. Include volume-based floor
+  // to handle high-frequency traders with low current balance.
+  const avgTradeSize = tradeCount > 0 ? totalBoughtResolved / tradeCount : 0
+  const drawdownBase = Math.max(currentBalance - totalPnl, currentBalance, avgTradeSize * 3, 1)
   const maxDrawdownResult = calculateMaxDrawdown(closedPositions, drawdownBase)
 
   return {
