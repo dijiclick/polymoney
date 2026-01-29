@@ -154,6 +154,16 @@ export interface Wallet {
   total_volume: number      // all-time volume
   total_trades: number      // all-time trade count
   top_category?: string     // most frequently traded market category
+  // ===== COPY-TRADE METRICS =====
+  profit_factor_30d: number   // 30d gross wins / abs(gross losses)
+  profit_factor_all: number   // all-time gross wins / abs(gross losses)
+  diff_win_rate_30d: number   // 30d difficulty-weighted win rate
+  diff_win_rate_all: number   // all-time difficulty-weighted win rate
+  weekly_profit_rate: number  // % of active weeks profitable
+  copy_score: number          // composite copy-trade score (0-100)
+  avg_trades_per_day: number  // average trades per active day
+  median_profit_pct: number | null  // median profit % per trade (IQR outlier removal)
+  is_bot: boolean             // whether wallet is likely a bot
   metrics_updated_at?: string
   created_at: string
   updated_at: string

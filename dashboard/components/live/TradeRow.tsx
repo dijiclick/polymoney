@@ -77,14 +77,14 @@ export default function TradeRow({ trade, isSelected, isNew, onSelect }: TradeRo
     <div
       onClick={onSelect}
       className={`
-        group flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors
+        group flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2.5 sm:py-2 cursor-pointer transition-colors
         border-l-[3px] ${getBorderColor(trade)}
         ${isSelected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'}
         ${animClass}
       `}
     >
-      {/* Score */}
-      <div className="w-8 flex-shrink-0 flex justify-center">
+      {/* Score — hidden on mobile */}
+      <div className="hidden sm:flex w-8 flex-shrink-0 justify-center">
         {trade.is_insider_suspect && trade.trader_insider_score ? (
           <span className={`w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-bold ${getScoreColor(trade.trader_insider_score)}`}>
             {trade.trader_insider_score}
@@ -102,15 +102,15 @@ export default function TradeRow({ trade, isSelected, isNew, onSelect }: TradeRo
       </div>
 
       {/* Trader */}
-      <div className="w-[130px] flex-shrink-0 min-w-0">
+      <div className="w-[90px] sm:w-[130px] flex-shrink-0 min-w-0">
         <div className="flex items-center gap-1.5">
           <TraderHoverCard address={trade.trader_address}>
             <span className="text-xs text-gray-300 truncate font-medium cursor-default">
               {trade.trader_username || formatAddress(trade.trader_address)}
             </span>
           </TraderHoverCard>
-          {/* Hover actions */}
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {/* Hover actions — always visible on mobile (no hover) */}
+          <div className="hidden sm:flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <button onClick={copyAddress} className="p-0.5 hover:bg-white/10 rounded" title="Copy address">
               {copied ? (
                 <svg className="w-3 h-3 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -140,29 +140,29 @@ export default function TradeRow({ trade, isSelected, isNew, onSelect }: TradeRo
         </p>
       </div>
 
-      {/* Price */}
-      <div className="w-12 flex-shrink-0 text-right">
+      {/* Price — hidden on mobile */}
+      <div className="hidden sm:block w-12 flex-shrink-0 text-right">
         <span className="text-[11px] text-gray-400 tabular-nums">
           {(trade.price * 100).toFixed(0)}%
         </span>
       </div>
 
       {/* Value */}
-      <div className="w-16 flex-shrink-0 text-right">
+      <div className="w-14 sm:w-16 flex-shrink-0 text-right">
         <span className={`text-xs font-medium tabular-nums ${getValueColor(trade.usd_value)}`}>
           {formatUsd(trade.usd_value)}
         </span>
       </div>
 
       {/* Time */}
-      <div className="w-10 flex-shrink-0 text-right">
+      <div className="w-8 sm:w-10 flex-shrink-0 text-right">
         <span className="text-[10px] text-gray-600 tabular-nums">
           {formatTime(trade.executed_at)}
         </span>
       </div>
 
-      {/* Flags */}
-      <div className="w-14 flex-shrink-0 flex items-center justify-end gap-1">
+      {/* Flags — hidden on mobile */}
+      <div className="hidden sm:flex w-14 flex-shrink-0 items-center justify-end gap-1">
         {trade.is_insider_suspect && (
           <span className="text-[8px] px-1 py-0.5 rounded bg-orange-500/10 text-orange-400 font-medium">INS</span>
         )}

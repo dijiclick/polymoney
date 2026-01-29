@@ -43,7 +43,7 @@ export default function WalletsPage() {
   const [hasMore, setHasMore] = useState(true)
   const [totalEstimate, setTotalEstimate] = useState(0)
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('30d')
-  const [sortBy, setSortBy] = useState('pnl_30d')
+  const [sortBy, setSortBy] = useState('copy_score')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [columnFilters, setColumnFilters] = useState<Record<string, ColumnFilter>>({})
   const [searchQuery, setSearchQuery] = useState('')
@@ -58,6 +58,10 @@ export default function WalletsPage() {
   const [refreshProgress, setRefreshProgress] = useState<RefreshProgress | null>(null)
   const [refreshDone, setRefreshDone] = useState(false)
   const eventSourceRef = useRef<EventSource | null>(null)
+  const [selectedAddresses, setSelectedAddresses] = useState<Set<string>>(new Set())
+  const [reanalyzeProgress, setReanalyzeProgress] = useState<RefreshProgress | null>(null)
+  const [reanalyzeDone, setReanalyzeDone] = useState(false)
+  const reanalyzeAbortRef = useRef(false)
   const columnSettingsRef = useRef<HTMLDivElement>(null)
   const analyzeInputRef = useRef<HTMLInputElement>(null)
 
@@ -104,6 +108,69 @@ export default function WalletsPage() {
       eventSourceRef.current = null
       setRefreshDone(true)
     }
+  }, [])
+
+  const handleToggleSelect = useCallback((address: string) => {
+    setSelectedAddresses(prev => {
+      const next = new Set(prev)
+      if (next.has(address)) {
+        next.delete(address)
+      } else {
+        next.add(address)
+      }
+      return next
+    })
+  }, [])
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedAddresses(prev => {
+      const allSelected = wallets.length > 0 && wallets.every(w => prev.has(w.address))
+      if (allSelected) {
+        return new Set()
+      }
+      return new Set(wallets.map(w => w.address))
+    })
+  }, [wallets])
+
+  const handleReanalyzeSelected = useCallback(async () => {
+    const addresses = Array.from(selectedAddresses)
+    if (addresses.length === 0) return
+
+    reanalyzeAbortRef.current = false
+    setReanalyzeDone(false)
+    setReanalyzeProgress({ total: addresses.length, current: 0, success: 0, failed: 0 })
+
+    let success = 0
+    let failed = 0
+
+    for (let i = 0; i < addresses.length; i++) {
+      if (reanalyzeAbortRef.current) break
+
+      try {
+        const res = await fetch(`/api/admin/refresh-metrics?address=${addresses[i]}`, { method: 'POST' })
+        if (res.ok) {
+          success++
+        } else {
+          failed++
+        }
+      } catch {
+        failed++
+      }
+
+      setReanalyzeProgress({
+        total: addresses.length,
+        current: i + 1,
+        success,
+        failed,
+        address: addresses[i],
+      })
+    }
+
+    setReanalyzeDone(true)
+  }, [selectedAddresses])
+
+  const stopReanalyzeSelected = useCallback(() => {
+    reanalyzeAbortRef.current = true
   }, [])
 
   // Load column preferences from localStorage
@@ -187,6 +254,12 @@ export default function WalletsPage() {
       if (usernameToResolve) params.set('username', usernameToResolve)
       const res = await fetch(`/api/traders/${finalAddr}?${params}`)
       if (!res.ok) throw new Error('Failed to analyze wallet')
+      const data = await res.json()
+      // Skip wallets with fewer than 15 total trades
+      if ((data.metrics?.tradeCountAllTime || 0) < 15) {
+        alert(`Wallet skipped: only ${data.metrics?.tradeCountAllTime || 0} trades (minimum 15 required)`)
+        return
+      }
       // Refresh wallet list to show the new/updated entry
       await fetchWallets(null)
     } catch (error) {
@@ -313,6 +386,8 @@ export default function WalletsPage() {
           cursorSortValue: cursor.sortValue,
           cursorAddress: cursor.address,
         }),
+        // Piggyback stats on the initial load to avoid a separate round-trip
+        ...(!cursor && { includeStats: 'true' }),
       })
 
       const res = await fetch(`/api/wallets?${params}`)
@@ -321,6 +396,8 @@ export default function WalletsPage() {
       if (data.wallets) {
         if (isInitialLoad) {
           setWallets(data.wallets)
+          // Use piggybacked stats if available (avoids separate round-trip)
+          if (data.stats) setStats(data.stats)
           // Check which of these wallets are tracked
           checkTrackedBatch(data.wallets.map((w: any) => w.address))
         } else {
@@ -351,8 +428,9 @@ export default function WalletsPage() {
   }, [fetchWallets])
 
   useEffect(() => {
-    fetchStats()
-  }, [fetchStats])
+    // Stats are piggybacked on initial wallet fetch; only call separately as fallback
+    if (!stats) fetchStats()
+  }, [fetchStats]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reload data when refresh-all stream completes
   useEffect(() => {
@@ -361,6 +439,15 @@ export default function WalletsPage() {
       fetchStats()
     }
   }, [refreshDone]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reload data when reanalyze-selected completes
+  useEffect(() => {
+    if (reanalyzeDone) {
+      fetchWallets(null)
+      fetchStats()
+      setSelectedAddresses(new Set())
+    }
+  }, [reanalyzeDone]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cleanup EventSource on unmount
   useEffect(() => {
@@ -427,8 +514,8 @@ export default function WalletsPage() {
     <div className="min-h-screen">
       {/* Stats Overview */}
       {stats && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-          <div className="glass rounded-xl p-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3 mb-4 md:mb-6">
+          <div className="glass rounded-xl p-3 md:p-4">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
                 <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -442,7 +529,7 @@ export default function WalletsPage() {
             </div>
           </div>
 
-          <div className="glass rounded-xl p-4">
+          <div className="glass rounded-xl p-3 md:p-4">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
                 <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -461,7 +548,7 @@ export default function WalletsPage() {
             </div>
           </div>
 
-          <div className="glass rounded-xl p-4">
+          <div className="glass rounded-xl p-3 md:p-4">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
                 <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -475,7 +562,7 @@ export default function WalletsPage() {
             </div>
           </div>
 
-          <div className="glass rounded-xl p-4">
+          <div className="glass rounded-xl p-3 md:p-4">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
                 <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -552,7 +639,7 @@ export default function WalletsPage() {
 
       {/* Controls Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3 flex-wrap">
           <TimePeriodSelector
             value={timePeriod}
             onChange={handleTimePeriodChange}
@@ -568,7 +655,7 @@ export default function WalletsPage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search..."
-              className="w-48 pl-8 pr-7 py-1.5 bg-white/[0.02] border border-white/5 rounded-lg text-xs text-white placeholder-gray-600 focus:outline-none focus:border-white/20 transition-all"
+              className="w-32 sm:w-48 pl-8 pr-7 py-1.5 bg-white/[0.02] border border-white/5 rounded-lg text-xs text-white placeholder-gray-600 focus:outline-none focus:border-white/20 transition-all"
             />
             {searchQuery && (
               <button
@@ -604,8 +691,8 @@ export default function WalletsPage() {
                     setAnalyzeAddress('')
                   }
                 }}
-                placeholder="0x address, @username, or profile URL..."
-                className="w-80 pl-3 pr-8 py-1.5 bg-white/[0.02] border border-blue-500/30 rounded-lg text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 transition-all font-mono"
+                placeholder="0x address, @user, or URL..."
+                className="w-full sm:w-80 pl-3 pr-8 py-1.5 bg-white/[0.02] border border-blue-500/30 rounded-lg text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 transition-all font-mono"
                 autoFocus
                 disabled={resolving}
               />
@@ -717,6 +804,71 @@ export default function WalletsPage() {
         )}
       </div>
 
+      {/* Selection Action Bar */}
+      {selectedAddresses.size > 0 && (
+        <div className="glass rounded-xl p-3 mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-white">
+              {selectedAddresses.size} wallet{selectedAddresses.size !== 1 ? 's' : ''} selected
+            </span>
+            <button
+              onClick={() => setSelectedAddresses(new Set())}
+              className="text-[10px] text-gray-500 hover:text-white px-2 py-1 rounded-md hover:bg-white/5 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            {reanalyzeProgress && !reanalyzeDone ? (
+              <>
+                <div className="flex items-center gap-2 text-xs">
+                  <div className="w-3.5 h-3.5 rounded-full border border-transparent border-t-blue-400 animate-spin" />
+                  <span className="text-gray-400">
+                    {reanalyzeProgress.current}/{reanalyzeProgress.total}
+                  </span>
+                  <span className="text-emerald-400">{reanalyzeProgress.success} ok</span>
+                  {reanalyzeProgress.failed > 0 && (
+                    <span className="text-red-400">{reanalyzeProgress.failed} fail</span>
+                  )}
+                </div>
+                <button
+                  onClick={stopReanalyzeSelected}
+                  className="px-2.5 py-1.5 text-[10px] text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-md transition-colors"
+                >
+                  Stop
+                </button>
+              </>
+            ) : reanalyzeProgress && reanalyzeDone ? (
+              <div className="flex items-center gap-2 text-xs">
+                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span className="text-emerald-400">{reanalyzeProgress.success} refreshed</span>
+                {reanalyzeProgress.failed > 0 && (
+                  <span className="text-red-400">{reanalyzeProgress.failed} failed</span>
+                )}
+                <button
+                  onClick={() => { setReanalyzeProgress(null); setReanalyzeDone(false) }}
+                  className="px-2 py-1 text-[10px] text-gray-500 hover:text-gray-300 border border-white/10 rounded-md transition-colors ml-1"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleReanalyzeSelected}
+                className="px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-500/15 hover:border-blue-500/30 transition-all flex items-center gap-1.5"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Reanalyze Selected
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Wallet Table */}
       <WalletTable
         wallets={wallets}
@@ -733,6 +885,10 @@ export default function WalletsPage() {
         visibleColumns={visibleColumns}
         trackedAddresses={trackedAddresses}
         onToggleTrack={handleToggleTrack}
+        selectedAddresses={selectedAddresses}
+        onToggleSelect={handleToggleSelect}
+        onSelectAll={handleSelectAll}
+        allSelected={wallets.length > 0 && wallets.every(w => selectedAddresses.has(w.address))}
       />
 
       {/* Scroll status */}

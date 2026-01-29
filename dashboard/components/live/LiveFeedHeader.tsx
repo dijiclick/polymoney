@@ -18,9 +18,9 @@ export default function LiveFeedHeader({
   onClear,
 }: LiveFeedHeaderProps) {
   return (
-    <div className="flex items-center justify-between mb-3">
-      <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold text-white">Live Feed</h1>
+    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div className="flex items-center gap-2 sm:gap-3">
+        <h1 className="text-base md:text-lg font-semibold text-white">Live Feed</h1>
         <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md ${
           isConnected ? 'bg-emerald-500/5' : 'bg-red-500/5'
         }`}>
@@ -34,7 +34,7 @@ export default function LiveFeedHeader({
           </span>
         </div>
         <span className="text-[11px] text-gray-600 tabular-nums">
-          {tradeCount} trades{totalSeen > tradeCount ? ` (${totalSeen.toLocaleString()} seen)` : ''}
+          {tradeCount}<span className="hidden sm:inline"> trades</span>{totalSeen > tradeCount ? <span className="hidden sm:inline">{` (${totalSeen.toLocaleString()} seen)`}</span> : ''}
         </span>
       </div>
 

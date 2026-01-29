@@ -11,6 +11,7 @@ interface ServiceStatus {
   last_trade_at?: string
   last_wallet_update?: string
   wallet_count?: number
+  wallet_discovery_enabled?: boolean
 }
 
 export interface HealthData {

@@ -39,29 +39,29 @@ export default function TradeTable({ trades, selectedAddress, onSelectTrader }: 
   return (
     <div className="glass rounded-xl h-full flex flex-col overflow-hidden">
       {/* Sticky Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[var(--surface)] sticky top-0 z-10">
-        <div className="w-8 flex-shrink-0 text-center">
+      <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 border-b border-white/5 bg-[var(--surface)] sticky top-0 z-10">
+        <div className="hidden sm:flex w-8 flex-shrink-0 justify-center">
           <span className="text-[9px] text-gray-600 uppercase tracking-wider">Score</span>
         </div>
         <div className="w-10 flex-shrink-0">
           <span className="text-[9px] text-gray-600 uppercase tracking-wider">Side</span>
         </div>
-        <div className="w-[130px] flex-shrink-0">
+        <div className="w-[90px] sm:w-[130px] flex-shrink-0">
           <span className="text-[9px] text-gray-600 uppercase tracking-wider">Trader</span>
         </div>
         <div className="flex-1 min-w-0">
           <span className="text-[9px] text-gray-600 uppercase tracking-wider">Market</span>
         </div>
-        <div className="w-12 flex-shrink-0 text-right">
+        <div className="hidden sm:block w-12 flex-shrink-0 text-right">
           <span className="text-[9px] text-gray-600 uppercase tracking-wider">Price</span>
         </div>
-        <div className="w-16 flex-shrink-0 text-right">
+        <div className="w-14 sm:w-16 flex-shrink-0 text-right">
           <span className="text-[9px] text-gray-600 uppercase tracking-wider">Value</span>
         </div>
-        <div className="w-10 flex-shrink-0 text-right">
+        <div className="w-8 sm:w-10 flex-shrink-0 text-right">
           <span className="text-[9px] text-gray-600 uppercase tracking-wider">Time</span>
         </div>
-        <div className="w-14 flex-shrink-0 text-right">
+        <div className="hidden sm:flex w-14 flex-shrink-0 justify-end">
           <span className="text-[9px] text-gray-600 uppercase tracking-wider">Flags</span>
         </div>
       </div>

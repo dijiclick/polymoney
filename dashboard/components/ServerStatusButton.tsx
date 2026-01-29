@@ -12,8 +12,33 @@ const dotColor: Record<string, string> = {
 
 export default function ServerStatusButton() {
   const [open, setOpen] = useState(false)
+  const [isTogglingDiscovery, setIsTogglingDiscovery] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const { health, isLoading, error, refetch, setPollInterval } = useServerHealth(60000)
+
+  const handleToggleWalletDiscovery = async () => {
+    if (!health || isTogglingDiscovery) return
+    const currentlyEnabled = health.services.vps_service.wallet_discovery_enabled !== false
+
+    setIsTogglingDiscovery(true)
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: 'wallet_discovery_enabled',
+          value: !currentlyEnabled,
+        }),
+      })
+      if (res.ok) {
+        await refetch()
+      }
+    } catch (err) {
+      console.error('Failed to toggle wallet discovery:', err)
+    } finally {
+      setIsTogglingDiscovery(false)
+    }
+  }
 
   // Faster polling when panel is open
   useEffect(() => {
@@ -61,12 +86,14 @@ export default function ServerStatusButton() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 rounded-xl shadow-2xl overflow-hidden z-50">
+        <div className="absolute right-0 md:right-0 top-full mt-2 rounded-xl shadow-2xl overflow-hidden z-50">
           <ServerStatusPanel
             health={health}
             isLoading={isLoading}
             error={error}
             onRefresh={refetch}
+            onToggleWalletDiscovery={handleToggleWalletDiscovery}
+            isTogglingDiscovery={isTogglingDiscovery}
           />
         </div>
       )}

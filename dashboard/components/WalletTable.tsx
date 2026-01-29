@@ -10,22 +10,26 @@ interface ColumnFilter {
   max?: number
 }
 
-export type ColumnKey = 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'category' | 'joined'
+export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'medianProfit' | 'avgTrades' | 'bot' | 'category' | 'joined'
 
 export const COLUMNS: { key: ColumnKey; label: string }[] = [
+  { key: 'score', label: 'Score' },
   { key: 'chart', label: 'Chart' },
   { key: 'roi', label: 'ROI' },
   { key: 'winRate', label: 'Win Rate' },
   { key: 'pnl', label: 'PnL' },
   { key: 'dd', label: 'Drawdown' },
+  { key: 'medianProfit', label: 'Avg %/Trade' },
   { key: 'active', label: 'Active' },
   { key: 'total', label: 'Total' },
   { key: 'value', label: 'Value' },
+  { key: 'avgTrades', label: 'Trades/d' },
+  { key: 'bot', label: 'Bot' },
   { key: 'category', label: 'Category' },
   { key: 'joined', label: 'Joined' },
 ]
 
-export const DEFAULT_VISIBLE: ColumnKey[] = ['chart', 'roi', 'winRate', 'pnl', 'dd', 'active', 'total', 'value', 'category', 'joined']
+export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'medianProfit', 'active', 'total', 'value', 'avgTrades', 'bot', 'category', 'joined']
 
 // Module-level cache for raw positions data (not filtered by timeframe)
 const positionsCache = new Map<string, { resolvedAt?: string; realizedPnl: number }[] | null>()
@@ -210,6 +214,11 @@ interface Props {
   trackedWalletMeta?: Map<string, TrackedWalletMeta>
   onRemoveTracked?: (address: string) => void
   refreshingAddresses?: Set<string>
+  // Selection feature props
+  selectedAddresses?: Set<string>
+  onToggleSelect?: (address: string) => void
+  onSelectAll?: () => void
+  allSelected?: boolean
 }
 
 function FilterPopover({
@@ -262,7 +271,7 @@ function FilterPopover({
   return (
     <div
       ref={ref}
-      className="absolute top-full left-0 mt-2 z-50 bg-[#12121a] border border-white/10 rounded-lg shadow-2xl p-3 min-w-[180px]"
+      className="absolute top-full left-0 mt-2 z-50 bg-[#12121a] border border-white/10 rounded-lg shadow-2xl p-3 min-w-[180px] max-w-[calc(100vw-2rem)]"
       onClick={(e) => e.stopPropagation()}
     >
       <div className="text-[10px] font-medium text-gray-500 mb-2.5 uppercase tracking-wider">{label}</div>
@@ -333,6 +342,10 @@ export default function WalletTable({
   trackedWalletMeta,
   onRemoveTracked,
   refreshingAddresses,
+  selectedAddresses,
+  onToggleSelect,
+  onSelectAll,
+  allSelected = false,
 }: Props) {
   const show = (key: ColumnKey) => visibleColumns.includes(key)
   const [openFilter, setOpenFilter] = useState<string | null>(null)
@@ -574,18 +587,43 @@ export default function WalletTable({
         data-scroll-container
         style={{ maxHeight: 'calc(100vh - 240px)' }}
       >
-        <table className="w-full">
+        <table className="w-full min-w-[800px]">
           <thead className="sticky top-0 z-20" style={{ background: 'var(--background)' }}>
             <tr className="border-b border-white/5">
+              {onToggleSelect && (
+                <th className="px-2 py-2.5 w-8">
+                  <button
+                    onClick={onSelectAll}
+                    className="flex items-center justify-center"
+                    title={allSelected ? 'Deselect all' : 'Select all'}
+                  >
+                    <div className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors cursor-pointer ${
+                      allSelected
+                        ? 'border-blue-500/50 bg-blue-500/20'
+                        : 'border-white/10 bg-white/[0.02] hover:border-white/20'
+                    }`}>
+                      {allSelected && (
+                        <svg className="w-2.5 h-2.5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </button>
+                </th>
+              )}
               <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
+              {show('score') && <SortHeader column="copy_score" label="Score" filterType="number" />}
               {show('chart') && <th className="px-1 py-2.5 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-20">Chart</th>}
               {show('roi') && <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" />}
               {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" />}
               {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" />}
               {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" />}
+              {show('medianProfit') && <SortHeader column="median_profit_pct" label="Avg %/T" filterType="percent" />}
               {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" />}
               {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" />}
               {show('value') && <SortHeader column="balance" label="Value" filterType="money" />}
+              {show('avgTrades') && <SortHeader column="avg_trades_per_day" label="Trades/d" filterType="number" />}
+              {show('bot') && <th className="px-2 py-2.5 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-12">Bot</th>}
               {show('category') && <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider w-16">Cat</th>}
               {show('joined') && <SortHeader column="account_created_at" label="Joined" filterType="number" />}
               {trackMode && (
@@ -623,6 +661,26 @@ export default function WalletTable({
                   ref={measureRef}
                   className="group hover:bg-white/[0.02] transition-colors border-b border-white/[0.02]"
                 >
+                  {onToggleSelect && (
+                    <td className="px-2 py-2.5 w-8">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onToggleSelect(wallet.address) }}
+                        className="flex items-center justify-center"
+                      >
+                        <div className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors cursor-pointer ${
+                          selectedAddresses?.has(wallet.address)
+                            ? 'border-blue-500/50 bg-blue-500/20'
+                            : 'border-white/10 bg-white/[0.02] hover:border-white/20'
+                        }`}>
+                          {selectedAddresses?.has(wallet.address) && (
+                            <svg className="w-2.5 h-2.5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      </button>
+                    </td>
+                  )}
                   <td className="px-2 py-2.5 max-w-[160px]">
                     <div className="flex items-center gap-1.5">
                       <button
@@ -665,6 +723,31 @@ export default function WalletTable({
                       </div>
                     </div>
                   </td>
+                  {show('score') && (() => {
+                    const score = wallet.copy_score || 0
+                    const scoreInt = Math.round(score)
+                    let scoreBg: string, scoreText: string
+                    if (scoreInt >= 80) {
+                      scoreBg = 'bg-amber-500/20 border border-amber-500/30'
+                      scoreText = 'text-amber-300'
+                    } else if (scoreInt >= 60) {
+                      scoreBg = 'bg-emerald-500/15 border border-emerald-500/25'
+                      scoreText = 'text-emerald-400'
+                    } else if (scoreInt >= 40) {
+                      scoreBg = 'bg-blue-500/10 border border-blue-500/20'
+                      scoreText = 'text-blue-400'
+                    } else {
+                      scoreBg = 'bg-white/[0.04] border border-white/[0.06]'
+                      scoreText = 'text-gray-500'
+                    }
+                    return (
+                      <td className="px-2 py-2.5 text-center">
+                        <span className={`text-sm font-extrabold tabular-nums inline-flex items-center justify-center w-10 h-6 rounded-md ${scoreBg} ${scoreText}`}>
+                          {scoreInt}
+                        </span>
+                      </td>
+                    )
+                  })()}
                   {show('chart') && (
                     <td className="px-1 py-2.5">
                       <InlineMiniChart address={wallet.address} timePeriod={timePeriod} />
@@ -713,6 +796,19 @@ export default function WalletTable({
                       )}
                     </td>
                   )}
+                  {show('medianProfit') && (
+                    <td className="px-3 py-2.5 text-right">
+                      {wallet.median_profit_pct != null ? (
+                        <span className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                          wallet.median_profit_pct > 0 ? 'bg-emerald-500/10' : wallet.median_profit_pct < 0 ? 'bg-red-500/10' : ''
+                        } ${getPnlColor(wallet.median_profit_pct)}`}>
+                          {wallet.median_profit_pct > 0 ? '+' : ''}{Math.round(wallet.median_profit_pct)}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
+                    </td>
+                  )}
                   {show('active') && (
                     <td className="px-3 py-2.5 text-center">
                       <span className={`text-xs tabular-nums ${(wallet.active_positions || 0) > 0 ? 'text-gray-300' : 'text-gray-600'}`}>
@@ -730,6 +826,22 @@ export default function WalletTable({
                   {show('value') && (
                     <td className="px-3 py-2.5 text-right">
                       <span className="text-gray-300 text-xs tabular-nums font-medium">{formatMoney(wallet.balance)}</span>
+                    </td>
+                  )}
+                  {show('avgTrades') && (
+                    <td className="px-3 py-2.5 text-right">
+                      <span className="text-gray-400 text-xs tabular-nums">
+                        {(wallet.avg_trades_per_day || 0).toFixed(1)}/d
+                      </span>
+                    </td>
+                  )}
+                  {show('bot') && (
+                    <td className="px-2 py-2.5 text-center">
+                      {wallet.is_bot ? (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/15 border border-purple-500/25 text-purple-400 font-medium">BOT</span>
+                      ) : (
+                        <span className="text-gray-600 text-[9px]">-</span>
+                      )}
                     </td>
                   )}
                   {show('category') && (

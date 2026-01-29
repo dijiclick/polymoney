@@ -112,6 +112,19 @@ export interface TraderProfileResponse {
   // Classification scores (only if from DB pipeline)
   scores?: TraderScores
 
+  // Copy-trade scoring
+  copyScore?: number
+  copyMetrics?: {
+    profitFactor30d: number
+    profitFactorAll: number
+    diffWinRate30d: number
+    diffWinRateAll: number
+    weeklyProfitRate: number
+    avgTradesPerDay: number
+    edgeTrend: number
+    calmarRatio: number
+  }
+
   // Metadata
   isNewlyFetched: boolean
   lastUpdatedAt?: string

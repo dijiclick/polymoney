@@ -62,10 +62,10 @@ export async function GET() {
   return NextResponse.json(response)
 }
 
-async function checkVpsService(): Promise<ServiceStatus & { last_trade_at?: string; last_wallet_update?: string }> {
+async function checkVpsService(): Promise<ServiceStatus & { last_trade_at?: string; last_wallet_update?: string; wallet_discovery_enabled?: boolean }> {
   const start = Date.now()
   try {
-    const [tradeRes, walletRes] = await Promise.all([
+    const [tradeRes, walletRes, settingsRes] = await Promise.all([
       supabase
         .from('live_trades')
         .select('received_at')
@@ -76,6 +76,11 @@ async function checkVpsService(): Promise<ServiceStatus & { last_trade_at?: stri
         .select('updated_at')
         .order('updated_at', { ascending: false })
         .limit(1),
+      supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'wallet_discovery_enabled')
+        .single(),
     ])
 
     const latency = Date.now() - start
@@ -109,7 +114,14 @@ async function checkVpsService(): Promise<ServiceStatus & { last_trade_at?: stri
       detail = `Last trade ${Math.round(ageMinutes)}m ago`
     }
 
-    return { status, latency_ms: latency, detail, last_trade_at: lastTradeAt, last_wallet_update: lastWalletUpdate }
+    // Extract discovery enabled state
+    let discoveryEnabled = true
+    if (settingsRes.data && !settingsRes.error) {
+      const val = settingsRes.data.value
+      discoveryEnabled = typeof val === 'boolean' ? val : String(val).toLowerCase() === 'true'
+    }
+
+    return { status, latency_ms: latency, detail, last_trade_at: lastTradeAt, last_wallet_update: lastWalletUpdate, wallet_discovery_enabled: discoveryEnabled }
   } catch {
     return { status: 'down', latency_ms: Date.now() - start, detail: 'Check failed' }
   }

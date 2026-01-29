@@ -127,16 +127,16 @@ export default function LiveFilterBar({ filter, onChange }: LiveFilterBarProps) 
           </button>
         ))}
 
-        <div className="w-px h-5 bg-white/5 mx-1" />
+        <div className="hidden sm:block w-px h-5 bg-white/5 mx-1" />
 
         {/* Trader address input */}
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <input
             type="text"
             value={filter.traderAddress || ''}
             onChange={(e) => update({ traderAddress: e.target.value || undefined })}
             placeholder="0x... or slug"
-            className="w-[140px] bg-white/[0.02] border border-white/5 rounded-md px-2 py-1 text-[11px] font-mono text-gray-300 placeholder:text-gray-600 focus:border-white/15 focus:outline-none transition-colors"
+            className="w-full sm:w-[140px] bg-white/[0.02] border border-white/5 rounded-md px-2 py-1 text-[11px] font-mono text-gray-300 placeholder:text-gray-600 focus:border-white/15 focus:outline-none transition-colors"
           />
         </div>
 

@@ -199,7 +199,7 @@ export default function TrackPage() {
     <div className="min-h-screen">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3 flex-wrap">
           <TimePeriodSelector value={timePeriod} onChange={handleTimePeriodChange} />
 
           <div className="text-xs text-gray-600">
@@ -214,7 +214,7 @@ export default function TrackPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* Global refresh interval selector */}
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] text-gray-500">Auto-refresh:</span>

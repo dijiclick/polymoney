@@ -61,14 +61,16 @@ interface ServerStatusPanelProps {
   isLoading: boolean
   error: string | null
   onRefresh: () => void
+  onToggleWalletDiscovery?: () => void
+  isTogglingDiscovery?: boolean
 }
 
-export default function ServerStatusPanel({ health, isLoading, error, onRefresh }: ServerStatusPanelProps) {
+export default function ServerStatusPanel({ health, isLoading, error, onRefresh, onToggleWalletDiscovery, isTogglingDiscovery }: ServerStatusPanelProps) {
   const overall = health?.overall || 'down'
   const oCfg = overallConfig[isLoading ? 'healthy' : (error ? 'down' : overall)]
 
   return (
-    <div className="w-72" style={{ background: 'var(--popover-bg)', border: '1px solid var(--popover-border)' }}
+    <div className="w-72 max-w-[calc(100vw-2rem)]" style={{ background: 'var(--popover-bg)', border: '1px solid var(--popover-border)' }}
       onClick={e => e.stopPropagation()}
     >
       {/* Header */}
@@ -109,6 +111,24 @@ export default function ServerStatusPanel({ health, isLoading, error, onRefresh 
                 ? `Wallet updated ${timeAgo(health.services.vps_service.last_wallet_update)}`
                 : undefined}
             />
+
+            {/* Wallet Discovery Toggle */}
+            <div className="flex items-center justify-between py-1.5 pl-10 pr-1">
+              <span className="text-[10px] text-gray-500">Wallet Detection</span>
+              <button
+                onClick={onToggleWalletDiscovery}
+                disabled={isTogglingDiscovery}
+                className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${
+                  health.services.vps_service.wallet_discovery_enabled !== false
+                    ? 'bg-emerald-500/30'
+                    : 'bg-white/10'
+                } ${isTogglingDiscovery ? 'opacity-50 cursor-wait' : 'cursor-pointer hover:opacity-80'}`}
+              >
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                  health.services.vps_service.wallet_discovery_enabled !== false ? 'translate-x-4' : 'translate-x-0.5'
+                }`} />
+              </button>
+            </div>
 
             <div className="h-px bg-white/[0.03]" />
 

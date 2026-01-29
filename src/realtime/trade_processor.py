@@ -56,6 +56,7 @@ class TradeProcessor:
         self._batch_task: Optional[asyncio.Task] = None
         self._cache_task: Optional[asyncio.Task] = None
         self._discovery_tasks: list[asyncio.Task] = []
+        self._settings_poller_task: Optional[asyncio.Task] = None
 
         # Wallet discovery processor
         self._discovery_processor: Optional[WalletDiscoveryProcessor] = None
@@ -440,14 +441,17 @@ class TradeProcessor:
         self._batch_task = asyncio.create_task(self.batch_processor())
         self._cache_task = asyncio.create_task(self.refresh_caches())
 
-        # Start multiple wallet discovery workers
+        # Start multiple wallet discovery workers + settings poller
         if self._discovery_processor:
             num_workers = self._discovery_processor.NUM_WORKERS
             self._discovery_tasks = [
                 asyncio.create_task(self._discovery_processor.process_queue(worker_id=i))
                 for i in range(num_workers)
             ]
-            logger.info(f"Started {num_workers} wallet discovery workers")
+            self._settings_poller_task = asyncio.create_task(
+                self._discovery_processor.poll_settings()
+            )
+            logger.info(f"Started {num_workers} wallet discovery workers + settings poller")
 
     async def stop_background_tasks(self) -> None:
         """Stop background tasks gracefully."""
@@ -462,6 +466,14 @@ class TradeProcessor:
             self._cache_task.cancel()
             try:
                 await self._cache_task
+            except asyncio.CancelledError:
+                pass
+
+        # Stop settings poller
+        if hasattr(self, '_settings_poller_task') and self._settings_poller_task:
+            self._settings_poller_task.cancel()
+            try:
+                await self._settings_poller_task
             except asyncio.CancelledError:
                 pass
 

@@ -57,6 +57,10 @@ class WalletDiscoveryProcessor:
         # Per-worker rate limiting
         self._worker_last_request: dict[int, datetime] = {}
 
+        # Pause/resume control (set via system_settings table)
+        self._paused = False
+        self._settings_check_interval = 15  # seconds
+
         # Stats
         self._wallets_discovered = 0
         self._wallets_skipped_cooldown = 0
@@ -102,6 +106,47 @@ class WalletDiscoveryProcessor:
         if self._api:
             await self._api.__aexit__(None, None, None)
 
+    def _check_enabled_flag(self) -> bool:
+        """Check system_settings table for wallet_discovery_enabled flag."""
+        try:
+            result = self.supabase.table("system_settings").select("value").eq(
+                "key", "wallet_discovery_enabled"
+            ).execute()
+
+            if result.data and len(result.data) > 0:
+                value = result.data[0].get("value")
+                if isinstance(value, bool):
+                    return value
+                return str(value).lower() == "true"
+
+            # Default: enabled if setting doesn't exist
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to check wallet_discovery_enabled setting: {e}")
+            return True  # Fail-open: keep running on error
+
+    async def poll_settings(self) -> None:
+        """Background task that checks the enabled flag periodically."""
+        logger.info("Starting wallet discovery settings poller")
+        while True:
+            try:
+                enabled = self._check_enabled_flag()
+                was_paused = self._paused
+                self._paused = not enabled
+
+                if self._paused and not was_paused:
+                    logger.info("Wallet discovery PAUSED via system settings")
+                elif not self._paused and was_paused:
+                    logger.info("Wallet discovery RESUMED via system settings")
+
+                await asyncio.sleep(self._settings_check_interval)
+            except asyncio.CancelledError:
+                logger.info("Settings poller stopped")
+                break
+            except Exception as e:
+                logger.error(f"Settings poller error: {e}")
+                await asyncio.sleep(self._settings_check_interval)
+
     async def check_and_queue(self, trader_address: str, usd_value: float) -> bool:
         """
         Check if wallet needs analysis and queue for processing.
@@ -117,6 +162,9 @@ class WalletDiscoveryProcessor:
         Returns:
             True if wallet was queued, False if skipped or queue full
         """
+        if self._paused:
+            return False
+
         addr = trader_address.lower()
 
         self._wallets_discovered += 1
@@ -157,9 +205,19 @@ class WalletDiscoveryProcessor:
 
         while True:
             try:
+                # Wait while paused
+                while self._paused:
+                    await asyncio.sleep(2)
+
                 addr, usd_value = await self._queue.get()
 
                 try:
+                    # Re-check pause after dequeue
+                    if self._paused:
+                        self._queue.put_nowait((addr, usd_value))
+                        self._queue.task_done()
+                        continue
+
                     await self._rate_limit_wait(worker_id)
                     await self._process_wallet(addr)
 
@@ -243,6 +301,33 @@ class WalletDiscoveryProcessor:
             f"win_rate={metrics.get('win_rate_all', 0):.1f}%"
         )
 
+        # Skip new wallets with fewer than 15 trades
+        is_new = address not in self._known_wallets
+        if is_new and metrics.get("trade_count", 0) < 15:
+            logger.info(
+                f"Wallet skipped (< 15 trades): {address[:10]}... "
+                f"({metrics.get('trade_count', 0)} trades)"
+            )
+            return
+
+        # Calculate new copy-trade metrics
+        weekly_profit_rate = self._calculate_weekly_profit_rate(closed_positions)
+        diff_win_rate_all = self._calculate_diff_win_rate(closed_positions)
+        avg_trades_per_day = self._calculate_avg_trades_per_day(closed_positions)
+        median_profit_pct = self._calculate_median_profit_pct(closed_positions)
+
+        # Copy Score uses 30d metrics for recency
+        copy_score = self._calculate_copy_score(
+            profit_factor_30d=metrics_30d.get("profit_factor", 0),
+            roi_30d=metrics_30d["roi"],
+            drawdown_30d=metrics_30d["drawdown"],
+            diff_win_rate_30d=metrics_30d.get("diff_win_rate", 0),
+            weekly_profit_rate=weekly_profit_rate,
+            roi_7d=metrics_7d["roi"],
+            trade_count_all=metrics.get("trade_count", 0),
+            median_profit_pct=median_profit_pct,
+        )
+
         wallet_data = {
             "address": address,
             "source": "live",
@@ -285,6 +370,16 @@ class WalletDiscoveryProcessor:
             "overall_win_rate": metrics.get("win_rate_all", 0),
             "total_volume": metrics.get("total_bought", 0),
             "total_trades": metrics.get("trade_count", 0),
+            # Copy-trade metrics
+            "profit_factor_30d": metrics_30d.get("profit_factor", 0),
+            "profit_factor_all": metrics.get("profit_factor_all", 0),
+            "diff_win_rate_30d": metrics_30d.get("diff_win_rate", 0),
+            "diff_win_rate_all": diff_win_rate_all,
+            "weekly_profit_rate": weekly_profit_rate,
+            "copy_score": copy_score,
+            "avg_trades_per_day": avg_trades_per_day,
+            "is_bot": False,  # Not calculated here (no bot scorer in this pipeline)
+            "median_profit_pct": median_profit_pct,
             "metrics_updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -366,7 +461,7 @@ class WalletDiscoveryProcessor:
             condition_id = pos.get("conditionId", "")
             outcome = pos.get("outcome", "unknown")
             pnl = float(pos.get("realizedPnl", 0))
-            bought = float(pos.get("totalBought", 0)) or (float(pos.get("size", 0)) * float(pos.get("avgPrice", 0)))
+            bought = float(pos.get("initialValue", 0)) or (float(pos.get("size", 0)) * float(pos.get("avgPrice", 0)))
 
             if condition_id not in market_groups:
                 market_groups[condition_id] = {"outcomes": {}}
@@ -509,6 +604,8 @@ class WalletDiscoveryProcessor:
         win_count = 0
         loss_count = 0
         active_count = 0
+        gross_wins = 0
+        gross_losses = 0
 
         for trade in trades:
             if trade["is_resolved"]:
@@ -516,8 +613,10 @@ class WalletDiscoveryProcessor:
                 total_bought += trade["total_bought"]
                 if trade["total_pnl"] > 0:
                     win_count += 1
+                    gross_wins += trade["total_pnl"]
                 else:
                     loss_count += 1
+                    gross_losses += abs(trade["total_pnl"])
             else:
                 unrealized_pnl += trade["total_pnl"]
                 active_count += 1
@@ -526,15 +625,12 @@ class WalletDiscoveryProcessor:
         trade_count = win_count + loss_count
 
         # ROI = Total PnL / Initial Capital * 100
+        # Initial Capital estimated as current_balance - total_pnl (what was deposited)
         initial_capital = current_balance - total_pnl
         if initial_capital > 0:
             roi_all = (total_pnl / initial_capital * 100)
         elif total_pnl > 0 and total_bought > 0:
-            # Profitable but withdrew profits (initial_capital <= 0)
             roi_all = (total_pnl / total_bought * 100)
-        elif total_pnl < 0 and current_balance == 0:
-            # Lost everything: ROI = -100%
-            roi_all = -100.0
         else:
             roi_all = 0
 
@@ -556,6 +652,14 @@ class WalletDiscoveryProcessor:
             if p.get("conditionId") and float(p.get("currentValue", 0)) > 0
         ))
 
+        # Profit Factor = gross wins / abs(gross losses)
+        if gross_losses > 0:
+            profit_factor_all = round(gross_wins / gross_losses, 2)
+        elif gross_wins > 0:
+            profit_factor_all = 10.0  # Cap when no losses
+        else:
+            profit_factor_all = 0
+
         return {
             "realized_pnl": round(realized_pnl, 2),
             "unrealized_pnl": round(unrealized_pnl, 2),
@@ -570,6 +674,9 @@ class WalletDiscoveryProcessor:
             "open_count": unique_open_markets,
             "closed_count": unique_closed_markets,
             "max_drawdown": max_drawdown,
+            "gross_wins": round(gross_wins, 2),
+            "gross_losses": round(gross_losses, 2),
+            "profit_factor_all": profit_factor_all,
         }
 
     def _calculate_period_metrics(
@@ -610,16 +717,25 @@ class WalletDiscoveryProcessor:
         # Group by conditionId to count unique markets (not raw entries)
         # Each market has YES/NO outcomes, raw count double-counts
         market_pnl: dict[str, float] = {}
+        # Track per-market avg entry price for difficulty-weighted win rate
+        market_difficulty: dict[str, list[float]] = {}
         for p in period_positions:
             cid = p.get("conditionId", "")
-            market_pnl[cid] = market_pnl.get(cid, 0) + float(p.get("realizedPnl", 0))
+            rpnl = float(p.get("realizedPnl", 0))
+            market_pnl[cid] = market_pnl.get(cid, 0) + rpnl
+            # avgPrice = entry probability (what they paid per share)
+            avg_price = float(p.get("avgPrice", 0.5))
+            avg_price = max(0.01, min(avg_price, 0.99))  # Clamp to valid range
+            if cid not in market_difficulty:
+                market_difficulty[cid] = []
+            market_difficulty[cid].append(avg_price)
 
         # Calculate PnL
         pnl = sum(market_pnl.values())
 
         # Calculate volume
         volume = sum(
-            float(p.get("totalBought", 0)) or (float(p.get("size", 0)) * float(p.get("avgPrice", 0)))
+            float(p.get("initialValue", 0)) or (float(p.get("size", 0)) * float(p.get("avgPrice", 0)))
             for p in period_positions
         )
 
@@ -628,8 +744,37 @@ class WalletDiscoveryProcessor:
         trade_count = len(market_pnl)
         win_rate = (wins / trade_count * 100) if trade_count > 0 else 0
 
-        # Calculate ROI for period
-        roi = (pnl / volume * 100) if volume > 0 else 0
+        # Profit Factor for period
+        gross_wins = sum(v for v in market_pnl.values() if v > 0)
+        gross_losses_abs = sum(abs(v) for v in market_pnl.values() if v < 0)
+        if gross_losses_abs > 0:
+            profit_factor = round(gross_wins / gross_losses_abs, 2)
+        elif gross_wins > 0:
+            profit_factor = 10.0
+        else:
+            profit_factor = 0
+
+        # Difficulty-weighted win rate for period
+        # difficulty = 1 - avg_entry_price (lower entry price = harder bet = more credit)
+        total_difficulty = 0
+        wins_difficulty = 0
+        for cid, prices in market_difficulty.items():
+            avg_entry = sum(prices) / len(prices)
+            difficulty = 1 - avg_entry
+            total_difficulty += difficulty
+            if market_pnl.get(cid, 0) > 0:
+                wins_difficulty += difficulty
+        diff_win_rate = (wins_difficulty / total_difficulty * 100) if total_difficulty > 0 else 0
+
+        # ROI = Period PnL / Starting Balance
+        # Starting balance estimated as current_balance - period_pnl
+        estimated_start = current_balance - pnl
+        if estimated_start > 0:
+            roi = (pnl / estimated_start * 100)
+        elif pnl > 0 and volume > 0:
+            roi = (pnl / volume * 100)
+        else:
+            roi = 0
 
         # Calculate drawdown for period
         # Use max(estimated_start, current_balance) to avoid near-zero base from withdrawals
@@ -643,7 +788,254 @@ class WalletDiscoveryProcessor:
             "trade_count": trade_count,
             "win_rate": round(win_rate, 2),
             "drawdown": drawdown,
+            "profit_factor": profit_factor,
+            "diff_win_rate": round(diff_win_rate, 2),
         }
+
+    def _calculate_weekly_profit_rate(self, closed_positions: list[dict]) -> float:
+        """
+        Calculate percentage of active weeks that were profitable.
+        Groups closed positions by ISO week and counts profitable weeks.
+        """
+        if not closed_positions:
+            return 0
+
+        # Group PnL by ISO week
+        week_pnl: dict[str, float] = {}
+        for pos in closed_positions:
+            resolved_at = pos.get("resolvedAt") or pos.get("timestamp")
+            if not resolved_at:
+                continue
+            try:
+                if isinstance(resolved_at, (int, float)):
+                    resolved_ts = resolved_at / 1000 if resolved_at > 4102444800 else resolved_at
+                    dt = datetime.fromtimestamp(resolved_ts, tz=timezone.utc)
+                else:
+                    dt = datetime.fromisoformat(str(resolved_at).replace("Z", "+00:00"))
+                iso_year, iso_week, _ = dt.isocalendar()
+                week_key = f"{iso_year}-W{iso_week:02d}"
+                pnl = float(pos.get("realizedPnl", 0))
+                week_pnl[week_key] = week_pnl.get(week_key, 0) + pnl
+            except Exception:
+                continue
+
+        if not week_pnl:
+            return 0
+
+        profitable_weeks = sum(1 for v in week_pnl.values() if v > 0)
+        return round(profitable_weeks / len(week_pnl) * 100, 2)
+
+    def _calculate_diff_win_rate(self, closed_positions: list[dict]) -> float:
+        """
+        Calculate difficulty-weighted win rate from closed positions.
+        Difficulty = 1 - avgPrice (lower entry price = harder bet = more credit).
+        """
+        if not closed_positions:
+            return 0
+
+        # Group by conditionId
+        market_pnl: dict[str, float] = {}
+        market_prices: dict[str, list[float]] = {}
+
+        for pos in closed_positions:
+            cid = pos.get("conditionId", "")
+            if not cid:
+                continue
+            pnl = float(pos.get("realizedPnl", 0))
+            avg_price = float(pos.get("avgPrice", 0.5))
+            avg_price = max(0.01, min(avg_price, 0.99))
+
+            market_pnl[cid] = market_pnl.get(cid, 0) + pnl
+            if cid not in market_prices:
+                market_prices[cid] = []
+            market_prices[cid].append(avg_price)
+
+        if not market_pnl:
+            return 0
+
+        total_difficulty = 0
+        wins_difficulty = 0
+        for cid, prices in market_prices.items():
+            avg_entry = sum(prices) / len(prices)
+            difficulty = 1 - avg_entry
+            total_difficulty += difficulty
+            if market_pnl.get(cid, 0) > 0:
+                wins_difficulty += difficulty
+
+        return round((wins_difficulty / total_difficulty * 100) if total_difficulty > 0 else 0, 2)
+
+    def _calculate_avg_trades_per_day(self, closed_positions: list[dict]) -> float:
+        """Calculate average trades per active day from closed positions."""
+        if not closed_positions:
+            return 0
+
+        # Collect unique active days
+        active_days: set[str] = set()
+        for pos in closed_positions:
+            resolved_at = pos.get("resolvedAt") or pos.get("timestamp")
+            if not resolved_at:
+                continue
+            try:
+                if isinstance(resolved_at, (int, float)):
+                    resolved_ts = resolved_at / 1000 if resolved_at > 4102444800 else resolved_at
+                    dt = datetime.fromtimestamp(resolved_ts, tz=timezone.utc)
+                else:
+                    dt = datetime.fromisoformat(str(resolved_at).replace("Z", "+00:00"))
+                active_days.add(dt.strftime("%Y-%m-%d"))
+            except Exception:
+                continue
+
+        if not active_days:
+            return 0
+
+        # Count unique markets (trades) rather than raw positions
+        unique_markets = len(set(p.get("conditionId", "") for p in closed_positions if p.get("conditionId")))
+        return round(unique_markets / len(active_days), 2)
+
+    @staticmethod
+    def _calculate_median_profit_pct(closed_positions: list[dict]) -> float | None:
+        """
+        Calculate median profit percentage per closed trade with IQR outlier removal.
+
+        For each closed position: profit_pct = (realizedPnl / initialValue) * 100
+        Then remove outliers via IQR method and return median.
+
+        Returns None if fewer than 3 valid positions.
+        """
+        profit_pcts: list[float] = []
+
+        for pos in closed_positions:
+            realized_pnl = float(pos.get("realizedPnl", 0))
+            initial_value = float(pos.get("initialValue", 0))
+            if initial_value <= 0:
+                size = float(pos.get("size", 0))
+                avg_price = float(pos.get("avgPrice", 0))
+                initial_value = size * avg_price
+
+            if initial_value <= 0:
+                continue
+
+            pct = (realized_pnl / initial_value) * 100
+            profit_pcts.append(pct)
+
+        if len(profit_pcts) < 3:
+            return None
+
+        profit_pcts.sort()
+        n = len(profit_pcts)
+
+        def interpolate(sorted_data: list[float], frac_idx: float) -> float:
+            lower = int(frac_idx)
+            upper = min(lower + 1, len(sorted_data) - 1)
+            weight = frac_idx - lower
+            return sorted_data[lower] * (1 - weight) + sorted_data[upper] * weight
+
+        q1 = interpolate(profit_pcts, n * 0.25)
+        q3 = interpolate(profit_pcts, n * 0.75)
+        iqr = q3 - q1
+
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+
+        filtered = [p for p in profit_pcts if lower_bound <= p <= upper_bound]
+        if not filtered:
+            return None
+
+        filtered.sort()
+        mid = len(filtered) // 2
+        if len(filtered) % 2 == 0:
+            median_val = (filtered[mid - 1] + filtered[mid]) / 2
+        else:
+            median_val = filtered[mid]
+
+        return round(median_val, 2)
+
+    @staticmethod
+    def _calculate_copy_score(
+        profit_factor_30d: float,
+        roi_30d: float,
+        drawdown_30d: float,
+        diff_win_rate_30d: float,
+        weekly_profit_rate: float,
+        roi_7d: float,
+        trade_count_all: int,
+        median_profit_pct: float | None = None,
+    ) -> int:
+        """
+        Calculate composite copy-trade score (0-100).
+
+        Optimized for small-bankroll copy-trading ($50/trade).
+        Traders with tiny per-trade % gains are penalized because
+        those gains don't translate to meaningful profit at small sizes.
+
+        Components:
+        - Median Profit % (25%): per-trade ROI — the core small-bettor metric
+        - Profit Factor (15%): normalized to 0-1 with cap at 3.0
+        - Calmar Ratio (10%): ROI / drawdown, normalized with cap at 5.0
+        - Difficulty-Weighted Win Rate (15%): already 0-100
+        - Weekly Profit Rate (20%): already 0-100
+        - Edge Trend (15%): roi_7d / roi_30d ratio, normalized
+        """
+        # Hard disqualifiers
+        if trade_count_all < 20:
+            return 0
+        if profit_factor_30d < 1.0:
+            return 0
+        # Median profit must be at least 5% per trade to be worth copying
+        if median_profit_pct is None or median_profit_pct < 5.0:
+            return 0
+
+        # 1. Median Profit % score (0-1, capped at 40% = perfect)
+        #    At $50/trade: 5%=$2.50 (floor), 20%=$10, 40%=$20 (perfect)
+        mpp_score = min(median_profit_pct / 40.0, 1.0)
+
+        # 2. Profit Factor score (0-1, capped at 3.0 = perfect)
+        pf_score = min(profit_factor_30d / 3.0, 1.0)
+
+        # 3. Calmar Ratio score (0-1, capped at 5.0 = perfect)
+        if drawdown_30d > 0:
+            calmar = roi_30d / drawdown_30d
+        elif roi_30d > 0:
+            calmar = 5.0  # No drawdown + positive ROI = perfect
+        else:
+            calmar = 0
+        calmar_score = min(max(calmar, 0) / 5.0, 1.0)
+
+        # 4. Difficulty-weighted win rate (0-1)
+        dwr_score = min(diff_win_rate_30d / 100.0, 1.0)
+
+        # 5. Weekly profit rate (0-1)
+        wpr_score = min(weekly_profit_rate / 100.0, 1.0)
+
+        # 6. Edge trend (0-1)
+        if roi_30d > 0:
+            ratio = roi_7d / roi_30d
+            if ratio >= 2.0:
+                edge_score = 1.0
+            elif ratio >= 1.0:
+                edge_score = 0.5 + (ratio - 1.0) * 0.5
+            else:
+                edge_score = max(ratio * 0.5, 0)
+        elif roi_7d > 0:
+            edge_score = 0.8  # Positive recent, bad past = improving
+        else:
+            edge_score = 0
+
+        # Weighted sum
+        raw_score = (
+            mpp_score * 0.25 +
+            pf_score * 0.15 +
+            calmar_score * 0.10 +
+            dwr_score * 0.15 +
+            wpr_score * 0.20 +
+            edge_score * 0.15
+        ) * 100
+
+        # Confidence multiplier: discount low-sample wallets
+        confidence = min(1.0, trade_count_all / 80.0)
+        final_score = raw_score * confidence
+
+        return min(round(final_score), 100)
 
     def refresh_cache(self, address: str) -> None:
         """Add an address to the known wallets cache."""
@@ -661,4 +1053,5 @@ class WalletDiscoveryProcessor:
             "wallets_processed": self._wallets_processed,
             "trades_stored": self._trades_stored,
             "errors": self._errors,
+            "paused": self._paused,
         }

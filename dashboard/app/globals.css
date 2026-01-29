@@ -43,6 +43,20 @@
 body {
   color: rgb(var(--foreground-rgb));
   background: var(--background);
+  min-height: 100dvh;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* iOS touch scrolling */
+.overflow-auto,
+.overflow-y-auto,
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Safe area padding for bottom elements on notched devices */
+footer {
+  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 /* Custom scrollbar - minimal style */

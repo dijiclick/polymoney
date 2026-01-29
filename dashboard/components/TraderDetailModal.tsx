@@ -26,6 +26,17 @@ interface TraderData {
   closedPositions?: ClosedPosition[]
   closedPositionsCount: number
   metrics?: any
+  copyScore?: number
+  copyMetrics?: {
+    profitFactor30d: number
+    profitFactorAll: number
+    diffWinRate30d: number
+    diffWinRateAll: number
+    weeklyProfitRate: number
+    avgTradesPerDay: number
+    edgeTrend: number
+    calmarRatio: number
+  }
 }
 
 interface Props {
@@ -113,7 +124,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
   if (!mounted) return null
 
   const modalContent = (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
+    <div className="fixed inset-0 z-[9999] flex items-end md:items-center justify-center p-0 md:p-3" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -121,9 +132,9 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
       />
 
       {/* Modal — nearly full size */}
-      <div className="relative bg-[#0d0d12] border border-white/10 rounded-xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-hidden">
+      <div className="relative bg-[#0d0d12] border border-white/10 rounded-t-xl md:rounded-xl shadow-2xl w-full max-w-5xl max-h-[100vh] md:max-h-[95vh] overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-3.5 border-b border-white/5">
+        <div className="flex items-center justify-between px-4 md:px-6 py-3.5 border-b border-white/5">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center">
               <span className="text-white font-medium text-xs">
@@ -156,7 +167,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
         </div>
 
         {/* Content */}
-        <div className="overflow-y-auto max-h-[calc(95vh-56px)]">
+        <div className="overflow-y-auto max-h-[calc(100vh-56px)] md:max-h-[calc(95vh-56px)]">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16">
               <div className="relative w-8 h-8">
@@ -182,6 +193,73 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
             </div>
           ) : data ? (
             <>
+              {/* Copy Score Banner */}
+              {(() => {
+                const score = Math.round(data.copyScore || 0)
+                let scoreBg: string, scoreText: string, scoreLabel: string
+                if (score >= 80) {
+                  scoreBg = 'from-amber-500/20 to-amber-600/10 border-amber-500/30'
+                  scoreText = 'text-amber-300'
+                  scoreLabel = 'Excellent'
+                } else if (score >= 60) {
+                  scoreBg = 'from-emerald-500/15 to-emerald-600/10 border-emerald-500/25'
+                  scoreText = 'text-emerald-400'
+                  scoreLabel = 'Good'
+                } else if (score >= 40) {
+                  scoreBg = 'from-blue-500/10 to-blue-600/5 border-blue-500/20'
+                  scoreText = 'text-blue-400'
+                  scoreLabel = 'Average'
+                } else {
+                  scoreBg = 'from-white/[0.04] to-white/[0.02] border-white/[0.06]'
+                  scoreText = 'text-gray-500'
+                  scoreLabel = 'Low'
+                }
+                return (
+                  <div className={`mx-3 md:mx-5 mt-4 mb-2 px-4 md:px-5 py-3.5 rounded-lg bg-gradient-to-r ${scoreBg} border`}>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[9px] text-gray-500 uppercase tracking-wider">Copy Score</p>
+                        <div className="flex items-baseline gap-2 mt-0.5">
+                          <span className={`text-3xl font-extrabold tabular-nums ${scoreText}`}>{score}</span>
+                          <span className={`text-sm font-medium ${scoreText} opacity-70`}>{scoreLabel}</span>
+                        </div>
+                      </div>
+                      {data.copyMetrics && (
+                        <div className="sm:text-right space-y-1">
+                          <div className="flex items-center gap-2 md:gap-3 flex-wrap">
+                            <div className="text-center">
+                              <p className="text-[9px] text-gray-600 uppercase">Profit F.</p>
+                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{data.copyMetrics.profitFactor30d.toFixed(1)}</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-[9px] text-gray-600 uppercase">Calmar</p>
+                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{data.copyMetrics.calmarRatio.toFixed(1)}</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-[9px] text-gray-600 uppercase">Weekly</p>
+                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{data.copyMetrics.weeklyProfitRate.toFixed(0)}%</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-[9px] text-gray-600 uppercase">Edge</p>
+                              <p className={`text-xs font-semibold tabular-nums ${data.copyMetrics.edgeTrend >= 1 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {data.copyMetrics.edgeTrend.toFixed(2)}x
+                              </p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-[9px] text-gray-600 uppercase">Diff WR</p>
+                              <p className="text-xs font-semibold text-gray-300 tabular-nums">{data.copyMetrics.diffWinRate30d.toFixed(1)}%</p>
+                            </div>
+                          </div>
+                          <p className="text-[9px] text-gray-600">
+                            {data.copyMetrics.avgTradesPerDay.toFixed(1)} trades/day
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
+
               {/* PnL Chart */}
               <PnlChart closedPositions={data.closedPositions || []} />
 
@@ -189,7 +267,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
               <div className="border-t border-white/5" />
 
               {/* Tabs */}
-              <div className="flex gap-1 px-6 pt-3 pb-3 border-b border-white/5">
+              <div className="flex gap-1 px-4 md:px-6 pt-3 pb-3 border-b border-white/5">
                 <button
                   onClick={() => setActiveTab('open')}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
@@ -213,7 +291,7 @@ export default function TraderDetailModal({ address, username, isOpen, onClose }
               </div>
 
               {/* Tab Content */}
-              <div className="p-5">
+              <div className="p-3 md:p-5">
                 {activeTab === 'open' && (
                   <div className="space-y-2">
                     {data.positions && data.positions.length > 0 ? (

@@ -24,6 +24,17 @@ interface TraderData {
   closedPositions?: ClosedPosition[]
   closedPositionsCount: number
   metrics?: any
+  copyScore?: number
+  copyMetrics?: {
+    profitFactor30d: number
+    profitFactorAll: number
+    diffWinRate30d: number
+    diffWinRateAll: number
+    weeklyProfitRate: number
+    avgTradesPerDay: number
+    edgeTrend: number
+    calmarRatio: number
+  }
 }
 
 interface TraderDetailPanelProps {
@@ -142,9 +153,9 @@ export default function TraderDetailPanel({ address, trades, onClose }: TraderDe
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded-md transition-colors flex-shrink-0"
+          className="p-2 md:p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded-md transition-colors flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-5 h-5 md:w-4 md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
@@ -169,6 +180,65 @@ export default function TraderDetailPanel({ address, trades, onClose }: TraderDe
           </div>
         ) : data ? (
           <>
+            {/* Copy Score Banner */}
+            {(() => {
+              const score = Math.round(data.copyScore || 0)
+              let scoreBg: string, scoreText: string, scoreLabel: string
+              if (score >= 80) {
+                scoreBg = 'from-amber-500/20 to-amber-600/10 border-amber-500/30'
+                scoreText = 'text-amber-300'
+                scoreLabel = 'Excellent'
+              } else if (score >= 60) {
+                scoreBg = 'from-emerald-500/15 to-emerald-600/10 border-emerald-500/25'
+                scoreText = 'text-emerald-400'
+                scoreLabel = 'Good'
+              } else if (score >= 40) {
+                scoreBg = 'from-blue-500/10 to-blue-600/5 border-blue-500/20'
+                scoreText = 'text-blue-400'
+                scoreLabel = 'Average'
+              } else {
+                scoreBg = 'from-white/[0.04] to-white/[0.02] border-white/[0.06]'
+                scoreText = 'text-gray-500'
+                scoreLabel = 'Low'
+              }
+              return (
+                <div className={`mx-3 mt-3 mb-1 px-4 py-3 rounded-lg bg-gradient-to-r ${scoreBg} border`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[9px] text-gray-500 uppercase tracking-wider">Copy Score</p>
+                      <div className="flex items-baseline gap-2 mt-0.5">
+                        <span className={`text-2xl font-extrabold tabular-nums ${scoreText}`}>{score}</span>
+                        <span className={`text-xs font-medium ${scoreText} opacity-70`}>{scoreLabel}</span>
+                      </div>
+                    </div>
+                    <div className="text-right space-y-0.5">
+                      {data.copyMetrics && (
+                        <>
+                          <p className="text-[9px] text-gray-500">
+                            PF <span className="text-gray-400 font-medium">{data.copyMetrics.profitFactor30d.toFixed(1)}</span>
+                            {' / '}
+                            Calmar <span className="text-gray-400 font-medium">{data.copyMetrics.calmarRatio.toFixed(1)}</span>
+                          </p>
+                          <p className="text-[9px] text-gray-500">
+                            Weekly <span className="text-gray-400 font-medium">{data.copyMetrics.weeklyProfitRate.toFixed(0)}%</span>
+                            {' / '}
+                            Edge <span className={`font-medium ${data.copyMetrics.edgeTrend >= 1 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {data.copyMetrics.edgeTrend.toFixed(2)}x
+                            </span>
+                          </p>
+                          <p className="text-[9px] text-gray-500">
+                            Diff WR <span className="text-gray-400 font-medium">{data.copyMetrics.diffWinRate30d.toFixed(1)}%</span>
+                            {' / '}
+                            <span className="text-gray-400 font-medium">{data.copyMetrics.avgTradesPerDay.toFixed(1)}</span>/d
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+
             {/* Metrics Grid */}
             <div className="grid grid-cols-2 gap-px bg-white/5 border-b border-white/5">
               <div className="bg-[var(--background)] px-4 py-3">

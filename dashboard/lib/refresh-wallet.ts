@@ -177,7 +177,17 @@ function calculatePeriodMetrics(
   }
   const winRate = tradeCount > 0 ? (wins / tradeCount) * 100 : 0
 
-  const roi = volume > 0 ? (pnl / volume) * 100 : 0
+  // ROI = Period PnL / Starting Balance
+  // Starting balance estimated as current_balance - period_pnl
+  const estimatedStart = currentBalance - pnl
+  let roi: number
+  if (estimatedStart > 0) {
+    roi = (pnl / estimatedStart) * 100
+  } else if (pnl > 0 && volume > 0) {
+    roi = (pnl / volume) * 100
+  } else {
+    roi = 0
+  }
   const initialBalance = Math.max(currentBalance - pnl, currentBalance, 1)
   const drawdownResult = calculateMaxDrawdown(periodPositions, initialBalance)
 
@@ -220,7 +230,18 @@ function calculatePolymarketMetrics(
 
   const totalPnl = realizedPnl + unrealizedPnl
   const tradeCount = winCount + lossCount
-  const roiAll = totalBoughtResolved > 0 ? (totalPnl / totalBoughtResolved) * 100 : 0
+
+  // ROI = Total PnL / Initial Capital
+  // Initial Capital estimated as current_balance - total_pnl (what was deposited)
+  const initialCapital = currentBalance - totalPnl
+  let roiAll: number
+  if (initialCapital > 0) {
+    roiAll = (totalPnl / initialCapital) * 100
+  } else if (totalPnl > 0 && totalBoughtResolved > 0) {
+    roiAll = (totalPnl / totalBoughtResolved) * 100
+  } else {
+    roiAll = 0
+  }
   const winRateAll = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0
   const drawdownBase = Math.max(currentBalance - totalPnl, currentBalance, 1)
   const maxDrawdownResult = calculateMaxDrawdown(closedPositions, drawdownBase)
@@ -239,6 +260,198 @@ function calculatePolymarketMetrics(
     maxDrawdown: maxDrawdownResult.percent,
     maxDrawdownAmount: maxDrawdownResult.amount,
   }
+}
+
+// --- Copy score calculation helpers ---
+
+function calculateProfitFactor(
+  closedPositions: { conditionId: string; realizedPnl: number; resolvedAt?: string }[],
+  days?: number
+): number {
+  const cutoffMs = days ? Date.now() - days * 24 * 60 * 60 * 1000 : 0
+  const positions = days
+    ? closedPositions.filter(p => p.resolvedAt ? new Date(p.resolvedAt).getTime() >= cutoffMs : false)
+    : closedPositions
+
+  const marketPnl = new Map<string, number>()
+  for (const p of positions) {
+    const cid = p.conditionId || ''
+    marketPnl.set(cid, (marketPnl.get(cid) || 0) + p.realizedPnl)
+  }
+
+  let grossWins = 0
+  let grossLosses = 0
+  for (const pnl of marketPnl.values()) {
+    if (pnl > 0) grossWins += pnl
+    else grossLosses += Math.abs(pnl)
+  }
+
+  if (grossLosses > 0) return Math.round((grossWins / grossLosses) * 100) / 100
+  if (grossWins > 0) return 10.0
+  return 0
+}
+
+function calculateDiffWinRate(
+  closedPositions: { conditionId: string; avgPrice: number; realizedPnl: number; resolvedAt?: string }[],
+  days?: number
+): number {
+  const cutoffMs = days ? Date.now() - days * 24 * 60 * 60 * 1000 : 0
+  const positions = days
+    ? closedPositions.filter(p => p.resolvedAt ? new Date(p.resolvedAt).getTime() >= cutoffMs : false)
+    : closedPositions
+
+  if (positions.length === 0) return 0
+
+  const marketPnl = new Map<string, number>()
+  const marketPrices = new Map<string, number[]>()
+  for (const p of positions) {
+    const cid = p.conditionId || ''
+    marketPnl.set(cid, (marketPnl.get(cid) || 0) + p.realizedPnl)
+    const prices = marketPrices.get(cid) || []
+    prices.push(Math.max(0.01, Math.min(p.avgPrice, 0.99)))
+    marketPrices.set(cid, prices)
+  }
+
+  let totalDifficulty = 0
+  let winsDifficulty = 0
+  for (const [cid, prices] of marketPrices) {
+    const avgEntry = prices.reduce((a, b) => a + b, 0) / prices.length
+    const difficulty = 1 - avgEntry
+    totalDifficulty += difficulty
+    if ((marketPnl.get(cid) || 0) > 0) winsDifficulty += difficulty
+  }
+
+  if (totalDifficulty === 0) return 0
+  return Math.round((winsDifficulty / totalDifficulty) * 10000) / 100
+}
+
+function calculateWeeklyProfitRate(
+  closedPositions: { realizedPnl: number; resolvedAt?: string }[]
+): number {
+  const weekPnl = new Map<string, number>()
+  for (const p of closedPositions) {
+    if (!p.resolvedAt) continue
+    const dt = new Date(p.resolvedAt)
+    if (isNaN(dt.getTime())) continue
+    const startOfYear = new Date(dt.getFullYear(), 0, 1)
+    const weekNum = Math.ceil(((dt.getTime() - startOfYear.getTime()) / 86400000 + startOfYear.getDay() + 1) / 7)
+    const key = `${dt.getFullYear()}-W${String(weekNum).padStart(2, '0')}`
+    weekPnl.set(key, (weekPnl.get(key) || 0) + p.realizedPnl)
+  }
+
+  if (weekPnl.size === 0) return 0
+  const profitableWeeks = Array.from(weekPnl.values()).filter(v => v > 0).length
+  return Math.round((profitableWeeks / weekPnl.size) * 10000) / 100
+}
+
+function calculateAvgTradesPerDay(
+  closedPositions: { conditionId: string; resolvedAt?: string }[]
+): number {
+  const activeDays = new Set<string>()
+  for (const p of closedPositions) {
+    if (!p.resolvedAt) continue
+    const dt = new Date(p.resolvedAt)
+    if (isNaN(dt.getTime())) continue
+    activeDays.add(dt.toISOString().slice(0, 10))
+  }
+  if (activeDays.size === 0) return 0
+  const uniqueMarkets = new Set(closedPositions.map(p => p.conditionId).filter(Boolean)).size
+  return Math.round((uniqueMarkets / activeDays.size) * 100) / 100
+}
+
+function calculateMedianProfitPct(
+  closedPositions: { size: number; avgPrice: number; realizedPnl: number }[]
+): number | null {
+  const profitPcts: number[] = []
+
+  for (const pos of closedPositions) {
+    const initialValue = pos.size * pos.avgPrice
+    if (initialValue <= 0) continue
+    const pct = (pos.realizedPnl / initialValue) * 100
+    profitPcts.push(pct)
+  }
+
+  if (profitPcts.length < 3) return null
+
+  profitPcts.sort((a, b) => a - b)
+  const n = profitPcts.length
+
+  const interpolate = (sortedData: number[], fracIdx: number): number => {
+    const lower = Math.floor(fracIdx)
+    const upper = Math.min(lower + 1, sortedData.length - 1)
+    const weight = fracIdx - lower
+    return sortedData[lower] * (1 - weight) + sortedData[upper] * weight
+  }
+
+  const q1 = interpolate(profitPcts, n * 0.25)
+  const q3 = interpolate(profitPcts, n * 0.75)
+  const iqr = q3 - q1
+  const lowerBound = q1 - 1.5 * iqr
+  const upperBound = q3 + 1.5 * iqr
+
+  const filtered = profitPcts.filter(p => p >= lowerBound && p <= upperBound)
+  if (filtered.length === 0) return null
+
+  filtered.sort((a, b) => a - b)
+  const mid = Math.floor(filtered.length / 2)
+  const median = filtered.length % 2 === 0
+    ? (filtered[mid - 1] + filtered[mid]) / 2
+    : filtered[mid]
+
+  return Math.round(median * 100) / 100
+}
+
+function calculateCopyScore(params: {
+  profitFactor30d: number
+  roi30d: number
+  drawdown30d: number
+  diffWinRate30d: number
+  weeklyProfitRate: number
+  roi7d: number
+  tradeCountAll: number
+  medianProfitPct: number | null
+}): number {
+  const { profitFactor30d, roi30d, drawdown30d, diffWinRate30d, weeklyProfitRate, roi7d, tradeCountAll, medianProfitPct } = params
+
+  if (tradeCountAll < 20) return 0
+  if (profitFactor30d < 1.0) return 0
+  if (medianProfitPct == null || medianProfitPct < 5.0) return 0
+
+  const mppScore = Math.min(medianProfitPct / 40.0, 1.0)
+  const pfScore = Math.min(profitFactor30d / 3.0, 1.0)
+
+  let calmar: number
+  if (drawdown30d > 0) calmar = roi30d / drawdown30d
+  else if (roi30d > 0) calmar = 5.0
+  else calmar = 0
+  const calmarScore = Math.min(Math.max(calmar, 0) / 5.0, 1.0)
+
+  const dwrScore = Math.min(diffWinRate30d / 100.0, 1.0)
+  const wprScore = Math.min(weeklyProfitRate / 100.0, 1.0)
+
+  let edgeScore: number
+  if (roi30d > 0) {
+    const ratio = roi7d / roi30d
+    if (ratio >= 2.0) edgeScore = 1.0
+    else if (ratio >= 1.0) edgeScore = 0.5 + (ratio - 1.0) * 0.5
+    else edgeScore = Math.max(ratio * 0.5, 0)
+  } else if (roi7d > 0) {
+    edgeScore = 0.8
+  } else {
+    edgeScore = 0
+  }
+
+  const rawScore = (
+    mppScore * 0.25 +
+    pfScore * 0.15 +
+    calmarScore * 0.10 +
+    dwrScore * 0.15 +
+    wprScore * 0.20 +
+    edgeScore * 0.15
+  ) * 100
+
+  const confidence = Math.min(1.0, tradeCountAll / 80.0)
+  return Math.min(Math.round(rawScore * confidence), 100)
 }
 
 // --- Per-wallet refresh function ---
@@ -302,6 +515,25 @@ export async function refreshOneWallet(
     const categoryMap = await fetchEventCategories(allEventSlugs)
     const topCategory = getTopCategory(allEventSlugs, categoryMap)
 
+    // Calculate copy-trade metrics
+    const profitFactor30d = calculateProfitFactor(closedPositions, 30)
+    const profitFactorAll = calculateProfitFactor(closedPositions)
+    const diffWinRate30d = calculateDiffWinRate(closedPositions, 30)
+    const diffWinRateAll = calculateDiffWinRate(closedPositions)
+    const weeklyProfitRate = calculateWeeklyProfitRate(closedPositions)
+    const avgTradesPerDay = calculateAvgTradesPerDay(closedPositions)
+    const medianProfitPct = calculateMedianProfitPct(closedPositions)
+    const copyScore = calculateCopyScore({
+      profitFactor30d,
+      roi30d: metrics30d.roi,
+      drawdown30d: metrics30d.drawdown || 0,
+      diffWinRate30d,
+      weeklyProfitRate,
+      roi7d: metrics7d.roi,
+      tradeCountAll: polymetrics.tradeCount,
+      medianProfitPct,
+    })
+
     const { error: updateError } = await supabase.from('wallets').update({
       username: (profile as any).name || (profile as any).pseudonym || wallet.username,
       account_created_at: (profile as any).createdAt,
@@ -337,6 +569,15 @@ export async function refreshOneWallet(
       drawdown_all: metricsAll.drawdown,
       drawdown_amount_all: metricsAll.drawdownAmount,
       ...(topCategory && { top_category: topCategory }),
+      // Copy-trade metrics
+      profit_factor_30d: profitFactor30d,
+      profit_factor_all: profitFactorAll,
+      diff_win_rate_30d: diffWinRate30d,
+      diff_win_rate_all: diffWinRateAll,
+      weekly_profit_rate: weeklyProfitRate,
+      copy_score: copyScore,
+      avg_trades_per_day: avgTradesPerDay,
+      median_profit_pct: medianProfitPct,
       metrics_updated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('address', wallet.address)

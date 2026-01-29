@@ -117,7 +117,11 @@ function LiveFeedContent() {
       {/* Split Panel Layout */}
       <div className="flex-1 flex gap-3 min-h-0">
         {/* Left: Trade Feed */}
-        <div className={`transition-all duration-200 ${selectedAddress ? 'w-[60%]' : 'w-full xl:w-[60%]'}`}>
+        <div className={`transition-all duration-200 ${
+          selectedAddress
+            ? 'hidden md:block md:w-[60%]'
+            : 'w-full md:w-[60%] xl:w-[60%]'
+        }`}>
           <TradeTable
             trades={trades}
             selectedAddress={selectedAddress}
@@ -126,8 +130,10 @@ function LiveFeedContent() {
         </div>
 
         {/* Right: Trader Detail or Empty State */}
-        <div className={`min-w-[340px] transition-all duration-200 ${
-          selectedAddress ? 'w-[40%]' : 'hidden xl:block w-[40%]'
+        <div className={`transition-all duration-200 ${
+          selectedAddress
+            ? 'w-full md:w-[40%] min-w-0 md:min-w-[340px]'
+            : 'hidden xl:block w-[40%] min-w-[340px]'
         }`}>
           {selectedAddress ? (
             <TraderDetailPanel

@@ -4,6 +4,15 @@ import { supabase, Wallet, WalletSource } from '@/lib/supabase'
 // Valid columns for sorting
 const VALID_SORT_COLUMNS = [
   'balance',
+  // Copy-trade score (primary ranking)
+  'copy_score',
+  'profit_factor_30d',
+  'profit_factor_all',
+  'diff_win_rate_30d',
+  'diff_win_rate_all',
+  'weekly_profit_rate',
+  'avg_trades_per_day',
+  'median_profit_pct',
   // Period metrics (7d/30d/all)
   'win_rate_7d',
   'win_rate_30d',
@@ -53,6 +62,7 @@ export async function GET(request: NextRequest) {
     const sortAsc = searchParams.get('sortDir') === 'asc'
 
     const search = searchParams.get('search')?.toLowerCase().trim() || ''
+    const includeStats = searchParams.get('includeStats') === 'true'
 
     // Cursor parameters (null = first page)
     const cursorSortValue = searchParams.get('cursorSortValue') || null
@@ -61,10 +71,10 @@ export async function GET(request: NextRequest) {
     // Validate sort column
     const safeSortBy = VALID_SORT_COLUMNS.includes(sortBy) ? sortBy : 'balance'
 
-    // Build query with exact count
+    // Build query with estimated count (uses planner estimate for large tables, much faster)
     let query = supabase
       .from('wallets')
-      .select('*', { count: 'exact' })
+      .select('*', { count: 'estimated' })
 
     // Server-side search by username or address
     if (search) {
@@ -125,7 +135,13 @@ export async function GET(request: NextRequest) {
       .order('address', { ascending: sortAsc })
       .limit(limit)
 
-    const { data, error, count } = await query
+    // Run wallet query and optional stats query in parallel
+    const queryPromise = query
+    const statsPromise = includeStats
+      ? Promise.resolve(supabase.rpc('get_wallet_stats')).then(r => r.data).catch(() => null)
+      : Promise.resolve(null)
+
+    const [{ data, error, count }, statsData] = await Promise.all([queryPromise, statsPromise])
 
     if (error) {
       console.error('Error fetching wallets:', error)
@@ -166,6 +182,15 @@ export async function GET(request: NextRequest) {
       total_volume: wallet.total_volume || 0,
       total_trades: wallet.total_trades || 0,
       top_category: wallet.top_category || '',
+      // Copy-trade metrics
+      profit_factor_30d: wallet.profit_factor_30d || 0,
+      profit_factor_all: wallet.profit_factor_all || 0,
+      diff_win_rate_30d: wallet.diff_win_rate_30d || 0,
+      diff_win_rate_all: wallet.diff_win_rate_all || 0,
+      weekly_profit_rate: wallet.weekly_profit_rate || 0,
+      copy_score: wallet.copy_score || 0,
+      avg_trades_per_day: wallet.avg_trades_per_day || 0,
+      is_bot: wallet.is_bot || false,
     }))
 
     // Build next cursor from the last item
@@ -180,6 +205,7 @@ export async function GET(request: NextRequest) {
       totalEstimate: count || 0,
       nextCursor,
       hasMore: wallets.length === limit,
+      ...(statsData && { stats: statsData }),
     })
   } catch (error) {
     console.error('Error in wallets API:', error)

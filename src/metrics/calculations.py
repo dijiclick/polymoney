@@ -40,12 +40,14 @@ class MetricsCalculator:
     @staticmethod
     def calculate_roi(
         positions: list[dict],
-        closed_positions: list[dict]
+        closed_positions: list[dict],
+        current_balance: float = 0
     ) -> dict:
         """
         Calculate ROI from positions.
 
-        ROI = (Total Returns - Total Invested) / Total Invested * 100
+        Account ROI = Total PnL / Initial Capital * 100
+        Initial Capital = Current Balance - Total PnL
         """
         # Current positions
         current_value = sum(float(p.get("currentValue", 0)) for p in positions)
@@ -59,7 +61,8 @@ class MetricsCalculator:
         )
 
         total_invested = initial_value + closed_invested
-        total_returns = current_value + realized_pnl + closed_invested
+        unrealized_pnl = current_value - initial_value
+        total_pnl = realized_pnl + unrealized_pnl
 
         if total_invested == 0:
             return {
@@ -70,13 +73,24 @@ class MetricsCalculator:
                 "realized_pnl": 0
             }
 
-        roi = ((total_returns - total_invested) / total_invested) * 100
+        # Account-level ROI: PnL / Initial Capital
+        initial_capital = current_balance - total_pnl
+        if initial_capital > 0:
+            roi = (total_pnl / initial_capital) * 100
+        elif total_pnl > 0 and total_invested > 0:
+            roi = (total_pnl / total_invested) * 100  # Fallback: profitable but withdrew
+        elif total_pnl < 0 and current_balance == 0:
+            roi = -100.0
+        else:
+            roi = 0
+
+        total_returns = current_value + realized_pnl + closed_invested
 
         return {
             "roi_percent": roi,
             "total_invested": total_invested,
             "total_returns": total_returns,
-            "unrealized_pnl": current_value - initial_value,
+            "unrealized_pnl": unrealized_pnl,
             "realized_pnl": realized_pnl
         }
 

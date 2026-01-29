@@ -4,6 +4,7 @@ import Link from 'next/link'
 import ThemeProvider from '@/components/ThemeProvider'
 import ThemeToggle from '@/components/ThemeToggle'
 import ServerStatusButton from '@/components/ServerStatusButton'
+import MobileNav from '@/components/MobileNav'
 import './globals.css'
 
 const inter = Inter({ subsets: ['latin'] })
@@ -27,9 +28,9 @@ export default function RootLayout({
         <ThemeProvider>
           {/* Navigation */}
           <nav className="sticky top-0 z-50 backdrop-blur-xl" style={{ background: 'var(--bg-nav)', borderBottom: '1px solid var(--border-nav)' }}>
-            <div className="max-w-[1600px] mx-auto px-6">
+            <div className="max-w-[1600px] mx-auto px-3 md:px-6">
               <div className="flex items-center justify-between h-14">
-                <div className="flex items-center gap-8">
+                <div className="flex items-center gap-4 md:gap-8">
                   <Link href="/wallets" className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
                       <svg className="w-[18px] h-[18px]" viewBox="0 0 32 32" fill="none">
@@ -44,7 +45,7 @@ export default function RootLayout({
                     </span>
                   </Link>
 
-                  <div className="flex items-center gap-1">
+                  <div className="hidden md:flex items-center gap-1">
                     <Link
                       href="/wallets"
                       className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-all"
@@ -82,15 +83,18 @@ export default function RootLayout({
                 </div>
 
                 <div className="flex items-center gap-1">
-                  <ServerStatusButton />
-                  <ThemeToggle />
+                  <div className="hidden md:flex items-center gap-1">
+                    <ServerStatusButton />
+                    <ThemeToggle />
+                  </div>
+                  <MobileNav />
                 </div>
               </div>
             </div>
           </nav>
 
           {/* Main content */}
-          <main className="max-w-[1600px] mx-auto px-6 py-6">
+          <main className="max-w-[1600px] mx-auto px-3 md:px-6 py-3 md:py-6">
             {children}
           </main>
 
