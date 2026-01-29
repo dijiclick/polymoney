@@ -556,13 +556,12 @@ export async function refreshOneWallet(
       drawdown_all: metricsAll.drawdown,
       drawdown_amount_all: metricsAll.drawdownAmount,
       top_category: topCategory || null,
-      // Copy-trade metrics
+      // Copy-trade metrics (copy_score is only set by Python sync — not overwritten here)
       profit_factor_30d: profitFactor30d,
       profit_factor_all: profitFactorAll,
       diff_win_rate_30d: diffWinRate30d,
       diff_win_rate_all: diffWinRateAll,
       weekly_profit_rate: weeklyProfitRate,
-      copy_score: copyScore,
       avg_trades_per_day: avgTradesPerDay,
       median_profit_pct: medianProfitPct,
       metrics_updated_at: new Date().toISOString(),

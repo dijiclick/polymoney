@@ -253,17 +253,21 @@ export async function GET(
     const weeklyProfitRate = calculateWeeklyProfitRate(closedPositions)
     const avgTradesPerDay = calculateAvgTradesPerDay(closedPositions)
     const medianProfitPct = calculateMedianProfitPct(closedPositions)
-    const copyScore = calculateCopyScore({
-      profitFactor30d,
-      roi30d: metrics30d.roi,
-      drawdown30d: metrics30d.drawdown || 0,
-      diffWinRate30d,
-      weeklyProfitRate,
-      roi7d: metrics7d.roi,
-      tradeCountAll: polymarketMetrics.tradeCount,
-      medianProfitPct,
-      avgTradesPerDay,
-    })
+    // Use DB cached copy_score when available (authoritative, from full Python sync).
+    // Only recalculate for wallets not yet in DB.
+    const copyScore = dbWallet?.copy_score != null
+      ? dbWallet.copy_score
+      : calculateCopyScore({
+          profitFactor30d,
+          roi30d: metrics30d.roi,
+          drawdown30d: metrics30d.drawdown || 0,
+          diffWinRate30d,
+          weeklyProfitRate,
+          roi7d: metrics7d.roi,
+          tradeCountAll: polymarketMetrics.tradeCount,
+          medianProfitPct,
+          avgTradesPerDay,
+        })
 
     const copyMetrics = {
       profitFactor30d,
@@ -1119,14 +1123,13 @@ async function updateWalletMetrics(
       total_volume: polymarketMetrics.totalBought,
       total_trades: polymarketMetrics.tradeCount,
       ...(topCategory && { top_category: topCategory }),
-      // Copy-trade metrics
+      // Copy-trade metrics (copy_score is only set by Python sync — not overwritten here)
       ...(copyMetrics && {
         profit_factor_30d: copyMetrics.profitFactor30d,
         profit_factor_all: copyMetrics.profitFactorAll,
         diff_win_rate_30d: copyMetrics.diffWinRate30d,
         diff_win_rate_all: copyMetrics.diffWinRateAll,
         weekly_profit_rate: copyMetrics.weeklyProfitRate,
-        copy_score: copyMetrics.copyScore,
         avg_trades_per_day: copyMetrics.avgTradesPerDay,
         median_profit_pct: copyMetrics.medianProfitPct,
       }),
