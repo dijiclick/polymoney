@@ -69,8 +69,6 @@ class SupabaseClient:
 
         if profile == "copytrade":
             query = query.gte("copytrade_score", 60).order("copytrade_score", desc=True)
-        elif profile == "bot":
-            query = query.gte("bot_score", 60).order("bot_score", desc=True)
         elif profile == "insider":
             query = query.gte("insider_score", 60).order("insider_score", desc=True)
         else:

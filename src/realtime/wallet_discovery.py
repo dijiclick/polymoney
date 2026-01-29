@@ -268,7 +268,6 @@ class WalletDiscoveryProcessor:
             self._api.get_closed_positions(address),
             self._api.get_total_balance(address),
             self._api.get_profile(address),
-            self._api.get_activity(address),
         ]
 
         results = await asyncio.gather(*api_tasks, return_exceptions=True)
@@ -280,7 +279,6 @@ class WalletDiscoveryProcessor:
         else:
             portfolio_value, usdc_cash = 0, 0
         profile = results[3] if not isinstance(results[3], Exception) else {}
-        activity = results[4] if not isinstance(results[4], Exception) else []
 
         if not positions and not closed_positions:
             logger.debug(f"No positions found for {address[:10]}...")
@@ -318,9 +316,6 @@ class WalletDiscoveryProcessor:
         avg_trades_per_day = self._calculate_avg_trades_per_day(closed_positions)
         median_profit_pct = self._calculate_median_profit_pct(closed_positions)
 
-        # Bot detection from activity trades
-        is_bot = self._calculate_is_bot(activity)
-
         # Top category from event slugs
         all_event_slugs = []
         for p in positions:
@@ -343,6 +338,7 @@ class WalletDiscoveryProcessor:
             roi_7d=metrics_7d["roi"],
             trade_count_all=metrics.get("trade_count", 0),
             median_profit_pct=median_profit_pct,
+            avg_trades_per_day=avg_trades_per_day,
         )
 
         wallet_data = {
@@ -395,7 +391,6 @@ class WalletDiscoveryProcessor:
             "weekly_profit_rate": weekly_profit_rate,
             "copy_score": copy_score,
             "avg_trades_per_day": avg_trades_per_day,
-            "is_bot": is_bot,
             "top_category": top_category,
             "median_profit_pct": median_profit_pct,
             "metrics_updated_at": datetime.now(timezone.utc).isoformat(),
@@ -984,207 +979,48 @@ class WalletDiscoveryProcessor:
         roi_7d: float,
         trade_count_all: int,
         median_profit_pct: float | None = None,
+        avg_trades_per_day: float | None = None,
     ) -> int:
         """
         Calculate composite copy-trade score (0-100).
 
-        Optimized for small-bankroll copy-trading ($50/trade).
-        Traders with tiny per-trade % gains are penalized because
-        those gains don't translate to meaningful profit at small sizes.
-
-        Components:
-        - Median Profit % (25%): per-trade ROI — the core small-bettor metric
-        - Profit Factor (15%): normalized to 0-1 with cap at 3.0
-        - Calmar Ratio (10%): ROI / drawdown, normalized with cap at 5.0
-        - Difficulty-Weighted Win Rate (15%): already 0-100
-        - Weekly Profit Rate (20%): already 0-100
-        - Edge Trend (15%): roi_7d / roi_30d ratio, normalized
+        3-pillar formula matching the TypeScript implementation:
+        - Edge (40%): Profit Factor normalized 1.2-3.0
+        - Consistency (35%): Weekly Profit Rate normalized 40%-85%
+        - Risk (25%): Inverse drawdown, DD 5%-25%
         """
-        # Hard disqualifiers
-        if trade_count_all < 20:
+        # Hard filters — all must pass or score = 0
+        if trade_count_all < 30:
             return 0
-        if profit_factor_30d < 1.0:
+        if profit_factor_30d < 1.2:
             return 0
-        # Median profit must be at least 5% per trade to be worth copying
         if median_profit_pct is None or median_profit_pct < 5.0:
             return 0
+        if avg_trades_per_day is not None and (avg_trades_per_day < 2 or avg_trades_per_day > 15):
+            return 0
 
-        # 1. Median Profit % score (0-1, capped at 40% = perfect)
-        #    At $50/trade: 5%=$2.50 (floor), 20%=$10, 40%=$20 (perfect)
-        mpp_score = min(median_profit_pct / 40.0, 1.0)
+        # Pillar 1: Edge (40%) — Profit Factor 1.2 → 0, 3.0+ → 1.0
+        edge_score = min((profit_factor_30d - 1.2) / (3.0 - 1.2), 1.0)
 
-        # 2. Profit Factor score (0-1, capped at 3.0 = perfect)
-        pf_score = min(profit_factor_30d / 3.0, 1.0)
+        # Pillar 2: Consistency (35%) — Weekly profit rate 40% → 0, 85%+ → 1.0
+        consistency_score = min(max((weekly_profit_rate - 40) / (85 - 40), 0), 1.0)
 
-        # 3. Calmar Ratio score (0-1, capped at 5.0 = perfect)
-        if drawdown_30d > 0:
-            calmar = roi_30d / drawdown_30d
-        elif roi_30d > 0:
-            calmar = 5.0  # No drawdown + positive ROI = perfect
+        # Pillar 3: Risk (25%) — Inverse drawdown: DD 5% → 1.0, DD 25%+ → 0
+        if drawdown_30d <= 0:
+            risk_score = 1.0
         else:
-            calmar = 0
-        calmar_score = min(max(calmar, 0) / 5.0, 1.0)
-
-        # 4. Difficulty-weighted win rate (0-1)
-        dwr_score = min(diff_win_rate_30d / 100.0, 1.0)
-
-        # 5. Weekly profit rate (0-1)
-        wpr_score = min(weekly_profit_rate / 100.0, 1.0)
-
-        # 6. Edge trend (0-1)
-        if roi_30d > 0:
-            ratio = roi_7d / roi_30d
-            if ratio >= 2.0:
-                edge_score = 1.0
-            elif ratio >= 1.0:
-                edge_score = 0.5 + (ratio - 1.0) * 0.5
-            else:
-                edge_score = max(ratio * 0.5, 0)
-        elif roi_7d > 0:
-            edge_score = 0.8  # Positive recent, bad past = improving
-        else:
-            edge_score = 0
+            risk_score = min(max((25 - drawdown_30d) / (25 - 5), 0), 1.0)
 
         # Weighted sum
         raw_score = (
-            mpp_score * 0.25 +
-            pf_score * 0.15 +
-            calmar_score * 0.10 +
-            dwr_score * 0.15 +
-            wpr_score * 0.20 +
-            edge_score * 0.15
+            edge_score * 0.40 +
+            consistency_score * 0.35 +
+            risk_score * 0.25
         ) * 100
 
-        # Confidence multiplier: discount low-sample wallets
-        confidence = min(1.0, trade_count_all / 80.0)
-        final_score = raw_score * confidence
-
-        return min(round(final_score), 100)
-
-    @staticmethod
-    def _calculate_is_bot(activity: list[dict]) -> bool:
-        """
-        Calculate bot likelihood from activity trades.
-        Returns True if bot score >= 60.
-
-        Uses 5 indicators matching the TypeScript implementation:
-        - Trade frequency (0-25 pts)
-        - Low time variance (0-25 pts)
-        - Night trading ratio (0-20 pts)
-        - Consistent position sizing (0-15 pts)
-        - Short hold duration (0-15 pts)
-        """
-        import math
-
-        # Filter to only TRADE type activities
-        trades = [a for a in activity if a.get("type") == "TRADE"]
-        if len(trades) < 5:
-            return False
-
-        score = 0
-
-        # Extract timestamps and values
-        timestamps = []
-        usd_values = []
-        for t in trades:
-            ts = t.get("timestamp")
-            if ts is not None:
-                try:
-                    timestamps.append(int(ts) if not isinstance(ts, int) else ts)
-                except (ValueError, TypeError):
-                    pass
-            usd = t.get("usdcSize")
-            if usd is not None:
-                try:
-                    val = float(usd)
-                    if val > 0:
-                        usd_values.append(val)
-                except (ValueError, TypeError):
-                    pass
-
-        # 1. Trade frequency (trades per active day)
-        trade_days = set()
-        hours_of_day = []
-        for ts in timestamps:
-            if ts > 0:
-                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-                trade_days.add(dt.strftime("%Y-%m-%d"))
-                hours_of_day.append(dt.hour + dt.minute / 60)
-
-        if trade_days:
-            freq = len(trades) / len(trade_days)
-            if freq >= 50:
-                score += 25
-            elif freq >= 20:
-                score += 20
-            elif freq >= 10:
-                score += 15
-            elif freq >= 5:
-                score += 8
-
-        # 2. Low time variance (circular variance of hour-of-day)
-        if len(hours_of_day) >= 5:
-            sin_sum = sum(math.sin((h / 24) * 2 * math.pi) for h in hours_of_day)
-            cos_sum = sum(math.cos((h / 24) * 2 * math.pi) for h in hours_of_day)
-            n = len(hours_of_day)
-            r = math.sqrt((sin_sum / n) ** 2 + (cos_sum / n) ** 2)
-            circular_variance_hours = (1 - r) * 12
-            if circular_variance_hours <= 0.5:
-                score += 25
-            elif circular_variance_hours <= 1:
-                score += 20
-            elif circular_variance_hours <= 2:
-                score += 15
-            elif circular_variance_hours <= 4:
-                score += 8
-
-        # 3. Night trading ratio (% between 1-6 AM UTC)
-        if hours_of_day:
-            night_trades = sum(1 for h in hours_of_day if 1 <= h < 6)
-            night_ratio = (night_trades / len(hours_of_day)) * 100
-            if night_ratio >= 40:
-                score += 20
-            elif night_ratio >= 30:
-                score += 15
-            elif night_ratio >= 20:
-                score += 10
-            elif night_ratio >= 10:
-                score += 5
-
-        # 4. Consistent position sizing (coefficient of variation)
-        if len(usd_values) >= 5:
-            mean_size = sum(usd_values) / len(usd_values)
-            if mean_size > 0:
-                std_size = math.sqrt(
-                    sum((s - mean_size) ** 2 for s in usd_values) / len(usd_values)
-                )
-                cv = (std_size / mean_size) * 100
-                if cv <= 10:
-                    score += 15
-                elif cv <= 20:
-                    score += 12
-                elif cv <= 30:
-                    score += 8
-                elif cv <= 50:
-                    score += 4
-
-        # 5. Short hold duration (avg time between consecutive trades)
-        sorted_ts = sorted(ts for ts in timestamps if ts > 0)
-        if len(sorted_ts) >= 2:
-            total_interval = sum(
-                sorted_ts[i] - sorted_ts[i - 1] for i in range(1, len(sorted_ts))
-            )
-            avg_interval_hours = (total_interval / (len(sorted_ts) - 1)) / 3600
-            if avg_interval_hours <= 2:
-                score += 15
-            elif avg_interval_hours <= 6:
-                score += 12
-            elif avg_interval_hours <= 12:
-                score += 8
-            elif avg_interval_hours <= 24:
-                score += 4
-
-        return min(100, score) >= 60
+        # Confidence multiplier
+        confidence = min(1.0, trade_count_all / 50)
+        return min(round(raw_score * confidence), 100)
 
     async def _fetch_top_category(self, event_slugs: list[str]) -> str | None:
         """

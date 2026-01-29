@@ -127,9 +127,6 @@ export interface TraderProfileResponse {
     calmarRatio: number
   }
 
-  // Bot detection
-  isBot?: boolean
-
   // Metadata
   isNewlyFetched: boolean
   lastUpdatedAt?: string

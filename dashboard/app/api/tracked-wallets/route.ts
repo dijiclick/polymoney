@@ -94,7 +94,6 @@ export async function GET() {
         weekly_profit_rate: w?.weekly_profit_rate || 0,
         avg_trades_per_day: w?.avg_trades_per_day || 0,
         median_profit_pct: w?.median_profit_pct ?? null,
-        is_bot: w?.is_bot || false,
         metrics_updated_at: w?.metrics_updated_at,
         created_at: w?.created_at || t.added_at,
         updated_at: w?.updated_at || t.added_at,

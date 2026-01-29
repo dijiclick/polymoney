@@ -3,12 +3,10 @@ import { createClient } from '@supabase/supabase-js'
 import {
   getPositions,
   getClosedPositions,
-  getActivity,
   getProfile,
   getPortfolioValue,
   parsePositions,
   parseClosedPositions,
-  parseTrades,
   isValidEthAddress,
   fetchEventCategories,
   getTopCategory,
@@ -46,7 +44,7 @@ export async function GET(
   const refreshParam = request.nextUrl.searchParams.get('refresh')
   const forceRefresh = refreshParam === 'true'
   const cacheOnly = refreshParam === 'false'
-  // Lite mode: skip heavy operations (activity/bot detection, event categories)
+  // Lite mode: skip heavy operations (event categories)
   // Used by the modal for fast position loading (~1-2s vs 5-8s)
   const liteMode = request.nextUrl.searchParams.get('lite') === 'true'
 
@@ -149,7 +147,6 @@ export async function GET(
           ? Math.round(((dbWallet.roi_30d || 0) / dbWallet.drawdown_30d) * 100) / 100
           : (dbWallet.roi_30d || 0) > 0 ? 5.0 : 0,
       },
-      isBot: dbWallet.is_bot || false,
       scores: undefined,
       isNewlyFetched: false,
       lastUpdatedAt: dbWallet.metrics_updated_at,
@@ -160,13 +157,12 @@ export async function GET(
   }
 
   // 5. Fetch live data from Polymarket API
-  // Lite mode: only fetch positions + portfolio value (skip activity, profile, categories)
-  // Full mode: fetch everything including activity for bot detection and categories
+  // Lite mode: only fetch positions + portfolio value (skip profile, categories)
+  // Full mode: fetch everything including profile and categories
   try {
-    const [rawPositions, rawClosedPositions, rawActivity, profile, portfolioValue] = await Promise.all([
+    const [rawPositions, rawClosedPositions, profile, portfolioValue] = await Promise.all([
       getPositions(address).catch(() => []),
       getClosedPositions(address).catch(() => []),
-      liteMode ? Promise.resolve([]) : getActivity(address, 5000, 90).catch(() => []),
       liteMode ? Promise.resolve(dbWallet ? { name: dbWallet.username } : {}) : getProfile(address).catch(() => ({})),
       getPortfolioValue(address).catch(() => 0),
     ])
@@ -233,14 +229,6 @@ export async function GET(
     const metrics30d = calculatePeriodMetrics(closedPositions, 30, currentBalance)
     const metricsAll = calculatePeriodMetrics(closedPositions, 36500, currentBalance)
 
-    // Bot detection from activity trades (skip in lite mode, use cached value)
-    let isBot = dbWallet?.is_bot || false
-    if (!liteMode) {
-      const activityTrades = parseTrades(rawActivity)
-      const botScore = calculateBotScore(activityTrades)
-      isBot = botScore >= 60
-    }
-
     // Count unique markets
     const uniqueClosedMarkets = new Set(closedPositions.map(p => p.conditionId).filter(Boolean)).size
     const uniqueOpenMarkets = new Set(openPositions.map(p => p.conditionId).filter(Boolean)).size
@@ -275,7 +263,6 @@ export async function GET(
       tradeCountAll: polymarketMetrics.tradeCount,
       medianProfitPct,
       avgTradesPerDay,
-      isBot,
     })
 
     const copyMetrics = {
@@ -297,7 +284,7 @@ export async function GET(
     })
     const usernameParam = request.nextUrl.searchParams.get('username')
     if (dbWallet) {
-      await updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, metricsAll, uniqueOpenMarkets, uniqueClosedMarkets, topCategory, copyMetrics, currentBalance, isBot, profile, cachedPositionsJson)
+      await updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, metricsAll, uniqueOpenMarkets, uniqueClosedMarkets, topCategory, copyMetrics, currentBalance, profile, cachedPositionsJson)
     } else if (polymarketMetrics.tradeCount >= 15) {
       // Insert new wallet only if it has enough trades
       try {
@@ -338,8 +325,6 @@ export async function GET(
           total_volume: polymarketMetrics.totalBought,
           total_trades: polymarketMetrics.tradeCount,
           ...(topCategory && { top_category: topCategory }),
-          // Bot detection
-          is_bot: isBot,
           // Copy-trade metrics
           profit_factor_30d: profitFactor30d,
           profit_factor_all: profitFactorAll,
@@ -412,7 +397,6 @@ export async function GET(
           ? Math.round((metrics30d.roi / metrics30d.drawdown!) * 100) / 100
           : metrics30d.roi > 0 ? 5.0 : 0,
       },
-      isBot,
       scores: undefined,
       isNewlyFetched: true,
       lastUpdatedAt: new Date().toISOString(),
@@ -1013,9 +997,8 @@ function calculateCopyScore(params: {
   tradeCountAll: number
   medianProfitPct: number | null
   avgTradesPerDay?: number
-  isBot?: boolean
 }): number {
-  const { profitFactor30d, drawdown30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay, isBot } = params
+  const { profitFactor30d, drawdown30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay } = params
 
   // ── Hard Filters ────────────────────────────────────────────────
   // All must pass or score = 0. Designed for copy trading with a bot
@@ -1023,7 +1006,6 @@ function calculateCopyScore(params: {
   if (tradeCountAll < 30) return 0                                    // Statistical significance
   if (profitFactor30d < 1.2) return 0                                 // Real edge exists
   if (medianProfitPct == null || medianProfitPct < 5.0) return 0      // Per-trade quality
-  if (isBot) return 0                                                  // Human traders only
   if (avgTradesPerDay != null && (avgTradesPerDay < 2 || avgTradesPerDay > 15)) return 0  // Fits bot capacity
 
   // ── Pillar 1: Edge (40%) ────────────────────────────────────────
@@ -1055,90 +1037,6 @@ function calculateCopyScore(params: {
   // More trades = more statistical confidence in the score.
   const confidence = Math.min(1.0, tradeCountAll / 50)
   return Math.min(Math.round(rawScore * confidence), 100)
-}
-
-/**
- * Calculate bot score from parsed activity trades.
- * Score 0-100, threshold >= 60 = likely bot.
- */
-function calculateBotScore(
-  trades: { timestamp: number; size: number; price: number; usdValue: number; side: 'BUY' | 'SELL' }[]
-): number {
-  if (trades.length < 5) return 0
-
-  let score = 0
-
-  // 1. Trade frequency (0-25 points) — trades per active day
-  const tradeDays = new Set<string>()
-  for (const t of trades) {
-    if (t.timestamp > 0) tradeDays.add(new Date(t.timestamp * 1000).toISOString().slice(0, 10))
-  }
-  const freq = tradeDays.size > 0 ? trades.length / tradeDays.size : 0
-  if (freq >= 50) score += 25
-  else if (freq >= 20) score += 20
-  else if (freq >= 10) score += 15
-  else if (freq >= 5) score += 8
-
-  // 2. Low time variance (0-25 points) — circular variance of hour-of-day
-  const hoursOfDay: number[] = []
-  for (const t of trades) {
-    if (t.timestamp > 0) {
-      const d = new Date(t.timestamp * 1000)
-      hoursOfDay.push(d.getUTCHours() + d.getUTCMinutes() / 60)
-    }
-  }
-  if (hoursOfDay.length >= 5) {
-    let sinSum = 0, cosSum = 0
-    for (const h of hoursOfDay) {
-      const angle = (h / 24) * 2 * Math.PI
-      sinSum += Math.sin(angle)
-      cosSum += Math.cos(angle)
-    }
-    const R = Math.sqrt((sinSum / hoursOfDay.length) ** 2 + (cosSum / hoursOfDay.length) ** 2)
-    const circularVarianceHours = (1 - R) * 12
-    if (circularVarianceHours <= 0.5) score += 25
-    else if (circularVarianceHours <= 1) score += 20
-    else if (circularVarianceHours <= 2) score += 15
-    else if (circularVarianceHours <= 4) score += 8
-  }
-
-  // 3. Night trading ratio (0-20 points) — % of trades between 1am-6am UTC
-  const nightTrades = hoursOfDay.filter(h => h >= 1 && h < 6).length
-  const nightRatio = hoursOfDay.length > 0 ? (nightTrades / hoursOfDay.length) * 100 : 0
-  if (nightRatio >= 40) score += 20
-  else if (nightRatio >= 30) score += 15
-  else if (nightRatio >= 20) score += 10
-  else if (nightRatio >= 10) score += 5
-
-  // 4. Consistent position sizing (0-15 points) — coefficient of variation %
-  const sizes = trades.filter(t => t.usdValue > 0).map(t => t.usdValue)
-  if (sizes.length >= 5) {
-    const sizeMean = sizes.reduce((a, b) => a + b, 0) / sizes.length
-    if (sizeMean > 0) {
-      const sizeStd = Math.sqrt(sizes.reduce((sum, s) => sum + (s - sizeMean) ** 2, 0) / sizes.length)
-      const cv = (sizeStd / sizeMean) * 100
-      if (cv <= 10) score += 15
-      else if (cv <= 20) score += 12
-      else if (cv <= 30) score += 8
-      else if (cv <= 50) score += 4
-    }
-  }
-
-  // 5. Short hold duration proxy (0-15 points) — avg time between consecutive trades
-  const sortedTimestamps = trades.map(t => t.timestamp).filter(t => t > 0).sort((a, b) => a - b)
-  if (sortedTimestamps.length >= 2) {
-    let totalInterval = 0
-    for (let i = 1; i < sortedTimestamps.length; i++) {
-      totalInterval += sortedTimestamps[i] - sortedTimestamps[i - 1]
-    }
-    const avgIntervalHours = (totalInterval / (sortedTimestamps.length - 1)) / 3600
-    if (avgIntervalHours <= 2) score += 15
-    else if (avgIntervalHours <= 6) score += 12
-    else if (avgIntervalHours <= 12) score += 8
-    else if (avgIntervalHours <= 24) score += 4
-  }
-
-  return Math.min(100, score)
 }
 
 async function updateWalletMetrics(
@@ -1174,7 +1072,6 @@ async function updateWalletMetrics(
     medianProfitPct: number | null
   },
   currentBalance?: number,
-  isBot?: boolean,
   profile?: any,
   cachedPositionsJson?: string,
 ) {
@@ -1222,8 +1119,6 @@ async function updateWalletMetrics(
       total_volume: polymarketMetrics.totalBought,
       total_trades: polymarketMetrics.tradeCount,
       ...(topCategory && { top_category: topCategory }),
-      // Bot detection
-      ...(isBot != null && { is_bot: isBot }),
       // Copy-trade metrics
       ...(copyMetrics && {
         profit_factor_30d: copyMetrics.profitFactor30d,

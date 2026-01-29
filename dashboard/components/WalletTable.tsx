@@ -24,12 +24,11 @@ export const COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'total', label: 'Total' },
   { key: 'value', label: 'Value' },
   { key: 'avgTrades', label: 'Trades/d' },
-  { key: 'bot', label: 'Bot' },
   { key: 'category', label: 'Category' },
   { key: 'joined', label: 'Joined' },
 ]
 
-export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'medianProfit', 'active', 'total', 'value', 'avgTrades', 'bot', 'category', 'joined']
+export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'medianProfit', 'active', 'total', 'value', 'avgTrades', 'category', 'joined']
 
 // Module-level cache for raw positions data (not filtered by timeframe)
 const positionsCache = new Map<string, { resolvedAt?: string; realizedPnl: number }[] | null>()
@@ -624,7 +623,6 @@ export default function WalletTable({
               {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" />}
               {show('value') && <SortHeader column="balance" label="Value" filterType="money" />}
               {show('avgTrades') && <SortHeader column="avg_trades_per_day" label="Trades/d" filterType="number" />}
-              {show('bot') && <th className="px-2 py-2.5 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-12">Bot</th>}
               {show('category') && <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider w-16">Cat</th>}
               {show('joined') && <SortHeader column="account_created_at" label="Joined" filterType="number" />}
               {trackMode && (
@@ -834,15 +832,6 @@ export default function WalletTable({
                       <span className="text-gray-400 text-xs tabular-nums">
                         {(wallet.avg_trades_per_day || 0).toFixed(1)}/d
                       </span>
-                    </td>
-                  )}
-                  {show('bot') && (
-                    <td className="px-2 py-2.5 text-center">
-                      {wallet.is_bot ? (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/15 border border-purple-500/25 text-purple-400 font-medium">BOT</span>
-                      ) : (
-                        <span className="text-gray-600 text-[9px]">-</span>
-                      )}
                     </td>
                   )}
                   {show('category') && (

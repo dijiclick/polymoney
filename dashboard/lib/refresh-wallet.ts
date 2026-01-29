@@ -4,10 +4,8 @@ import {
   getPortfolioValue,
   getPositions,
   getClosedPositions,
-  getActivity,
   parsePositions,
   parseClosedPositions,
-  parseTrades,
   fetchEventCategories,
   getTopCategory,
 } from '@/lib/polymarket-api'
@@ -403,141 +401,45 @@ function calculateMedianProfitPct(
   return Math.round(median * 100) / 100
 }
 
+/**
+ * Calculate composite copy-trade score (0-100).
+ * 3-pillar formula: Edge (40%), Consistency (35%), Risk (25%).
+ */
 function calculateCopyScore(params: {
   profitFactor30d: number
-  roi30d: number
   drawdown30d: number
-  diffWinRate30d: number
   weeklyProfitRate: number
-  roi7d: number
   tradeCountAll: number
   medianProfitPct: number | null
+  avgTradesPerDay?: number
 }): number {
-  const { profitFactor30d, roi30d, drawdown30d, diffWinRate30d, weeklyProfitRate, roi7d, tradeCountAll, medianProfitPct } = params
+  const { profitFactor30d, drawdown30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay } = params
 
-  if (tradeCountAll < 20) return 0
-  if (profitFactor30d < 1.0) return 0
+  // Hard filters
+  if (tradeCountAll < 30) return 0
+  if (profitFactor30d < 1.2) return 0
   if (medianProfitPct == null || medianProfitPct < 5.0) return 0
+  if (avgTradesPerDay != null && (avgTradesPerDay < 2 || avgTradesPerDay > 15)) return 0
 
-  const mppScore = Math.min(medianProfitPct / 40.0, 1.0)
-  const pfScore = Math.min(profitFactor30d / 3.0, 1.0)
+  // Pillar 1: Edge (40%) — Profit Factor 1.2 → 0, 3.0+ → 1.0
+  const edgeScore = Math.min((profitFactor30d - 1.2) / (3.0 - 1.2), 1.0)
 
-  let calmar: number
-  if (drawdown30d > 0) calmar = roi30d / drawdown30d
-  else if (roi30d > 0) calmar = 5.0
-  else calmar = 0
-  const calmarScore = Math.min(Math.max(calmar, 0) / 5.0, 1.0)
+  // Pillar 2: Consistency (35%) — Weekly profit rate 40% → 0, 85%+ → 1.0
+  const consistencyScore = Math.min(Math.max((weeklyProfitRate - 40) / (85 - 40), 0), 1.0)
 
-  const dwrScore = Math.min(diffWinRate30d / 100.0, 1.0)
-  const wprScore = Math.min(weeklyProfitRate / 100.0, 1.0)
-
-  let edgeScore: number
-  if (roi30d > 0) {
-    const ratio = roi7d / roi30d
-    if (ratio >= 2.0) edgeScore = 1.0
-    else if (ratio >= 1.0) edgeScore = 0.5 + (ratio - 1.0) * 0.5
-    else edgeScore = Math.max(ratio * 0.5, 0)
-  } else if (roi7d > 0) {
-    edgeScore = 0.8
-  } else {
-    edgeScore = 0
-  }
+  // Pillar 3: Risk (25%) — Inverse drawdown: DD 5% → 1.0, DD 25%+ → 0
+  const riskScore = drawdown30d <= 0
+    ? 1.0
+    : Math.min(Math.max((25 - drawdown30d) / (25 - 5), 0), 1.0)
 
   const rawScore = (
-    mppScore * 0.25 +
-    pfScore * 0.15 +
-    calmarScore * 0.10 +
-    dwrScore * 0.15 +
-    wprScore * 0.20 +
-    edgeScore * 0.15
+    edgeScore * 0.40 +
+    consistencyScore * 0.35 +
+    riskScore * 0.25
   ) * 100
 
-  const confidence = Math.min(1.0, tradeCountAll / 80.0)
+  const confidence = Math.min(1.0, tradeCountAll / 50)
   return Math.min(Math.round(rawScore * confidence), 100)
-}
-
-// --- Bot detection (ported from src/scoring/bot.py) ---
-
-function calculateBotScore(
-  trades: { timestamp: number; size: number; price: number; usdValue: number; side: 'BUY' | 'SELL' }[]
-): number {
-  if (trades.length < 5) return 0
-
-  let score = 0
-
-  // 1. Trade frequency (0-25 points) — trades per active day
-  const tradeDays = new Set<string>()
-  for (const t of trades) {
-    if (t.timestamp > 0) tradeDays.add(new Date(t.timestamp * 1000).toISOString().slice(0, 10))
-  }
-  const freq = tradeDays.size > 0 ? trades.length / tradeDays.size : 0
-  if (freq >= 50) score += 25
-  else if (freq >= 20) score += 20
-  else if (freq >= 10) score += 15
-  else if (freq >= 5) score += 8
-
-  // 2. Low time variance (0-25 points) — std dev of hour-of-day in hours
-  const hoursOfDay: number[] = []
-  for (const t of trades) {
-    if (t.timestamp > 0) {
-      const d = new Date(t.timestamp * 1000)
-      hoursOfDay.push(d.getUTCHours() + d.getUTCMinutes() / 60)
-    }
-  }
-  if (hoursOfDay.length >= 5) {
-    const mean = hoursOfDay.reduce((a, b) => a + b, 0) / hoursOfDay.length
-    // Circular variance for hours (wraps around 24h)
-    let sinSum = 0, cosSum = 0
-    for (const h of hoursOfDay) {
-      const angle = (h / 24) * 2 * Math.PI
-      sinSum += Math.sin(angle)
-      cosSum += Math.cos(angle)
-    }
-    const R = Math.sqrt((sinSum / hoursOfDay.length) ** 2 + (cosSum / hoursOfDay.length) ** 2)
-    const circularVarianceHours = (1 - R) * 12 // 0 = no variance, 12 = max variance
-    if (circularVarianceHours <= 0.5) score += 25
-    else if (circularVarianceHours <= 1) score += 20
-    else if (circularVarianceHours <= 2) score += 15
-    else if (circularVarianceHours <= 4) score += 8
-  }
-
-  // 3. Night trading ratio (0-20 points) — % of trades between 1am-6am UTC
-  const nightTrades = hoursOfDay.filter(h => h >= 1 && h < 6).length
-  const nightRatio = hoursOfDay.length > 0 ? (nightTrades / hoursOfDay.length) * 100 : 0
-  if (nightRatio >= 40) score += 20
-  else if (nightRatio >= 30) score += 15
-  else if (nightRatio >= 20) score += 10
-  else if (nightRatio >= 10) score += 5
-
-  // 4. Consistent position sizing (0-15 points) — coefficient of variation %
-  const sizes = trades.filter(t => t.usdValue > 0).map(t => t.usdValue)
-  if (sizes.length >= 5) {
-    const sizeMean = sizes.reduce((a, b) => a + b, 0) / sizes.length
-    if (sizeMean > 0) {
-      const sizeStd = Math.sqrt(sizes.reduce((sum, s) => sum + (s - sizeMean) ** 2, 0) / sizes.length)
-      const cv = (sizeStd / sizeMean) * 100
-      if (cv <= 10) score += 15
-      else if (cv <= 20) score += 12
-      else if (cv <= 30) score += 8
-      else if (cv <= 50) score += 4
-    }
-  }
-
-  // 5. Short hold duration proxy (0-15 points) — avg time between consecutive trades
-  const sortedTimestamps = trades.map(t => t.timestamp).filter(t => t > 0).sort((a, b) => a - b)
-  if (sortedTimestamps.length >= 2) {
-    let totalInterval = 0
-    for (let i = 1; i < sortedTimestamps.length; i++) {
-      totalInterval += sortedTimestamps[i] - sortedTimestamps[i - 1]
-    }
-    const avgIntervalHours = (totalInterval / (sortedTimestamps.length - 1)) / 3600
-    if (avgIntervalHours <= 2) score += 15
-    else if (avgIntervalHours <= 6) score += 12
-    else if (avgIntervalHours <= 12) score += 8
-    else if (avgIntervalHours <= 24) score += 4
-  }
-
-  return Math.min(100, score)
 }
 
 // --- Per-wallet refresh function ---
@@ -555,12 +457,11 @@ export async function refreshOneWallet(
   const supabase = getServiceSupabase()
 
   try {
-    const [profile, portfolioValue, rawPositions, rawClosedPositions, rawActivity] = await Promise.all([
+    const [profile, portfolioValue, rawPositions, rawClosedPositions] = await Promise.all([
       getProfile(wallet.address).catch(() => ({})),
       getPortfolioValue(wallet.address).catch(() => wallet.balance || 0),
       getPositions(wallet.address).catch(() => []),
       getClosedPositions(wallet.address).catch(() => []),
-      getActivity(wallet.address, 5000, 90).catch(() => []),
     ])
 
     const allPositions = parsePositions(rawPositions)
@@ -613,19 +514,12 @@ export async function refreshOneWallet(
     const medianProfitPct = calculateMedianProfitPct(closedPositions)
     const copyScore = calculateCopyScore({
       profitFactor30d,
-      roi30d: metrics30d.roi,
       drawdown30d: metrics30d.drawdown || 0,
-      diffWinRate30d,
       weeklyProfitRate,
-      roi7d: metrics7d.roi,
       tradeCountAll: polymetrics.tradeCount,
       medianProfitPct,
+      avgTradesPerDay,
     })
-
-    // Bot detection from activity trades
-    const activityTrades = parseTrades(rawActivity)
-    const botScore = calculateBotScore(activityTrades)
-    const isBot = botScore >= 60
 
     const { error: updateError } = await supabase.from('wallets').update({
       username: (profile as any).name || (profile as any).pseudonym || wallet.username,
@@ -662,8 +556,6 @@ export async function refreshOneWallet(
       drawdown_all: metricsAll.drawdown,
       drawdown_amount_all: metricsAll.drawdownAmount,
       top_category: topCategory || null,
-      // Bot detection
-      is_bot: isBot,
       // Copy-trade metrics
       profit_factor_30d: profitFactor30d,
       profit_factor_all: profitFactorAll,

@@ -190,7 +190,6 @@ export async function GET(request: NextRequest) {
       weekly_profit_rate: wallet.weekly_profit_rate || 0,
       copy_score: wallet.copy_score || 0,
       avg_trades_per_day: wallet.avg_trades_per_day || 0,
-      is_bot: wallet.is_bot || false,
     }))
 
     // Build next cursor from the last item

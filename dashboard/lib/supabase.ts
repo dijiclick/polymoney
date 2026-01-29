@@ -163,7 +163,6 @@ export interface Wallet {
   copy_score: number          // composite copy-trade score (0-100)
   avg_trades_per_day: number  // average trades per active day
   median_profit_pct: number | null  // median profit % per trade (IQR outlier removal)
-  is_bot: boolean             // whether wallet is likely a bot
   metrics_updated_at?: string
   created_at: string
   updated_at: string
