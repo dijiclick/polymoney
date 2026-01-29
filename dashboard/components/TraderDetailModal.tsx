@@ -145,7 +145,7 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/traders/${address}`)
+      const res = await fetch(`/api/traders/${address}?refresh=true`)
       if (!res.ok) throw new Error('Failed to fetch trader data')
       const result = await res.json()
       setData(result)
