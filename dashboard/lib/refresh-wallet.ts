@@ -468,9 +468,12 @@ export async function refreshOneWallet(
     const apiClosedPositions = parseClosedPositions(rawClosedPositions)
 
     const openPositions = allPositions.filter(p => p.currentValue > 0)
-    const apiClosedConditionIds = new Set(apiClosedPositions.map(p => p.conditionId))
-    const additionalResolved = allPositions
-      .filter(p => p.currentValue === 0 && !apiClosedConditionIds.has(p.conditionId))
+
+    // IMPORTANT: /closed-positions only returns REDEEMED positions (mostly wins).
+    // Losing positions stay in /positions with currentValue=0, redeemable=true, cashPnl<0.
+    // Don't filter by conditionId — hedged positions can have wins and losses on same market.
+    const unredeemedLosses = allPositions
+      .filter(p => p.currentValue === 0 && p.redeemable === true && p.cashPnl < 0)
       .map(p => ({
         conditionId: p.conditionId,
         title: p.title,
@@ -481,10 +484,10 @@ export async function refreshOneWallet(
         finalPrice: 0,
         realizedPnl: p.cashPnl,
         resolvedAt: p.endDate,
-        isWin: p.cashPnl > 0,
+        isWin: false,
       }))
 
-    const closedPositions = [...apiClosedPositions, ...additionalResolved]
+    const closedPositions = [...apiClosedPositions, ...unredeemedLosses]
       .sort((a, b) => {
         const dateA = a.resolvedAt ? new Date(a.resolvedAt).getTime() : 0
         const dateB = b.resolvedAt ? new Date(b.resolvedAt).getTime() : 0
@@ -492,7 +495,7 @@ export async function refreshOneWallet(
       })
 
     const currentBalance = portfolioValue || wallet.balance || 0
-    const polymetrics = calculatePolymarketMetrics(closedPositions, allPositions, currentBalance)
+    const polymetrics = calculatePolymarketMetrics(closedPositions, openPositions, currentBalance)
     const metrics7d = calculatePeriodMetrics(closedPositions, 7, currentBalance)
     const metrics30d = calculatePeriodMetrics(closedPositions, 30, currentBalance)
     const metricsAll = calculatePeriodMetrics(closedPositions, 36500, currentBalance)

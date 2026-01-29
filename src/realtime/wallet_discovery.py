@@ -284,9 +284,51 @@ class WalletDiscoveryProcessor:
             logger.debug(f"No positions found for {address[:10]}...")
             return
 
+        # IMPORTANT: /closed-positions API only returns REDEEMED positions (mostly wins).
+        # Losing positions stay in /positions with currentValue=0, redeemable=true, cashPnl<0.
+        # We must extract these unredeemed losses and add them to closed_positions
+        # to get accurate metrics (matching the TypeScript dashboard).
+        unredeemed_losses = []
+        for pos in positions:
+            current_value = float(pos.get("currentValue", 0))
+            redeemable = pos.get("redeemable", False)
+            cash_pnl = float(pos.get("cashPnl", 0))
+            if current_value == 0 and redeemable and cash_pnl < 0:
+                # Convert open-position format to closed-position format
+                size = float(pos.get("size", 0))
+                avg_price = float(pos.get("avgPrice", 0))
+                initial_value = float(pos.get("initialValue", 0)) or (size * avg_price)
+                unredeemed_losses.append({
+                    "conditionId": pos.get("conditionId", ""),
+                    "title": pos.get("title", ""),
+                    "outcome": pos.get("outcome", ""),
+                    "size": pos.get("size", "0"),
+                    "totalBought": str(initial_value),
+                    "avgPrice": pos.get("avgPrice", "0"),
+                    "realizedPnl": cash_pnl,
+                    "resolvedAt": pos.get("endDate"),
+                    "eventSlug": pos.get("eventSlug") or pos.get("slug", ""),
+                })
+
+        if unredeemed_losses:
+            logger.info(
+                f"[{address[:10]}] Found {len(unredeemed_losses)} unredeemed losses "
+                f"from /positions (adding to {len(closed_positions)} closed)"
+            )
+            closed_positions = closed_positions + unredeemed_losses
+
+        # Filter out unredeemed losses from open positions count
+        # (they're resolved, not truly "open")
+        open_positions = [
+            p for p in positions
+            if float(p.get("currentValue", 0)) > 0
+        ]
+
         # Calculate all metrics using our formulas
+        # Pass open_positions (not raw positions) to avoid double-counting
+        # unredeemed losses as both open and closed
         metrics = self._calculate_metrics(
-            positions=positions,
+            positions=open_positions,
             closed_positions=closed_positions,
             current_balance=portfolio_value
         )
@@ -318,7 +360,7 @@ class WalletDiscoveryProcessor:
 
         # Top category from event slugs
         all_event_slugs = []
-        for p in positions:
+        for p in open_positions:
             slug = p.get("eventSlug") or p.get("slug") or ""
             if slug:
                 all_event_slugs.append(slug)
@@ -530,7 +572,11 @@ class WalletDiscoveryProcessor:
                         if entry["is_resolved"]:
                             is_resolved = True
                         if entry["resolved_at"]:
-                            if not latest_resolved_at or entry["resolved_at"] > latest_resolved_at:
+                            # Normalize to string for safe comparison
+                            # (API can return int timestamps or ISO date strings)
+                            entry_ra = str(entry["resolved_at"])
+                            latest_ra = str(latest_resolved_at) if latest_resolved_at else ""
+                            if not latest_resolved_at or entry_ra > latest_ra:
                                 latest_resolved_at = entry["resolved_at"]
 
                 trades.append({
