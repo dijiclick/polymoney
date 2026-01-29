@@ -24,6 +24,7 @@ export interface PolymarketClosedPosition {
   outcome?: string
   size: number
   avgPrice: number
+  initialValue: number
   finalPrice: number
   realizedPnl: number
   resolvedAt?: string

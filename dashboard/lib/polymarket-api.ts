@@ -405,16 +405,22 @@ export function parseClosedPositions(rawPositions: RawPolymarketClosedPosition[]
       ? pos.avgPrice
       : parseFloat(String(pos.avgPrice || '0'))
 
-    // Size can come from 'size' or be calculated from 'totalBought'
+    // Size and initialValue can come from 'size' or 'totalBought'
     let size = 0
-    if (pos.size) {
-      size = parseFloat(pos.size)
-    } else if (pos.totalBought !== undefined) {
+    let initialValue = 0
+    if (pos.totalBought !== undefined) {
       const totalBought = typeof pos.totalBought === 'number'
         ? pos.totalBought
         : parseFloat(pos.totalBought)
-      // size = totalBought / avgPrice (since totalBought = size * avgPrice)
+      initialValue = totalBought
       size = avgPrice > 0 ? totalBought / avgPrice : 0
+    }
+    if (pos.size) {
+      size = parseFloat(pos.size)
+      // If we didn't get initialValue from totalBought, compute it
+      if (initialValue <= 0) {
+        initialValue = size * avgPrice
+      }
     }
 
     // Resolve date from either resolvedAt, endDate, or timestamp
@@ -431,6 +437,7 @@ export function parseClosedPositions(rawPositions: RawPolymarketClosedPosition[]
       outcome: pos.outcome,
       size: Math.round(size * 100) / 100,
       avgPrice: Math.round(avgPrice * 10000) / 10000,
+      initialValue: Math.round(initialValue * 100) / 100,
       finalPrice: 0, // Not available from API
       realizedPnl: Math.round(pnl * 100) / 100,
       resolvedAt,
@@ -641,7 +648,7 @@ function extractCategoryFromTags(tags: Array<{ label: string; slug?: string }>):
 /**
  * Fetch event categories from Gamma API for a list of event slugs.
  * Returns a Map of eventSlug -> category string.
- * Uses /events?slug=X&slug=Y&limit=100 to batch all slugs in one request.
+ * Batches slugs into chunks of 20 to avoid URL length limits.
  */
 export async function fetchEventCategories(eventSlugs: string[]): Promise<Map<string, string>> {
   const categoryMap = new Map<string, string>()
@@ -649,20 +656,38 @@ export async function fetchEventCategories(eventSlugs: string[]): Promise<Map<st
 
   if (uniqueSlugs.length === 0) return categoryMap
 
-  try {
-    const slugParams = uniqueSlugs.map(s => `slug=${encodeURIComponent(s)}`).join('&')
-    const res = await fetch(`${GAMMA_API_BASE}/events?limit=100&${slugParams}`, {
-      signal: AbortSignal.timeout(10000),
-    })
-    if (!res.ok) return categoryMap
-    const events = await res.json()
-    if (!Array.isArray(events)) return categoryMap
+  // Split into chunks of 20 slugs to avoid URL length limits
+  const CHUNK_SIZE = 20
+  const chunks: string[][] = []
+  for (let i = 0; i < uniqueSlugs.length; i += CHUNK_SIZE) {
+    chunks.push(uniqueSlugs.slice(i, i + CHUNK_SIZE))
+  }
 
-    for (const event of events) {
-      const slug = event.slug
-      if (slug) {
-        const category = extractCategoryFromTags(event.tags || [])
-        if (category) categoryMap.set(slug, category)
+  try {
+    // Fetch all chunks in parallel
+    const results = await Promise.all(
+      chunks.map(async (chunk) => {
+        try {
+          const slugParams = chunk.map(s => `slug=${encodeURIComponent(s)}`).join('&')
+          const res = await fetch(`${GAMMA_API_BASE}/events?limit=${chunk.length}&${slugParams}`, {
+            signal: AbortSignal.timeout(10000),
+          })
+          if (!res.ok) return []
+          const events = await res.json()
+          return Array.isArray(events) ? events : []
+        } catch {
+          return []
+        }
+      })
+    )
+
+    for (const events of results) {
+      for (const event of events) {
+        const slug = event.slug
+        if (slug) {
+          const category = extractCategoryFromTags(event.tags || [])
+          if (category) categoryMap.set(slug, category)
+        }
       }
     }
   } catch {

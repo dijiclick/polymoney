@@ -4,8 +4,10 @@ import {
   getPortfolioValue,
   getPositions,
   getClosedPositions,
+  getActivity,
   parsePositions,
   parseClosedPositions,
+  parseTrades,
   fetchEventCategories,
   getTopCategory,
 } from '@/lib/polymarket-api'
@@ -360,12 +362,12 @@ function calculateAvgTradesPerDay(
 }
 
 function calculateMedianProfitPct(
-  closedPositions: { size: number; avgPrice: number; realizedPnl: number }[]
+  closedPositions: { size: number; avgPrice: number; initialValue?: number; realizedPnl: number }[]
 ): number | null {
   const profitPcts: number[] = []
 
   for (const pos of closedPositions) {
-    const initialValue = pos.size * pos.avgPrice
+    const initialValue = (pos.initialValue && pos.initialValue > 0) ? pos.initialValue : pos.size * pos.avgPrice
     if (initialValue <= 0) continue
     const pct = (pos.realizedPnl / initialValue) * 100
     profitPcts.push(pct)
@@ -454,6 +456,90 @@ function calculateCopyScore(params: {
   return Math.min(Math.round(rawScore * confidence), 100)
 }
 
+// --- Bot detection (ported from src/scoring/bot.py) ---
+
+function calculateBotScore(
+  trades: { timestamp: number; size: number; price: number; usdValue: number; side: 'BUY' | 'SELL' }[]
+): number {
+  if (trades.length < 5) return 0
+
+  let score = 0
+
+  // 1. Trade frequency (0-25 points) — trades per active day
+  const tradeDays = new Set<string>()
+  for (const t of trades) {
+    if (t.timestamp > 0) tradeDays.add(new Date(t.timestamp * 1000).toISOString().slice(0, 10))
+  }
+  const freq = tradeDays.size > 0 ? trades.length / tradeDays.size : 0
+  if (freq >= 50) score += 25
+  else if (freq >= 20) score += 20
+  else if (freq >= 10) score += 15
+  else if (freq >= 5) score += 8
+
+  // 2. Low time variance (0-25 points) — std dev of hour-of-day in hours
+  const hoursOfDay: number[] = []
+  for (const t of trades) {
+    if (t.timestamp > 0) {
+      const d = new Date(t.timestamp * 1000)
+      hoursOfDay.push(d.getUTCHours() + d.getUTCMinutes() / 60)
+    }
+  }
+  if (hoursOfDay.length >= 5) {
+    const mean = hoursOfDay.reduce((a, b) => a + b, 0) / hoursOfDay.length
+    // Circular variance for hours (wraps around 24h)
+    let sinSum = 0, cosSum = 0
+    for (const h of hoursOfDay) {
+      const angle = (h / 24) * 2 * Math.PI
+      sinSum += Math.sin(angle)
+      cosSum += Math.cos(angle)
+    }
+    const R = Math.sqrt((sinSum / hoursOfDay.length) ** 2 + (cosSum / hoursOfDay.length) ** 2)
+    const circularVarianceHours = (1 - R) * 12 // 0 = no variance, 12 = max variance
+    if (circularVarianceHours <= 0.5) score += 25
+    else if (circularVarianceHours <= 1) score += 20
+    else if (circularVarianceHours <= 2) score += 15
+    else if (circularVarianceHours <= 4) score += 8
+  }
+
+  // 3. Night trading ratio (0-20 points) — % of trades between 1am-6am UTC
+  const nightTrades = hoursOfDay.filter(h => h >= 1 && h < 6).length
+  const nightRatio = hoursOfDay.length > 0 ? (nightTrades / hoursOfDay.length) * 100 : 0
+  if (nightRatio >= 40) score += 20
+  else if (nightRatio >= 30) score += 15
+  else if (nightRatio >= 20) score += 10
+  else if (nightRatio >= 10) score += 5
+
+  // 4. Consistent position sizing (0-15 points) — coefficient of variation %
+  const sizes = trades.filter(t => t.usdValue > 0).map(t => t.usdValue)
+  if (sizes.length >= 5) {
+    const sizeMean = sizes.reduce((a, b) => a + b, 0) / sizes.length
+    if (sizeMean > 0) {
+      const sizeStd = Math.sqrt(sizes.reduce((sum, s) => sum + (s - sizeMean) ** 2, 0) / sizes.length)
+      const cv = (sizeStd / sizeMean) * 100
+      if (cv <= 10) score += 15
+      else if (cv <= 20) score += 12
+      else if (cv <= 30) score += 8
+      else if (cv <= 50) score += 4
+    }
+  }
+
+  // 5. Short hold duration proxy (0-15 points) — avg time between consecutive trades
+  const sortedTimestamps = trades.map(t => t.timestamp).filter(t => t > 0).sort((a, b) => a - b)
+  if (sortedTimestamps.length >= 2) {
+    let totalInterval = 0
+    for (let i = 1; i < sortedTimestamps.length; i++) {
+      totalInterval += sortedTimestamps[i] - sortedTimestamps[i - 1]
+    }
+    const avgIntervalHours = (totalInterval / (sortedTimestamps.length - 1)) / 3600
+    if (avgIntervalHours <= 2) score += 15
+    else if (avgIntervalHours <= 6) score += 12
+    else if (avgIntervalHours <= 12) score += 8
+    else if (avgIntervalHours <= 24) score += 4
+  }
+
+  return Math.min(100, score)
+}
+
 // --- Per-wallet refresh function ---
 
 export interface RefreshResult {
@@ -469,11 +555,12 @@ export async function refreshOneWallet(
   const supabase = getServiceSupabase()
 
   try {
-    const [profile, portfolioValue, rawPositions, rawClosedPositions] = await Promise.all([
+    const [profile, portfolioValue, rawPositions, rawClosedPositions, rawActivity] = await Promise.all([
       getProfile(wallet.address).catch(() => ({})),
       getPortfolioValue(wallet.address).catch(() => wallet.balance || 0),
       getPositions(wallet.address).catch(() => []),
       getClosedPositions(wallet.address).catch(() => []),
+      getActivity(wallet.address, 5000, 90).catch(() => []),
     ])
 
     const allPositions = parsePositions(rawPositions)
@@ -489,6 +576,7 @@ export async function refreshOneWallet(
         outcome: p.outcome,
         size: p.size,
         avgPrice: p.avgPrice,
+        initialValue: p.size * p.avgPrice,
         finalPrice: 0,
         realizedPnl: p.cashPnl,
         resolvedAt: p.endDate,
@@ -509,8 +597,8 @@ export async function refreshOneWallet(
     const metricsAll = calculatePeriodMetrics(closedPositions, 36500, currentBalance)
 
     const allEventSlugs = [
-      ...rawPositions.map((p: any) => String(p.eventSlug || '')),
-      ...rawClosedPositions.map((p: any) => String(p.eventSlug || '')),
+      ...rawPositions.map((p: any) => String(p.eventSlug || p.slug || '')),
+      ...rawClosedPositions.map((p: any) => String(p.eventSlug || p.slug || '')),
     ].filter(Boolean)
     const categoryMap = await fetchEventCategories(allEventSlugs)
     const topCategory = getTopCategory(allEventSlugs, categoryMap)
@@ -533,6 +621,11 @@ export async function refreshOneWallet(
       tradeCountAll: polymetrics.tradeCount,
       medianProfitPct,
     })
+
+    // Bot detection from activity trades
+    const activityTrades = parseTrades(rawActivity)
+    const botScore = calculateBotScore(activityTrades)
+    const isBot = botScore >= 60
 
     const { error: updateError } = await supabase.from('wallets').update({
       username: (profile as any).name || (profile as any).pseudonym || wallet.username,
@@ -568,7 +661,9 @@ export async function refreshOneWallet(
       trade_count_all: metricsAll.tradeCount,
       drawdown_all: metricsAll.drawdown,
       drawdown_amount_all: metricsAll.drawdownAmount,
-      ...(topCategory && { top_category: topCategory }),
+      top_category: topCategory || null,
+      // Bot detection
+      is_bot: isBot,
       // Copy-trade metrics
       profit_factor_30d: profitFactor30d,
       profit_factor_all: profitFactorAll,

@@ -164,6 +164,7 @@ export async function GET(
         outcome: p.outcome,
         size: p.size,
         avgPrice: p.avgPrice,
+        initialValue: p.size * p.avgPrice,
         finalPrice: 0,
         realizedPnl: p.cashPnl,
         resolvedAt: p.endDate,
@@ -205,8 +206,8 @@ export async function GET(
     // Fetch event categories for top category calculation
     // Extract eventSlugs from raw positions (available on both open and closed)
     const allEventSlugs = [
-      ...rawPositions.map((p: any) => String(p.eventSlug || '')),
-      ...rawClosedPositions.map((p: any) => String(p.eventSlug || '')),
+      ...rawPositions.map((p: any) => String(p.eventSlug || p.slug || '')),
+      ...rawClosedPositions.map((p: any) => String(p.eventSlug || p.slug || '')),
     ].filter(Boolean)
     const categoryMap = await fetchEventCategories(allEventSlugs)
     const topCategory = getTopCategory(allEventSlugs, categoryMap)
