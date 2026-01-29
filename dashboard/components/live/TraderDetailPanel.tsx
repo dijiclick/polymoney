@@ -32,6 +32,7 @@ interface TraderData {
     diffWinRateAll: number
     weeklyProfitRate: number
     avgTradesPerDay: number
+    medianProfitPct: number | null
     edgeTrend: number
     calmarRatio: number
   }

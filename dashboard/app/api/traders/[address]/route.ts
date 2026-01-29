@@ -39,8 +39,13 @@ export async function GET(
     return NextResponse.json(error, { status: 400 })
   }
 
-  // Check if force refresh requested
-  const forceRefresh = request.nextUrl.searchParams.get('refresh') === 'true'
+  // Check refresh mode:
+  // refresh=true  → always fetch live from Polymarket API
+  // refresh=false → always return from DB cache (even stale), never fetch live
+  // no param      → return cache if fresh, else fetch live
+  const refreshParam = request.nextUrl.searchParams.get('refresh')
+  const forceRefresh = refreshParam === 'true'
+  const cacheOnly = refreshParam === 'false'
   // Lite mode: skip heavy operations (activity/bot detection, event categories)
   // Used by the modal for fast position loading (~1-2s vs 5-8s)
   const liteMode = request.nextUrl.searchParams.get('lite') === 'true'
@@ -56,8 +61,13 @@ export async function GET(
   const isFresh = dbWallet?.metrics_updated_at &&
     Date.now() - new Date(dbWallet.metrics_updated_at).getTime() < CACHE_DURATION_MS
 
-  // 4. If fresh cached data and no force refresh, return it from wallets table
-  if (dbWallet && isFresh && !forceRefresh) {
+  // 4. Return cached data from wallets table when:
+  //    - cacheOnly mode (refresh=false): always return from DB, even stale
+  //    - fresh cached data exists and no force refresh
+  if (cacheOnly && !dbWallet) {
+    return NextResponse.json({ error: 'Wallet not found in cache', code: 'NOT_FOUND' }, { status: 404 })
+  }
+  if (dbWallet && (cacheOnly || (isFresh && !forceRefresh))) {
     const metrics7d: TimePeriodMetrics = {
       pnl: dbWallet.pnl_7d || 0,
       roi: dbWallet.roi_7d || 0,
@@ -131,6 +141,7 @@ export async function GET(
         diffWinRateAll: dbWallet.diff_win_rate_all || 0,
         weeklyProfitRate: dbWallet.weekly_profit_rate || 0,
         avgTradesPerDay: dbWallet.avg_trades_per_day || 0,
+        medianProfitPct: dbWallet.median_profit_pct ?? null,
         edgeTrend: (dbWallet.roi_30d || 0) > 0
           ? Math.round(((dbWallet.roi_7d || 0) / dbWallet.roi_30d) * 100) / 100
           : 0,
@@ -138,6 +149,7 @@ export async function GET(
           ? Math.round(((dbWallet.roi_30d || 0) / dbWallet.drawdown_30d) * 100) / 100
           : (dbWallet.roi_30d || 0) > 0 ? 5.0 : 0,
       },
+      isBot: dbWallet.is_bot || false,
       scores: undefined,
       isNewlyFetched: false,
       lastUpdatedAt: dbWallet.metrics_updated_at,
@@ -394,11 +406,13 @@ export async function GET(
         diffWinRateAll,
         weeklyProfitRate,
         avgTradesPerDay,
+        medianProfitPct,
         edgeTrend: metrics30d.roi > 0 ? Math.round((metrics7d.roi / metrics30d.roi) * 100) / 100 : 0,
         calmarRatio: (metrics30d.drawdown || 0) > 0
           ? Math.round((metrics30d.roi / metrics30d.drawdown!) * 100) / 100
           : metrics30d.roi > 0 ? 5.0 : 0,
       },
+      isBot,
       scores: undefined,
       isNewlyFetched: true,
       lastUpdatedAt: new Date().toISOString(),
@@ -472,6 +486,7 @@ export async function GET(
           diffWinRateAll: dbWallet.diff_win_rate_all || 0,
           weeklyProfitRate: dbWallet.weekly_profit_rate || 0,
           avgTradesPerDay: dbWallet.avg_trades_per_day || 0,
+          medianProfitPct: dbWallet.median_profit_pct ?? null,
           edgeTrend: (dbWallet.roi_30d || 0) > 0
             ? Math.round(((dbWallet.roi_7d || 0) / dbWallet.roi_30d) * 100) / 100
             : 0,

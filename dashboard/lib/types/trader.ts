@@ -122,9 +122,13 @@ export interface TraderProfileResponse {
     diffWinRateAll: number
     weeklyProfitRate: number
     avgTradesPerDay: number
+    medianProfitPct: number | null
     edgeTrend: number
     calmarRatio: number
   }
+
+  // Bot detection
+  isBot?: boolean
 
   // Metadata
   isNewlyFetched: boolean

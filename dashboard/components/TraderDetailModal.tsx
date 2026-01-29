@@ -34,6 +34,7 @@ interface TraderData {
     diffWinRateAll: number
     weeklyProfitRate: number
     avgTradesPerDay: number
+    medianProfitPct: number | null
     edgeTrend: number
     calmarRatio: number
   }
@@ -102,6 +103,7 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
       diffWinRateAll: walletData.diff_win_rate_all || 0,
       weeklyProfitRate: walletData.weekly_profit_rate || 0,
       avgTradesPerDay: walletData.avg_trades_per_day || 0,
+      medianProfitPct: walletData.median_profit_pct ?? null,
       edgeTrend: (walletData.roi_30d || 0) > 0
         ? Math.round(((walletData.roi_7d || 0) / walletData.roi_30d!) * 100) / 100
         : 0,
