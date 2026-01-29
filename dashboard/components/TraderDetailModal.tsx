@@ -68,11 +68,12 @@ interface Props {
   walletData?: WalletData
   isOpen: boolean
   onClose: () => void
+  onDataUpdate?: (address: string, data: any) => void
 }
 
 // ── Main Modal ───────────────────────────────────────────────────────
 
-export default function TraderDetailModal({ address, username, walletData, isOpen, onClose }: Props) {
+export default function TraderDetailModal({ address, username, walletData, isOpen, onClose, onDataUpdate }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<TraderData | null>(null)
@@ -145,10 +146,36 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/traders/${address}?refresh=true`)
+      // Phase 1: Try cached data first (instant if positions are cached in DB)
+      const cachedRes = await fetch(`/api/traders/${address}?refresh=false`)
+      if (cachedRes.ok) {
+        const cachedResult = await cachedRes.json()
+        // If we got cached positions, show them immediately
+        if (cachedResult.closedPositions?.length > 0 || cachedResult.positions?.length > 0) {
+          setData(cachedResult)
+          onDataUpdate?.(address, cachedResult)
+          setLoading(false)
+          // Phase 2: Refresh in background with lite mode (positions only, skip activity/categories)
+          fetch(`/api/traders/${address}?refresh=true&lite=true`)
+            .then(res => res.ok ? res.json() : null)
+            .then(freshResult => {
+              if (freshResult) {
+                setData(freshResult)
+                onDataUpdate?.(address, freshResult)
+              }
+            })
+            .catch(() => {}) // Silent background refresh failure
+          return
+        }
+      }
+
+      // Phase 1 had no cached positions — fetch fresh with lite mode
+      const res = await fetch(`/api/traders/${address}?refresh=true&lite=true`)
       if (!res.ok) throw new Error('Failed to fetch trader data')
       const result = await res.json()
       setData(result)
+      // Notify parent so the dashboard table row can update with fresh data
+      onDataUpdate?.(address, result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {

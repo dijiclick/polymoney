@@ -217,6 +217,8 @@ interface Props {
   onToggleSelect?: (address: string) => void
   onSelectAll?: () => void
   allSelected?: boolean
+  // Callback when modal fetches fresh data for a trader
+  onWalletUpdate?: (address: string, data: any) => void
 }
 
 function FilterPopover({
@@ -344,6 +346,7 @@ export default function WalletTable({
   onToggleSelect,
   onSelectAll,
   allSelected = false,
+  onWalletUpdate,
 }: Props) {
   const show = (key: ColumnKey) => visibleColumns.includes(key)
   const [openFilter, setOpenFilter] = useState<string | null>(null)
@@ -928,6 +931,7 @@ export default function WalletTable({
         walletData={selectedTrader || undefined}
         isOpen={!!selectedTrader}
         onClose={() => setSelectedTrader(null)}
+        onDataUpdate={onWalletUpdate}
       />
     </div>
   )

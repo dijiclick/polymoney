@@ -110,6 +110,53 @@ export default function WalletsPage() {
     }
   }, [])
 
+  // When the modal fetches fresh data, update the corresponding wallet row in the table
+  const handleWalletUpdate = useCallback((address: string, data: any) => {
+    if (!data?.metrics) return
+    const m = data.metrics
+    const m7d = m.metrics7d || {}
+    const m30d = m.metrics30d || {}
+    setWallets(prev => prev.map(w => {
+      if (w.address !== address) return w
+      return {
+        ...w,
+        balance: m.portfolioValue ?? w.balance,
+        overall_pnl: m.totalPnl ?? w.overall_pnl,
+        overall_roi: m.roiPercent ?? w.overall_roi,
+        overall_win_rate: m.winRateAllTime ?? w.overall_win_rate,
+        realized_pnl: m.realizedPnl ?? w.realized_pnl,
+        unrealized_pnl: m.unrealizedPnl ?? w.unrealized_pnl,
+        active_positions: m.activePositions ?? w.active_positions,
+        total_positions: m.totalPositions ?? w.total_positions,
+        drawdown_all: m.maxDrawdown ?? w.drawdown_all,
+        // 7-day metrics
+        pnl_7d: m7d.pnl ?? w.pnl_7d,
+        roi_7d: m7d.roi ?? w.roi_7d,
+        win_rate_7d: m7d.winRate ?? w.win_rate_7d,
+        trade_count_7d: m7d.tradeCount ?? w.trade_count_7d,
+        drawdown_7d: m7d.drawdown ?? w.drawdown_7d,
+        volume_7d: m7d.volume ?? w.volume_7d,
+        // 30-day metrics
+        pnl_30d: m30d.pnl ?? w.pnl_30d,
+        roi_30d: m30d.roi ?? w.roi_30d,
+        win_rate_30d: m30d.winRate ?? w.win_rate_30d,
+        trade_count_30d: m30d.tradeCount ?? w.trade_count_30d,
+        drawdown_30d: m30d.drawdown ?? w.drawdown_30d,
+        volume_30d: m30d.volume ?? w.volume_30d,
+        // Copy metrics
+        copy_score: data.copyScore ?? w.copy_score,
+        profit_factor_30d: data.copyMetrics?.profitFactor30d ?? w.profit_factor_30d,
+        profit_factor_all: data.copyMetrics?.profitFactorAll ?? w.profit_factor_all,
+        diff_win_rate_30d: data.copyMetrics?.diffWinRate30d ?? w.diff_win_rate_30d,
+        diff_win_rate_all: data.copyMetrics?.diffWinRateAll ?? w.diff_win_rate_all,
+        weekly_profit_rate: data.copyMetrics?.weeklyProfitRate ?? w.weekly_profit_rate,
+        avg_trades_per_day: data.copyMetrics?.avgTradesPerDay ?? w.avg_trades_per_day,
+        // Username update
+        ...(data.username && { username: data.username }),
+      } as Wallet
+    }))
+  }, [])
+
   const handleToggleSelect = useCallback((address: string) => {
     setSelectedAddresses(prev => {
       const next = new Set(prev)
@@ -889,6 +936,7 @@ export default function WalletsPage() {
         onToggleSelect={handleToggleSelect}
         onSelectAll={handleSelectAll}
         allSelected={wallets.length > 0 && wallets.every(w => selectedAddresses.has(w.address))}
+        onWalletUpdate={handleWalletUpdate}
       />
 
       {/* Scroll status */}

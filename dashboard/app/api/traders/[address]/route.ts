@@ -41,6 +41,9 @@ export async function GET(
 
   // Check if force refresh requested
   const forceRefresh = request.nextUrl.searchParams.get('refresh') === 'true'
+  // Lite mode: skip heavy operations (activity/bot detection, event categories)
+  // Used by the modal for fast position loading (~1-2s vs 5-8s)
+  const liteMode = request.nextUrl.searchParams.get('lite') === 'true'
 
   // 2. Check database for cached data from wallets table (unified source)
   const { data: dbWallet } = await supabase
@@ -73,6 +76,17 @@ export async function GET(
       drawdown: dbWallet.drawdown_30d || 0,
     }
 
+    // Parse cached positions if available
+    let cachedOpen: any[] = []
+    let cachedClosed: any[] = []
+    if (dbWallet.cached_positions_json) {
+      try {
+        const cached = JSON.parse(dbWallet.cached_positions_json)
+        cachedOpen = cached.open || []
+        cachedClosed = cached.closed || []
+      } catch { /* ignore parse errors */ }
+    }
+
     const response: TraderProfileResponse = {
       source: 'database',
       dataFreshness: 'cached',
@@ -81,7 +95,8 @@ export async function GET(
       username: dbWallet.username,
       profileImage: undefined,
       accountCreatedAt: dbWallet.account_created_at,
-      positions: [],
+      positions: cachedOpen,
+      closedPositions: cachedClosed.length > 0 ? cachedClosed : undefined,
       closedPositionsCount: dbWallet.total_positions || 0,
       trades: [],
       metrics: {
@@ -133,12 +148,14 @@ export async function GET(
   }
 
   // 5. Fetch live data from Polymarket API
+  // Lite mode: only fetch positions + portfolio value (skip activity, profile, categories)
+  // Full mode: fetch everything including activity for bot detection and categories
   try {
     const [rawPositions, rawClosedPositions, rawActivity, profile, portfolioValue] = await Promise.all([
       getPositions(address).catch(() => []),
       getClosedPositions(address).catch(() => []),
-      getActivity(address, 5000, 90).catch(() => []),
-      getProfile(address).catch(() => ({})),
+      liteMode ? Promise.resolve([]) : getActivity(address, 5000, 90).catch(() => []),
+      liteMode ? Promise.resolve(dbWallet ? { name: dbWallet.username } : {}) : getProfile(address).catch(() => ({})),
       getPortfolioValue(address).catch(() => 0),
     ])
 
@@ -204,24 +221,29 @@ export async function GET(
     const metrics30d = calculatePeriodMetrics(closedPositions, 30, currentBalance)
     const metricsAll = calculatePeriodMetrics(closedPositions, 36500, currentBalance)
 
-    // Bot detection from activity trades
-    const activityTrades = parseTrades(rawActivity)
-    const botScore = calculateBotScore(activityTrades)
-    const isBot = botScore >= 60
+    // Bot detection from activity trades (skip in lite mode, use cached value)
+    let isBot = dbWallet?.is_bot || false
+    if (!liteMode) {
+      const activityTrades = parseTrades(rawActivity)
+      const botScore = calculateBotScore(activityTrades)
+      isBot = botScore >= 60
+    }
 
     // Count unique markets
     const uniqueClosedMarkets = new Set(closedPositions.map(p => p.conditionId).filter(Boolean)).size
     const uniqueOpenMarkets = new Set(openPositions.map(p => p.conditionId).filter(Boolean)).size
     const uniqueMarkets = uniqueClosedMarkets
 
-    // Fetch event categories for top category calculation
-    // Extract eventSlugs from raw positions (available on both open and closed)
-    const allEventSlugs = [
-      ...rawPositions.map((p: any) => String(p.eventSlug || p.slug || '')),
-      ...rawClosedPositions.map((p: any) => String(p.eventSlug || p.slug || '')),
-    ].filter(Boolean)
-    const categoryMap = await fetchEventCategories(allEventSlugs)
-    const topCategory = getTopCategory(allEventSlugs, categoryMap)
+    // Fetch event categories for top category calculation (skip in lite mode, use cached value)
+    let topCategory = dbWallet?.top_category || ''
+    if (!liteMode) {
+      const allEventSlugs = [
+        ...rawPositions.map((p: any) => String(p.eventSlug || p.slug || '')),
+        ...rawClosedPositions.map((p: any) => String(p.eventSlug || p.slug || '')),
+      ].filter(Boolean)
+      const categoryMap = await fetchEventCategories(allEventSlugs)
+      topCategory = getTopCategory(allEventSlugs, categoryMap)
+    }
 
     // 6. Calculate copy-trade metrics
     const profitFactor30d = calculateProfitFactor(closedPositions, 30)
@@ -240,6 +262,8 @@ export async function GET(
       roi7d: metrics7d.roi,
       tradeCountAll: polymarketMetrics.tradeCount,
       medianProfitPct,
+      avgTradesPerDay,
+      isBot,
     })
 
     const copyMetrics = {
@@ -254,9 +278,14 @@ export async function GET(
     }
 
     // 7. Save metrics to database (update existing or insert new wallet)
+    // Cache positions as JSON for instant loading on subsequent views
+    const cachedPositionsJson = JSON.stringify({
+      open: openPositions,
+      closed: closedPositions,
+    })
     const usernameParam = request.nextUrl.searchParams.get('username')
     if (dbWallet) {
-      updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, metricsAll, uniqueOpenMarkets, uniqueClosedMarkets, topCategory, copyMetrics, currentBalance, isBot, profile)
+      await updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, metricsAll, uniqueOpenMarkets, uniqueClosedMarkets, topCategory, copyMetrics, currentBalance, isBot, profile, cachedPositionsJson)
     } else if (polymarketMetrics.tradeCount >= 15) {
       // Insert new wallet only if it has enough trades
       try {
@@ -310,6 +339,12 @@ export async function GET(
           median_profit_pct: medianProfitPct,
           metrics_updated_at: new Date().toISOString(),
         })
+        // Cache positions separately (column may not exist yet - fails silently)
+        if (cachedPositionsJson) {
+          await supabase.from('wallets').update({
+            cached_positions_json: cachedPositionsJson,
+          }).eq('address', address).then(() => {}, () => {})
+        }
       } catch (error) {
         console.error('Error inserting new wallet:', error)
       }
@@ -962,58 +997,48 @@ function calculateCopyScore(params: {
   roi7d: number
   tradeCountAll: number
   medianProfitPct: number | null
+  avgTradesPerDay?: number
+  isBot?: boolean
 }): number {
-  const { profitFactor30d, roi30d, drawdown30d, diffWinRate30d, weeklyProfitRate, roi7d, tradeCountAll, medianProfitPct } = params
+  const { profitFactor30d, drawdown30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay, isBot } = params
 
-  // Hard disqualifiers
-  if (tradeCountAll < 20) return 0
-  if (profitFactor30d < 1.0) return 0
-  if (medianProfitPct == null || medianProfitPct < 5.0) return 0
+  // ── Hard Filters ────────────────────────────────────────────────
+  // All must pass or score = 0. Designed for copy trading with a bot
+  // doing $10-50 per trade, 2-15 trades/day.
+  if (tradeCountAll < 30) return 0                                    // Statistical significance
+  if (profitFactor30d < 1.2) return 0                                 // Real edge exists
+  if (medianProfitPct == null || medianProfitPct < 5.0) return 0      // Per-trade quality
+  if (isBot) return 0                                                  // Human traders only
+  if (avgTradesPerDay != null && (avgTradesPerDay < 2 || avgTradesPerDay > 15)) return 0  // Fits bot capacity
 
-  // 1. Median Profit % score (0-1, capped at 40% = perfect)
-  const mppScore = Math.min(medianProfitPct / 40.0, 1.0)
+  // ── Pillar 1: Edge (40%) ────────────────────────────────────────
+  // Profit Factor = gross wins / gross losses. THE fundamental measure
+  // of trading edge. PF 1.2 (min) → 0, PF 3.0+ → 1.0
+  const edgeScore = Math.min((profitFactor30d - 1.2) / (3.0 - 1.2), 1.0)
 
-  // 2. Profit Factor score (0-1, capped at 3.0)
-  const pfScore = Math.min(profitFactor30d / 3.0, 1.0)
+  // ── Pillar 2: Consistency (35%) ─────────────────────────────────
+  // Weekly profit rate = % of active weeks that were profitable.
+  // Best predictor of future performance (Darwinex research).
+  // 40% → 0, 85%+ → 1.0
+  const consistencyScore = Math.min(Math.max((weeklyProfitRate - 40) / (85 - 40), 0), 1.0)
 
-  // 3. Calmar Ratio score (0-1, capped at 5.0)
-  let calmar: number
-  if (drawdown30d > 0) calmar = roi30d / drawdown30d
-  else if (roi30d > 0) calmar = 5.0
-  else calmar = 0
-  const calmarScore = Math.min(Math.max(calmar, 0) / 5.0, 1.0)
+  // ── Pillar 3: Risk (25%) ────────────────────────────────────────
+  // Inverse of max drawdown. Lower drawdown = higher score.
+  // DD 5% → 1.0 (excellent), DD 25%+ → 0 (dangerous)
+  const riskScore = drawdown30d <= 0
+    ? 1.0  // No drawdown = perfect
+    : Math.min(Math.max((25 - drawdown30d) / (25 - 5), 0), 1.0)
 
-  // 4. Difficulty-weighted win rate (0-1)
-  const dwrScore = Math.min(diffWinRate30d / 100.0, 1.0)
-
-  // 5. Weekly profit rate (0-1)
-  const wprScore = Math.min(weeklyProfitRate / 100.0, 1.0)
-
-  // 6. Edge trend (0-1)
-  let edgeScore: number
-  if (roi30d > 0) {
-    const ratio = roi7d / roi30d
-    if (ratio >= 2.0) edgeScore = 1.0
-    else if (ratio >= 1.0) edgeScore = 0.5 + (ratio - 1.0) * 0.5
-    else edgeScore = Math.max(ratio * 0.5, 0)
-  } else if (roi7d > 0) {
-    edgeScore = 0.8
-  } else {
-    edgeScore = 0
-  }
-
-  // Weighted sum
+  // ── Weighted Sum ────────────────────────────────────────────────
   const rawScore = (
-    mppScore * 0.25 +
-    pfScore * 0.15 +
-    calmarScore * 0.10 +
-    dwrScore * 0.15 +
-    wprScore * 0.20 +
-    edgeScore * 0.15
+    edgeScore * 0.40 +
+    consistencyScore * 0.35 +
+    riskScore * 0.25
   ) * 100
 
-  // Confidence multiplier
-  const confidence = Math.min(1.0, tradeCountAll / 80.0)
+  // ── Confidence Multiplier ───────────────────────────────────────
+  // More trades = more statistical confidence in the score.
+  const confidence = Math.min(1.0, tradeCountAll / 50)
   return Math.min(Math.round(rawScore * confidence), 100)
 }
 
@@ -1136,6 +1161,7 @@ async function updateWalletMetrics(
   currentBalance?: number,
   isBot?: boolean,
   profile?: any,
+  cachedPositionsJson?: string,
 ) {
   try {
     await supabase.from('wallets').update({
@@ -1197,6 +1223,13 @@ async function updateWalletMetrics(
       metrics_updated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('address', address)
+
+    // Cache positions separately (column may not exist yet - fails silently)
+    if (cachedPositionsJson) {
+      await supabase.from('wallets').update({
+        cached_positions_json: cachedPositionsJson,
+      }).eq('address', address).then(() => {}, () => {})
+    }
   } catch (error) {
     console.error('Error updating wallet metrics:', error)
   }
