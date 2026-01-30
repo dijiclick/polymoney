@@ -1,10 +1,10 @@
 /**
- * Goldsky GraphQL API client for TypeScript/Next.js
+ * Goldsky Direct API client for TypeScript/Next.js
  *
- * Fetches ALL metrics from on-chain data via Goldsky subgraphs:
- * - Trades (volume, trade counts) from orderbook subgraph
- * - Positions (PnL, win rate, ROI) from PnL subgraph
- * - Redemptions (resolved positions) from activity subgraph
+ * Data strategy: Query Goldsky GraphQL subgraphs directly
+ * - Trades (volume, trade counts) from CLOB subgraph
+ * - Positions (PnL, win rate, ROI) from Activity subgraph
+ * - Redemptions (resolved positions) from Activity subgraph
  *
  * Metrics Calculation:
  * - PnL = (sellVolume - buyVolume) + redemptionPayouts (includes trading profits)
@@ -15,7 +15,7 @@
  * Server-side usage only (API routes)
  */
 
-// Goldsky subgraph endpoints
+// Goldsky GraphQL endpoints for direct queries (no Mirror tables needed)
 const ORDERBOOK_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn'
 const PNL_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/pnl-subgraph/0.0.14/gn'
 const ACTIVITY_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/activity-subgraph/0.0.4/gn'
@@ -110,18 +110,48 @@ async function queryGoldsky(endpoint: string, query: string, variables: Record<s
 async function getTradesSince(address: string, sinceTimestamp: number, batchSize = 1000): Promise<GoldskyTrade[]> {
   const addressLower = address.toLowerCase()
   const allTrades: GoldskyTrade[] = []
+  const seenIds = new Set<string>()
 
-  // Maker trades query
+  // Query for trades where user is maker
   const makerQuery = `
-    query($address: String!, $since: BigInt!, $first: Int!, $skip: Int!) {
-      trades: orderFilledEvents(
-        where: { maker: $address, timestamp_gte: $since }
+    query($user: String!, $since: BigInt!, $first: Int!, $skip: Int!) {
+      orderFilledEvents(
+        where: { maker: $user, timestamp_gte: $since }
         first: $first
         skip: $skip
         orderBy: timestamp
         orderDirection: desc
       ) {
-        timestamp maker taker makerAssetId takerAssetId makerAmountFilled takerAmountFilled
+        id
+        timestamp
+        maker
+        taker
+        makerAssetId
+        takerAssetId
+        makerAmountFilled
+        takerAmountFilled
+      }
+    }
+  `
+
+  // Query for trades where user is taker
+  const takerQuery = `
+    query($user: String!, $since: BigInt!, $first: Int!, $skip: Int!) {
+      orderFilledEvents(
+        where: { taker: $user, timestamp_gte: $since }
+        first: $first
+        skip: $skip
+        orderBy: timestamp
+        orderDirection: desc
+      ) {
+        id
+        timestamp
+        maker
+        taker
+        makerAssetId
+        takerAssetId
+        makerAmountFilled
+        takerAmountFilled
       }
     }
   `
@@ -131,30 +161,51 @@ async function getTradesSince(address: string, sinceTimestamp: number, batchSize
   while (true) {
     try {
       const data = await queryGoldsky(ORDERBOOK_SUBGRAPH, makerQuery, {
-        address: addressLower, since: sinceTimestamp.toString(), first: batchSize, skip,
-      }) as { trades: GoldskyTrade[] }
-      if (!data.trades?.length) break
-      allTrades.push(...data.trades)
-      if (data.trades.length < batchSize) break
+        user: addressLower,
+        since: sinceTimestamp.toString(),
+        first: batchSize,
+        skip,
+      }) as { orderFilledEvents: GoldskyTrade[] }
+
+      if (!data.orderFilledEvents?.length) break
+      for (const trade of data.orderFilledEvents) {
+        const id = (trade as any).id || `${trade.timestamp}-${trade.maker}-${trade.taker}`
+        if (!seenIds.has(id)) {
+          seenIds.add(id)
+          allTrades.push(trade)
+        }
+      }
+      if (data.orderFilledEvents.length < batchSize) break
       skip += batchSize
-    } catch {
+    } catch (err) {
+      console.error('Error fetching maker trades from Goldsky:', err)
       break
     }
   }
 
-  // Taker trades query
-  const takerQuery = makerQuery.replace('maker:', 'taker:')
+  // Fetch taker trades
   skip = 0
   while (true) {
     try {
       const data = await queryGoldsky(ORDERBOOK_SUBGRAPH, takerQuery, {
-        address: addressLower, since: sinceTimestamp.toString(), first: batchSize, skip,
-      }) as { trades: GoldskyTrade[] }
-      if (!data.trades?.length) break
-      allTrades.push(...data.trades)
-      if (data.trades.length < batchSize) break
+        user: addressLower,
+        since: sinceTimestamp.toString(),
+        first: batchSize,
+        skip,
+      }) as { orderFilledEvents: GoldskyTrade[] }
+
+      if (!data.orderFilledEvents?.length) break
+      for (const trade of data.orderFilledEvents) {
+        const id = (trade as any).id || `${trade.timestamp}-${trade.maker}-${trade.taker}`
+        if (!seenIds.has(id)) {
+          seenIds.add(id)
+          allTrades.push(trade)
+        }
+      }
+      if (data.orderFilledEvents.length < batchSize) break
       skip += batchSize
-    } catch {
+    } catch (err) {
+      console.error('Error fetching taker trades from Goldsky:', err)
       break
     }
   }
@@ -166,10 +217,19 @@ async function getUserPositions(address: string, batchSize = 1000): Promise<Gold
   const addressLower = address.toLowerCase()
   const allPositions: GoldskyPosition[] = []
 
+  // Query Goldsky GraphQL API directly for user positions
   const query = `
     query($user: String!, $first: Int!, $skip: Int!) {
-      userPositions(where: { user: $user }, first: $first, skip: $skip) {
-        tokenId amount avgPrice realizedPnl totalBought
+      userPositions(
+        where: { user: $user }
+        first: $first
+        skip: $skip
+      ) {
+        tokenId
+        amount
+        avgPrice
+        realizedPnl
+        totalBought
       }
     }
   `
@@ -178,13 +238,17 @@ async function getUserPositions(address: string, batchSize = 1000): Promise<Gold
   while (true) {
     try {
       const data = await queryGoldsky(PNL_SUBGRAPH, query, {
-        user: addressLower, first: batchSize, skip,
+        user: addressLower,
+        first: batchSize,
+        skip,
       }) as { userPositions: GoldskyPosition[] }
+
       if (!data.userPositions?.length) break
       allPositions.push(...data.userPositions)
       if (data.userPositions.length < batchSize) break
       skip += batchSize
-    } catch {
+    } catch (err) {
+      console.error('Error fetching positions from Goldsky:', err)
       break
     }
   }
@@ -365,8 +429,13 @@ function calculateTokenPnL(
  * Drawdown = (peak - trough) / peak * 100
  * We track running P&L and find the maximum decline from any peak
  */
-function calculateDrawdown(trades: ParsedTrade[], redemptions: GoldskyRedemption[]): number {
-  if (trades.length === 0) return 0
+interface DrawdownResult {
+  percent: number   // Max drawdown as percentage of peak
+  amount: number    // Max drawdown in dollar amount
+}
+
+function calculateDrawdown(trades: ParsedTrade[], redemptions: GoldskyRedemption[]): DrawdownResult {
+  if (trades.length === 0) return { percent: 0, amount: 0 }
 
   // Create P&L events sorted by time
   interface PnLEvent {
@@ -418,15 +487,17 @@ function calculateDrawdown(trades: ParsedTrade[], redemptions: GoldskyRedemption
     }
   }
 
-  // Return drawdown as percentage of peak
   // If peak is 0, negative, or too small (< $10), there's no meaningful drawdown
   // This avoids noise from very small positions that can show 100% drawdown
-  if (peakPnL < 10) return 0
+  if (peakPnL < 10) return { percent: 0, amount: 0 }
 
   const drawdownPercent = Math.round((maxDrawdown / peakPnL) * 100 * 100) / 100
 
-  // Cap drawdown at 100% (can't lose more than you made)
-  return Math.min(drawdownPercent, 100)
+  // Cap drawdown percentage at 100% (can't lose more than you made)
+  return {
+    percent: Math.min(drawdownPercent, 100),
+    amount: Math.round(maxDrawdown * 100) / 100,
+  }
 }
 
 /**
@@ -466,6 +537,7 @@ interface PeriodMetrics {
   roi: number
   winRate: number
   drawdown: number
+  drawdownAmount: number
   buyVolume: number
   sellVolume: number
   wins: number
@@ -482,7 +554,7 @@ function calculatePeriodMetrics(
 
   if (!trades.length && !redemptions.length) {
     console.log(`No activity for ${periodLabel}`)
-    return { pnl: 0, roi: 0, winRate: 0, drawdown: 0, buyVolume: 0, sellVolume: 0, wins: 0, losses: 0 }
+    return { pnl: 0, roi: 0, winRate: 0, drawdown: 0, drawdownAmount: 0, buyVolume: 0, sellVolume: 0, wins: 0, losses: 0 }
   }
 
   // Calculate token-level P&L
@@ -501,8 +573,8 @@ function calculatePeriodMetrics(
   console.log(`Win Rate: ${winRate.toFixed(2)}% (${wins} wins, ${losses} losses)`)
 
   // Calculate drawdown
-  const drawdown = calculateDrawdown(trades, redemptions)
-  console.log(`Drawdown: ${drawdown.toFixed(2)}%`)
+  const drawdownResult = calculateDrawdown(trades, redemptions)
+  console.log(`Drawdown: ${drawdownResult.percent.toFixed(2)}% ($${drawdownResult.amount.toFixed(2)})`)
 
   console.log(`========== END [${periodLabel}] ==========\n`)
 
@@ -510,7 +582,8 @@ function calculatePeriodMetrics(
     pnl: Math.round(totalPnl * 100) / 100,
     roi: Math.round(roi * 100) / 100,
     winRate: Math.round(winRate * 100) / 100,
-    drawdown,
+    drawdown: drawdownResult.percent,
+    drawdownAmount: drawdownResult.amount,
     buyVolume: Math.round(totalBuyVolume * 100) / 100,
     sellVolume: Math.round(totalSellVolume * 100) / 100,
     wins,
@@ -671,5 +744,309 @@ export async function getTraderMetrics(
     tradesFetched: trades.length,
     positionsFetched: positions.length,
     lookbackDays,
+  }
+}
+
+// ============================================
+// COPY-TRADE METRICS (Goldsky-sourced)
+// ============================================
+
+export interface GoldskyFullMetrics extends GoldskyMetrics {
+  // Copy-trade metrics
+  profitFactor30d: number
+  profitFactorAll: number
+  weeklyProfitRate: number
+  copyScore: number
+  avgTradesPerDay: number
+  medianProfitPct: number | null
+  // All-time breakdown
+  volumeAll: number
+  tradeCountAll: number
+  drawdownAll: number
+  drawdownAmountAll: number
+  grossWins30d: number
+  grossLosses30d: number
+}
+
+function calcProfitFactor(tokenPnLs: Map<string, TokenPnL>): number {
+  let grossWins = 0
+  let grossLosses = 0
+  for (const pnl of tokenPnLs.values()) {
+    if (!pnl.isComplete) continue
+    if (pnl.netPnl > 0.01) grossWins += pnl.netPnl
+    else if (pnl.netPnl < -0.01) grossLosses += Math.abs(pnl.netPnl)
+  }
+  if (grossLosses > 0) return Math.round((grossWins / grossLosses) * 100) / 100
+  if (grossWins > 0) return 10.0
+  return 0
+}
+
+function calcGrossWinsLosses(tokenPnLs: Map<string, TokenPnL>): { grossWins: number; grossLosses: number } {
+  let grossWins = 0
+  let grossLosses = 0
+  for (const pnl of tokenPnLs.values()) {
+    if (!pnl.isComplete) continue
+    if (pnl.netPnl > 0.01) grossWins += pnl.netPnl
+    else if (pnl.netPnl < -0.01) grossLosses += Math.abs(pnl.netPnl)
+  }
+  return { grossWins, grossLosses }
+}
+
+function calcWeeklyProfitRate(trades: ParsedTrade[], redemptions: GoldskyRedemption[]): number {
+  if (!trades.length && !redemptions.length) return 0
+
+  const weekPnl = new Map<string, number>()
+
+  // Group trade PnL by ISO week
+  for (const trade of trades) {
+    const d = new Date(trade.timestamp * 1000)
+    const iso = getISOWeek(d)
+    const current = weekPnl.get(iso) || 0
+    weekPnl.set(iso, current + (trade.side === 'SELL' ? trade.usdValue : -trade.usdValue))
+  }
+
+  // Add redemption payouts
+  for (const r of redemptions) {
+    const payout = parseInt(r.payout || '0') / DECIMALS
+    const d = new Date(parseInt(r.timestamp) * 1000)
+    const iso = getISOWeek(d)
+    const current = weekPnl.get(iso) || 0
+    weekPnl.set(iso, current + payout)
+  }
+
+  if (weekPnl.size === 0) return 0
+  const profitable = Array.from(weekPnl.values()).filter(v => v > 0).length
+  return Math.round((profitable / weekPnl.size) * 100 * 100) / 100
+}
+
+function getISOWeek(d: Date): string {
+  const year = d.getUTCFullYear()
+  // ISO week calculation
+  const jan4 = new Date(Date.UTC(year, 0, 4))
+  const dayOfYear = Math.floor((d.getTime() - new Date(Date.UTC(year, 0, 1)).getTime()) / 86400000) + 1
+  const weekNum = Math.ceil((dayOfYear + jan4.getUTCDay() - 1) / 7)
+  return `${year}-W${String(weekNum).padStart(2, '0')}`
+}
+
+function calcAvgTradesPerDay(trades: ParsedTrade[]): number {
+  if (!trades.length) return 0
+  const activeDays = new Set<string>()
+  const uniqueTokens = new Set<string>()
+  for (const t of trades) {
+    const d = new Date(t.timestamp * 1000)
+    activeDays.add(`${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`)
+    uniqueTokens.add(t.tokenId)
+  }
+  if (activeDays.size === 0) return 0
+  return Math.round((uniqueTokens.size / activeDays.size) * 100) / 100
+}
+
+function calcMedianProfitPct(tokenPnLs: Map<string, TokenPnL>): number | null {
+  const profitPcts: number[] = []
+  for (const pnl of tokenPnLs.values()) {
+    if (!pnl.isComplete || pnl.tokenId === '__redemptions__') continue
+    if (pnl.totalBought <= 0) continue
+    const pct = (pnl.netPnl / pnl.totalBought) * 100
+    profitPcts.push(pct)
+  }
+
+  if (profitPcts.length < 3) return null
+
+  profitPcts.sort((a, b) => a - b)
+  const n = profitPcts.length
+
+  const q1Idx = n * 0.25
+  const q3Idx = n * 0.75
+  const interpolate = (arr: number[], idx: number) => {
+    const lower = Math.floor(idx)
+    const upper = Math.min(lower + 1, arr.length - 1)
+    const weight = idx - lower
+    return arr[lower] * (1 - weight) + arr[upper] * weight
+  }
+  const q1 = interpolate(profitPcts, q1Idx)
+  const q3 = interpolate(profitPcts, q3Idx)
+  const iqr = q3 - q1
+
+  const lowerBound = q1 - 1.5 * iqr
+  const upperBound = q3 + 1.5 * iqr
+  const filtered = profitPcts.filter(p => p >= lowerBound && p <= upperBound)
+  if (!filtered.length) return null
+
+  filtered.sort((a, b) => a - b)
+  const mid = Math.floor(filtered.length / 2)
+  const median = filtered.length % 2 === 0
+    ? (filtered[mid - 1] + filtered[mid]) / 2
+    : filtered[mid]
+
+  return Math.round(median * 100) / 100
+}
+
+function calcCopyScore(params: {
+  profitFactor30d: number
+  drawdown30d: number
+  weeklyProfitRate: number
+  tradeCountAll: number
+  medianProfitPct: number | null
+  avgTradesPerDay: number
+}): number {
+  const { profitFactor30d, drawdown30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay } = params
+
+  // Hard filters
+  if (tradeCountAll < 30) return 0
+  if (profitFactor30d < 1.2) return 0
+  if (medianProfitPct === null || medianProfitPct < 5.0) return 0
+  if (avgTradesPerDay < 2 || avgTradesPerDay > 15) return 0
+
+  // Pillar 1: Edge (40%) - Profit Factor 1.2→0, 3.0+→1.0
+  const edgeScore = Math.min((profitFactor30d - 1.2) / (3.0 - 1.2), 1.0)
+
+  // Pillar 2: Consistency (35%) - Weekly profit rate 40%→0, 85%+→1.0
+  const consistencyScore = Math.min(Math.max((weeklyProfitRate - 40) / (85 - 40), 0), 1.0)
+
+  // Pillar 3: Risk (25%) - Drawdown 5%→1.0, 25%+→0
+  let riskScore: number
+  if (drawdown30d <= 0) riskScore = 1.0
+  else riskScore = Math.min(Math.max((25 - drawdown30d) / (25 - 5), 0), 1.0)
+
+  const rawScore = (edgeScore * 0.40 + consistencyScore * 0.35 + riskScore * 0.25) * 100
+  const confidence = Math.min(1.0, tradeCountAll / 50)
+  return Math.min(Math.round(rawScore * confidence), 100)
+}
+
+/**
+ * Get complete metrics + copy-trade score from Goldsky on-chain data.
+ * Fetches ALL available trade history for accurate copy-score calculation.
+ */
+export async function getTraderMetricsWithCopyScore(address: string): Promise<GoldskyFullMetrics> {
+  const now = Date.now() / 1000
+  const cutoff7d = Math.floor(now - 7 * 24 * 60 * 60)
+  const cutoff30d = Math.floor(now - 30 * 24 * 60 * 60)
+  const cutoffAll = 0
+
+  // Fetch ALL data in parallel
+  const [allTradesRaw, positions, redemptions7d, redemptions30d, redemptionsAll] = await Promise.all([
+    getTradesSince(address, cutoffAll).catch(() => [] as GoldskyTrade[]),
+    getUserPositions(address).catch(() => [] as GoldskyPosition[]),
+    getRedemptions(address, cutoff7d).catch(() => [] as GoldskyRedemption[]),
+    getRedemptions(address, cutoff30d).catch(() => [] as GoldskyRedemption[]),
+    getRedemptions(address, cutoffAll).catch(() => [] as GoldskyRedemption[]),
+  ])
+
+  // Parse all trades
+  const parsedAll = allTradesRaw.map(t => parseTrade(t, address))
+  const parsed7d = parsedAll.filter(t => t.timestamp >= cutoff7d)
+  const parsed30d = parsedAll.filter(t => t.timestamp >= cutoff30d)
+
+  // Volume
+  const volume7d = parsed7d.reduce((sum, t) => sum + t.usdValue, 0)
+  const volume30d = parsed30d.reduce((sum, t) => sum + t.usdValue, 0)
+  const volumeAll = parsedAll.reduce((sum, t) => sum + t.usdValue, 0)
+
+  // Period metrics
+  const metrics7d = calculatePeriodMetrics(parsed7d, redemptions7d, '7d')
+  const metrics30d = calculatePeriodMetrics(parsed30d, redemptions30d, '30d')
+  const metricsAll = calculatePeriodMetrics(parsedAll, redemptionsAll, 'all')
+
+  // All-time position metrics from PnL subgraph
+  let totalRealizedPnl = 0
+  let totalBought = 0
+  let winningPositions = 0
+  let losingPositions = 0
+  const uniqueMarkets = new Set<string>()
+
+  for (const pos of positions) {
+    const realizedPnl = parseInt(pos.realizedPnl || '0') / DECIMALS
+    const amount = parseInt(pos.amount || '0') / DECIMALS
+    const bought = parseInt(pos.totalBought || '0') / DECIMALS
+
+    totalRealizedPnl += realizedPnl
+    totalBought += bought
+    if (pos.tokenId) uniqueMarkets.add(pos.tokenId)
+
+    if (amount < 0.001) {
+      if (realizedPnl > 0.01) winningPositions++
+      else if (realizedPnl < -0.01) losingPositions++
+    }
+  }
+
+  const { unrealizedPnl, openPositions } = estimateUnrealizedPnL(positions)
+  const closedPositions = winningPositions + losingPositions
+  const winRateAll = closedPositions > 0 ? (winningPositions / closedPositions) * 100 : 0
+  const roiAll = totalBought > 0 ? (totalRealizedPnl / totalBought) * 100 : 0
+  const totalPnl = totalRealizedPnl + unrealizedPnl
+
+  // Copy-trade metrics
+  const { tokenPnLs: tokenPnLs30d } = calculateTokenPnL(parsed30d, redemptions30d)
+  const { tokenPnLs: tokenPnLsAll } = calculateTokenPnL(parsedAll, redemptionsAll)
+
+  const profitFactor30d = calcProfitFactor(tokenPnLs30d)
+  const profitFactorAll = calcProfitFactor(tokenPnLsAll)
+  const { grossWins: grossWins30d, grossLosses: grossLosses30d } = calcGrossWinsLosses(tokenPnLs30d)
+  const weeklyProfitRate = calcWeeklyProfitRate(parsedAll, redemptionsAll)
+  const avgTradesPerDay = calcAvgTradesPerDay(parsedAll)
+  const medianProfitPct = calcMedianProfitPct(tokenPnLsAll)
+
+  const copyScore = calcCopyScore({
+    profitFactor30d,
+    drawdown30d: metrics30d.drawdown,
+    weeklyProfitRate,
+    tradeCountAll: parsedAll.length,
+    medianProfitPct,
+    avgTradesPerDay,
+  })
+
+  return {
+    // 7-Day
+    volume7d: Math.round(volume7d * 100) / 100,
+    tradeCount7d: parsed7d.length,
+    pnl7d: metrics7d.pnl,
+    roi7d: metrics7d.roi,
+    winRate7d: metrics7d.winRate,
+    drawdown7d: metrics7d.drawdown,
+
+    // 30-Day
+    volume30d: Math.round(volume30d * 100) / 100,
+    tradeCount30d: parsed30d.length,
+    pnl30d: metrics30d.pnl,
+    roi30d: metrics30d.roi,
+    winRate30d: metrics30d.winRate,
+    drawdown30d: metrics30d.drawdown,
+
+    // All-Time Summary
+    winRateAll: Math.round(winRateAll * 100) / 100,
+    realizedPnl: Math.round(totalRealizedPnl * 100) / 100,
+    unrealizedPnl: Math.round(unrealizedPnl * 100) / 100,
+    totalPnl: Math.round(totalPnl * 100) / 100,
+    roiAll: Math.round(roiAll * 100) / 100,
+
+    // Position Counts
+    openPositions,
+    closedPositions,
+    totalPositions: openPositions + closedPositions,
+    winningPositions,
+    losingPositions,
+
+    // Additional
+    uniqueMarkets: uniqueMarkets.size,
+    totalInvested: Math.round(totalBought * 100) / 100,
+
+    // Metadata
+    tradesFetched: allTradesRaw.length,
+    positionsFetched: positions.length,
+    lookbackDays: 36500,
+
+    // Copy-trade metrics
+    profitFactor30d,
+    profitFactorAll,
+    weeklyProfitRate,
+    copyScore,
+    avgTradesPerDay,
+    medianProfitPct,
+    volumeAll: Math.round(volumeAll * 100) / 100,
+    tradeCountAll: parsedAll.length,
+    drawdownAll: metricsAll.drawdown,
+    drawdownAmountAll: metricsAll.drawdownAmount,
+    grossWins30d: Math.round(grossWins30d * 100) / 100,
+    grossLosses30d: Math.round(grossLosses30d * 100) / 100,
   }
 }

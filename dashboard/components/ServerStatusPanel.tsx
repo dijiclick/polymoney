@@ -65,9 +65,12 @@ interface ServerStatusPanelProps {
   isTogglingDiscovery?: boolean
   onResetDatabase?: () => void
   isResettingDatabase?: boolean
+  analysisMode?: 'main' | 'goldsky'
+  onToggleAnalysisMode?: () => void
+  isTogglingAnalysisMode?: boolean
 }
 
-export default function ServerStatusPanel({ health, isLoading, error, onRefresh, onToggleWalletDiscovery, isTogglingDiscovery, onResetDatabase, isResettingDatabase }: ServerStatusPanelProps) {
+export default function ServerStatusPanel({ health, isLoading, error, onRefresh, onToggleWalletDiscovery, isTogglingDiscovery, onResetDatabase, isResettingDatabase, analysisMode, onToggleAnalysisMode, isTogglingAnalysisMode }: ServerStatusPanelProps) {
   const overall = health?.overall || 'down'
   const oCfg = overallConfig[isLoading ? 'healthy' : (error ? 'down' : overall)]
 
@@ -114,7 +117,8 @@ export default function ServerStatusPanel({ health, isLoading, error, onRefresh,
                 : undefined}
             />
 
-            {/* Wallet Discovery Toggle */}
+            {/* Wallet Discovery Toggle - disabled, use run.bat option 3 locally */}
+            {/*
             <div className="flex items-center justify-between py-1.5 pl-10 pr-1">
               <span className="text-[10px] text-gray-500">Wallet Detection</span>
               <button
@@ -131,6 +135,7 @@ export default function ServerStatusPanel({ health, isLoading, error, onRefresh,
                 }`} />
               </button>
             </div>
+            */}
 
             <div className="h-px bg-white/[0.03]" />
 
@@ -162,6 +167,39 @@ export default function ServerStatusPanel({ health, isLoading, error, onRefresh,
                 : undefined}
               extra={`Latency: ${health.services.supabase.detail}`}
             />
+
+            {/* Analyzer Mode Toggle */}
+            {onToggleAnalysisMode && (
+              <>
+                <div className="h-px bg-white/[0.03]" />
+                <div className="flex items-center justify-between py-2.5 px-0">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-md bg-white/5 flex items-center justify-center flex-shrink-0">
+                      <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                          d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                      </svg>
+                    </div>
+                    <span className="text-xs font-medium text-gray-300">Analyzer Mode</span>
+                  </div>
+                  <button
+                    onClick={onToggleAnalysisMode}
+                    disabled={isTogglingAnalysisMode}
+                    className={`text-[10px] font-medium px-2.5 py-1 rounded-md transition-colors ${
+                      isTogglingAnalysisMode ? 'opacity-50 cursor-wait' : 'cursor-pointer'
+                    } ${
+                      analysisMode === 'goldsky'
+                        ? 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25'
+                        : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                    }`}
+                  >
+                    {analysisMode === 'goldsky' ? 'Goldsky' : 'Main'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            <div className="h-px bg-white/[0.03]" />
 
             {/* Reset Database */}
             <div className="flex items-center justify-between py-1.5 pl-10 pr-1">

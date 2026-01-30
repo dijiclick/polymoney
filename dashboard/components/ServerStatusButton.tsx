@@ -14,8 +14,41 @@ export default function ServerStatusButton() {
   const [open, setOpen] = useState(false)
   const [isTogglingDiscovery, setIsTogglingDiscovery] = useState(false)
   const [isResettingDatabase, setIsResettingDatabase] = useState(false)
+  const [analysisMode, setAnalysisMode] = useState<'main' | 'goldsky'>('main')
+  const [isTogglingAnalysisMode, setIsTogglingAnalysisMode] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const { health, isLoading, error, refetch, setPollInterval } = useServerHealth(60000)
+
+  // Fetch analysis_mode setting on mount
+  useEffect(() => {
+    fetch('/api/settings?key=analysis_mode')
+      .then(res => res.json())
+      .then(data => {
+        if (data.value === 'goldsky') setAnalysisMode('goldsky')
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleToggleAnalysisMode = async () => {
+    if (isTogglingAnalysisMode) return
+    const newMode = analysisMode === 'main' ? 'goldsky' : 'main'
+
+    setIsTogglingAnalysisMode(true)
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'analysis_mode', value: newMode }),
+      })
+      if (res.ok) {
+        setAnalysisMode(newMode)
+      }
+    } catch (err) {
+      console.error('Failed to toggle analysis mode:', err)
+    } finally {
+      setIsTogglingAnalysisMode(false)
+    }
+  }
 
   const handleToggleWalletDiscovery = async () => {
     if (!health || isTogglingDiscovery) return
@@ -120,6 +153,9 @@ export default function ServerStatusButton() {
             isTogglingDiscovery={isTogglingDiscovery}
             onResetDatabase={handleResetDatabase}
             isResettingDatabase={isResettingDatabase}
+            analysisMode={analysisMode}
+            onToggleAnalysisMode={handleToggleAnalysisMode}
+            isTogglingAnalysisMode={isTogglingAnalysisMode}
           />
         </div>
       )}

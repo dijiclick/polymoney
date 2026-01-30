@@ -1,3 +1,4 @@
+
 -- Migration: 011_fix_metrics_calculation.sql
 -- Description: Add all-time metrics columns to match Polymarket's display
 --

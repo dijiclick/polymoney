@@ -7,7 +7,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 export const dynamic = 'force-dynamic'
 
-const ALLOWED_KEYS = ['wallet_discovery_enabled']
+const ALLOWED_KEYS = ['wallet_discovery_enabled', 'analysis_mode']
 
 export async function GET(request: NextRequest) {
   try {
