@@ -10,7 +10,7 @@ interface ColumnFilter {
   max?: number
 }
 
-export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'medianProfit' | 'avgTrades' | 'bot' | 'category' | 'joined'
+export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'growthQuality' | 'medianProfit' | 'avgTrades' | 'bot' | 'category' | 'joined'
 
 export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[] = [
   { key: 'score', label: 'Score', isBlockchain: true },
@@ -19,6 +19,7 @@ export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[
   { key: 'winRate', label: 'Win Rate', isBlockchain: true },
   { key: 'pnl', label: 'PnL', isBlockchain: true },
   { key: 'dd', label: 'Drawdown', isBlockchain: true },
+  { key: 'growthQuality', label: 'Growth', isBlockchain: true },
   { key: 'medianProfit', label: 'Med %/Trade', isBlockchain: true },
   { key: 'active', label: 'Active', isBlockchain: true },
   { key: 'total', label: 'Total', isBlockchain: true },
@@ -28,7 +29,7 @@ export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[
   { key: 'joined', label: 'Joined', isBlockchain: false },  // Not available on blockchain
 ]
 
-export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'medianProfit', 'active', 'total', 'value', 'avgTrades', 'category', 'joined']
+export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'growthQuality', 'medianProfit', 'active', 'total', 'value', 'avgTrades', 'category', 'joined']
 
 // Module-level cache for raw positions data (not filtered by timeframe)
 const positionsCache = new Map<string, { resolvedAt?: string; realizedPnl: number }[] | null>()
@@ -649,6 +650,7 @@ export default function WalletTable({
               {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" isBlockchain={true} />}
               {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" isBlockchain={true} />}
               {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" isBlockchain={true} />}
+              {show('growthQuality') && <SortHeader column={getColumnName('growth_quality')} label="GQ" filterType="number" isBlockchain={true} />}
               {show('medianProfit') && <SortHeader column="median_profit_pct" label="Med %/T" filterType="percent" isBlockchain={true} />}
               {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" isBlockchain={true} />}
               {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" isBlockchain={true} />}
@@ -676,6 +678,7 @@ export default function WalletTable({
               const roi = getMetric(wallet, 'roi')
               const drawdown = getMetric(wallet, 'drawdown')
               const winRate = getMetric(wallet, 'win_rate')
+              const growthQuality = getMetric(wallet, 'growth_quality')
 
               const formatCreatedDate = (dateStr: string | undefined) => {
                 if (!dateStr) return '-'
@@ -820,6 +823,22 @@ export default function WalletTable({
                           title={`Max drawdown: ${formatMoney(wallet.drawdown_amount_all)}`}
                         >
                           {formatPercentPlain(drawdown)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
+                    </td>
+                  )}
+                  {show('growthQuality') && (
+                    <td className="px-3 py-2.5 text-center">
+                      {growthQuality > 0 ? (
+                        <span className={`text-xs font-bold tabular-nums inline-flex items-center justify-center w-6 h-5 rounded ${
+                          growthQuality >= 8 ? 'bg-emerald-500/15 text-emerald-400'
+                          : growthQuality >= 5 ? 'bg-blue-500/10 text-blue-400'
+                          : growthQuality >= 3 ? 'bg-amber-500/10 text-amber-400'
+                          : 'bg-red-500/10 text-red-400'
+                        }`}>
+                          {growthQuality}
                         </span>
                       ) : (
                         <span className="text-xs text-gray-600">-</span>

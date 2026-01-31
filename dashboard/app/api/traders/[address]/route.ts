@@ -73,6 +73,7 @@ export async function GET(
       tradeCount: dbWallet.trade_count_7d || 0,
       winRate: dbWallet.win_rate_7d || 0,
       drawdown: dbWallet.drawdown_7d || 0,
+      growthQuality: dbWallet.growth_quality_7d || 0,
     }
 
     const metrics30d: TimePeriodMetrics = {
@@ -82,6 +83,7 @@ export async function GET(
       tradeCount: dbWallet.trade_count_30d || 0,
       winRate: dbWallet.win_rate_30d || 0,
       drawdown: dbWallet.drawdown_30d || 0,
+      growthQuality: dbWallet.growth_quality_30d || 0,
     }
 
     // Parse cached positions if available
@@ -358,6 +360,12 @@ export async function GET(
             cached_positions_json: cachedPositionsJson,
           }).eq('address', address).then(() => {}, () => {})
         }
+        // Growth quality columns (may not exist yet - fails silently)
+        await supabase.from('wallets').update({
+          growth_quality_7d: metrics7d.growthQuality,
+          growth_quality_30d: metrics30d.growthQuality,
+          growth_quality_all: metricsAll.growthQuality,
+        }).eq('address', address).then(() => {}, () => {})
       } catch (error) {
         console.error('Error inserting new wallet:', error)
       }
@@ -689,6 +697,7 @@ function calculatePeriodMetrics(
   const avgPositionSize = tradeCount > 0 ? volume / tradeCount : 0
   const initialBalance = Math.max(currentBalance - pnl, currentBalance, avgPositionSize * 3, 1)
   const drawdownResult = calculateMaxDrawdown(periodPositions, initialBalance)
+  const growthQuality = calculateGrowthQuality(periodPositions, roi)
 
   return {
     pnl: Math.round(pnl * 100) / 100,
@@ -698,6 +707,7 @@ function calculatePeriodMetrics(
     winRate: Math.round(winRate * 100) / 100,
     drawdown: drawdownResult.percent,
     drawdownAmount: drawdownResult.amount,
+    growthQuality,
   }
 }
 
@@ -739,6 +749,67 @@ function calculateMaxDrawdown(
     percent: Math.min(Math.round(maxDrawdownPercent * 100) / 100, 100),
     amount: Math.round(maxDrawdownAmount * 100) / 100,
   }
+}
+
+/**
+ * Calculate Growth Quality score (1-10).
+ * Combines equity curve steadiness (R² of cumulative PnL) with return magnitude.
+ * 10 = smooth, strong upward curve. 1 = erratic or losing.
+ */
+function calculateGrowthQuality(
+  closedPositions: { realizedPnl: number; resolvedAt?: string }[],
+  roi: number,
+): number {
+  // Sort chronologically
+  const sorted = [...closedPositions]
+    .filter(p => p.resolvedAt)
+    .sort((a, b) => new Date(a.resolvedAt!).getTime() - new Date(b.resolvedAt!).getTime())
+
+  if (sorted.length < 3) return 0  // Not enough data
+
+  // Build cumulative PnL points (x = trade index, y = cumPnl)
+  let cumPnl = 0
+  const points: { x: number; y: number }[] = []
+  for (let i = 0; i < sorted.length; i++) {
+    cumPnl += sorted[i].realizedPnl
+    points.push({ x: i, y: cumPnl })
+  }
+
+  // Linear regression: calculate R² and slope
+  const n = points.length
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0
+  for (const p of points) {
+    sumX += p.x
+    sumY += p.y
+    sumXY += p.x * p.y
+    sumXX += p.x * p.x
+  }
+  const meanY = sumY / n
+  let ssTot = 0
+  for (const p of points) ssTot += (p.y - meanY) ** 2
+  if (ssTot === 0) return roi > 0 ? 7 : 1  // Flat line
+
+  const denom = n * sumXX - sumX * sumX
+  if (denom === 0) return 1
+  const slope = (n * sumXY - sumX * sumY) / denom
+  const intercept = (sumY - slope * sumX) / n
+
+  let ssRes = 0
+  for (const p of points) ssRes += (p.y - (intercept + slope * p.x)) ** 2
+  const r2 = Math.max(1 - ssRes / ssTot, 0)  // Clamp negative R² to 0
+
+  // If slope is negative (losing money), score is low regardless
+  if (slope <= 0) return 1
+
+  // Steadiness: R² directly (0 to 1)
+  const steadiness = r2
+
+  // Return magnitude: scale ROI to 0-1, capped at 20%
+  const returnScore = Math.min(Math.max(roi / 20, 0), 1)
+
+  // Combined: 60% steadiness + 40% return, mapped to 1-10
+  const raw = steadiness * 0.6 + returnScore * 0.4
+  return Math.max(1, Math.min(10, Math.round(raw * 9 + 1)))
 }
 
 /**
@@ -1204,6 +1275,13 @@ async function updateWalletMetrics(
         cached_positions_json: cachedPositionsJson,
       }).eq('address', address).then(() => {}, () => {})
     }
+
+    // Growth quality columns (may not exist yet - fails silently)
+    await supabase.from('wallets').update({
+      growth_quality_7d: metrics7d.growthQuality,
+      growth_quality_30d: metrics30d.growthQuality,
+      growth_quality_all: metricsAll.growthQuality,
+    }).eq('address', address).then(() => {}, () => {})
   } catch (error) {
     console.error('Error updating wallet metrics:', error)
   }

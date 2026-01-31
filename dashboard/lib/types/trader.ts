@@ -40,6 +40,7 @@ export interface TimePeriodMetrics {
   winRate: number
   drawdown?: number  // maximum peak-to-trough decline (%)
   drawdownAmount?: number  // maximum peak-to-trough decline in dollars
+  growthQuality?: number  // 1-10 score: steadiness (R²) + return magnitude
   // Optional fields
   positionsResolved?: number  // positions resolved in this period
   winningPositions?: number

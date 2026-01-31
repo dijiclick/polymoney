@@ -328,6 +328,12 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                           </div>
                           <p className="text-[9px] text-gray-600">
                             {displayData.copyMetrics.avgTradesPerDay.toFixed(1)} trades/day
+                            {(() => {
+                              const gq = displayData.metrics?.metrics30d?.growthQuality || 0
+                              if (gq <= 0) return null
+                              const gqColor = gq >= 8 ? 'text-emerald-400' : gq >= 5 ? 'text-blue-400' : gq >= 3 ? 'text-amber-400' : 'text-red-400'
+                              return <> · <span className={gqColor}>GQ {gq}/10</span></>
+                            })()}
                           </p>
                         </div>
                       )}
