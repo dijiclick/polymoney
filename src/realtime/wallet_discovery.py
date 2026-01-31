@@ -338,6 +338,17 @@ class WalletDiscoveryProcessor:
         metrics_30d = self._calculate_period_metrics(closed_positions, 30, portfolio_value)
         metrics_all = self._calculate_period_metrics(closed_positions, 36500, portfolio_value)  # 100 years = all time
 
+        # Calculate Growth Quality for each period
+        gq_7d = self._calculate_growth_quality(
+            [p for p in closed_positions if self._in_period(p, 7)],
+            metrics_7d["roi"],
+        )
+        gq_30d = self._calculate_growth_quality(
+            [p for p in closed_positions if self._in_period(p, 30)],
+            metrics_30d["roi"],
+        )
+        gq_all = self._calculate_growth_quality(closed_positions, metrics_all["roi"])
+
         logger.debug(
             f"Positions={metrics.get('closed_count', 0)}, "
             f"win_rate={metrics.get('win_rate_all', 0):.1f}%"
@@ -397,6 +408,7 @@ class WalletDiscoveryProcessor:
             "volume_7d": metrics_7d["volume"],
             "trade_count_7d": metrics_7d["trade_count"],
             "drawdown_7d": metrics_7d["drawdown"],
+            "growth_quality_7d": gq_7d,
             # 30-day metrics
             "pnl_30d": metrics_30d["pnl"],
             "roi_30d": metrics_30d["roi"],
@@ -404,6 +416,7 @@ class WalletDiscoveryProcessor:
             "volume_30d": metrics_30d["volume"],
             "trade_count_30d": metrics_30d["trade_count"],
             "drawdown_30d": metrics_30d["drawdown"],
+            "growth_quality_30d": gq_30d,
             # All-time metrics (consistent naming)
             "pnl_all": metrics_all["pnl"],
             "roi_all": metrics_all["roi"],
@@ -411,6 +424,7 @@ class WalletDiscoveryProcessor:
             "volume_all": metrics_all["volume"],
             "trade_count_all": metrics_all["trade_count"],
             "drawdown_all": metrics_all["drawdown"],
+            "growth_quality_all": gq_all,
             # Position counts
             "total_positions": metrics.get("closed_count", 0),
             "active_positions": metrics.get("open_count", 0),
@@ -1019,6 +1033,94 @@ class WalletDiscoveryProcessor:
         return round(median_val, 2)
 
     @staticmethod
+    def _in_period(position: dict, days: int) -> bool:
+        """Check if a position's resolvedAt is within the last N days."""
+        resolved_at = position.get("resolvedAt") or position.get("timestamp")
+        if not resolved_at:
+            return False
+        try:
+            if isinstance(resolved_at, (int, float)):
+                ts = resolved_at / 1000 if resolved_at > 4102444800 else resolved_at
+            else:
+                ts = datetime.fromisoformat(
+                    str(resolved_at).replace("Z", "+00:00")
+                ).timestamp()
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
+            return ts >= cutoff
+        except Exception:
+            return False
+
+    @staticmethod
+    def _calculate_growth_quality(
+        closed_positions: list[dict],
+        roi: float,
+    ) -> int:
+        """
+        Calculate Growth Quality score (1-10).
+        Combines R² of cumulative PnL equity curve (60%) with ROI magnitude (40%).
+
+        R² measures steadiness: 1.0 = perfectly linear growth, 0 = random.
+        """
+        # Filter positions with resolvedAt and sort by time
+        sorted_positions = []
+        for p in closed_positions:
+            resolved_at = p.get("resolvedAt") or p.get("timestamp")
+            if resolved_at:
+                try:
+                    if isinstance(resolved_at, (int, float)):
+                        ts = resolved_at / 1000 if resolved_at > 4102444800 else resolved_at
+                    else:
+                        ts = datetime.fromisoformat(
+                            str(resolved_at).replace("Z", "+00:00")
+                        ).timestamp()
+                    sorted_positions.append((ts, float(p.get("realizedPnl", 0))))
+                except Exception:
+                    pass
+
+        sorted_positions.sort(key=lambda x: x[0])
+
+        if len(sorted_positions) < 3:
+            return 0
+
+        # Build cumulative PnL points
+        cum_pnl = 0.0
+        points = []
+        for i, (_, pnl) in enumerate(sorted_positions):
+            cum_pnl += pnl
+            points.append((float(i), cum_pnl))
+
+        n = len(points)
+        sum_x = sum(p[0] for p in points)
+        sum_y = sum(p[1] for p in points)
+        sum_xy = sum(p[0] * p[1] for p in points)
+        sum_xx = sum(p[0] * p[0] for p in points)
+
+        mean_y = sum_y / n
+        ss_tot = sum((p[1] - mean_y) ** 2 for p in points)
+
+        if ss_tot == 0:
+            return 7 if roi > 0 else 1
+
+        denom = n * sum_xx - sum_x * sum_x
+        if denom == 0:
+            return 1
+
+        slope = (n * sum_xy - sum_x * sum_y) / denom
+        intercept = (sum_y - slope * sum_x) / n
+
+        ss_res = sum((p[1] - (intercept + slope * p[0])) ** 2 for p in points)
+        r2 = max(1 - ss_res / ss_tot, 0)
+
+        # Only reward upward trends
+        if slope <= 0:
+            return 1
+
+        steadiness = r2
+        return_score = min(max(roi / 20, 0), 1.0)
+        raw = steadiness * 0.6 + return_score * 0.4
+        return max(1, min(10, round(raw * 9 + 1)))
+
+    @staticmethod
     def _calculate_copy_score(
         profit_factor_30d: float,
         roi_30d: float,
@@ -1045,7 +1147,7 @@ class WalletDiscoveryProcessor:
             return 0
         if median_profit_pct is None or median_profit_pct < 5.0:
             return 0
-        if avg_trades_per_day is not None and (avg_trades_per_day < 2 or avg_trades_per_day > 15):
+        if avg_trades_per_day is not None and (avg_trades_per_day < 0.5 or avg_trades_per_day > 25):
             return 0
 
         # Pillar 1: Edge (40%) — Profit Factor 1.2 → 0, 3.0+ → 1.0
