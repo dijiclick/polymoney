@@ -392,6 +392,8 @@ class WalletDiscoveryProcessor:
             trade_count_all=metrics.get("trade_count", 0),
             median_profit_pct=median_profit_pct,
             avg_trades_per_day=avg_trades_per_day,
+            overall_pnl=metrics.get("total_pnl", 0),
+            overall_roi=metrics.get("roi_all", 0),
         )
 
         wallet_data = {
@@ -1131,6 +1133,8 @@ class WalletDiscoveryProcessor:
         trade_count_all: int,
         median_profit_pct: float | None = None,
         avg_trades_per_day: float | None = None,
+        overall_pnl: float = 0,
+        overall_roi: float = 0,
     ) -> int:
         """
         Calculate composite copy-trade score (0-100).
@@ -1140,7 +1144,11 @@ class WalletDiscoveryProcessor:
         - Consistency (35%): Weekly Profit Rate normalized 40%-85%
         - Risk (25%): Inverse drawdown, DD 5%-25%
         """
-        # Hard filters — all must pass or score = 0
+        # Hard filters — all must pass or score = 0 (matching TypeScript)
+        if overall_pnl < 0:
+            return 0
+        if overall_roi < 0:
+            return 0
         if trade_count_all < 30:
             return 0
         if profit_factor_30d < 1.2:
