@@ -6,7 +6,7 @@
 -- ============================================
 CREATE TABLE IF NOT EXISTS wallets (
     address TEXT PRIMARY KEY,
-    source TEXT NOT NULL CHECK (source IN ('goldsky', 'leaderboard', 'both')),
+    source TEXT NOT NULL CHECK (source IN ('live')),
     balance DECIMAL(18,2) DEFAULT 0,
     balance_updated_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),

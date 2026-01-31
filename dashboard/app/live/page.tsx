@@ -54,33 +54,33 @@ function LiveFeedContent() {
     }
   }, [trades])
 
-  // Batch check pending addresses every 5 seconds
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      if (pendingAddresses.current.size === 0) return
+  // Batch check pending addresses every 5 seconds - DISABLED
+  // useEffect(() => {
+  //   const interval = setInterval(async () => {
+  //     if (pendingAddresses.current.size === 0) return
 
-      const batch = Array.from(pendingAddresses.current)
-      pendingAddresses.current.clear()
+  //     const batch = Array.from(pendingAddresses.current)
+  //     pendingAddresses.current.clear()
 
-      try {
-        const res = await fetch('/api/wallets/check-stale', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ addresses: batch }),
-        })
-        if (!res.ok) return
-        const data = await res.json()
-        if (data.stale && data.stale.length > 0) {
-          refreshQueue.current.push(...data.stale)
-          processRefreshQueue()
-        }
-      } catch {
-        // Silently ignore
-      }
-    }, 5000)
+  //     try {
+  //       const res = await fetch('/api/wallets/check-stale', {
+  //         method: 'POST',
+  //         headers: { 'Content-Type': 'application/json' },
+  //         body: JSON.stringify({ addresses: batch }),
+  //       })
+  //       if (!res.ok) return
+  //       const data = await res.json()
+  //       if (data.stale && data.stale.length > 0) {
+  //         refreshQueue.current.push(...data.stale)
+  //         processRefreshQueue()
+  //       }
+  //     } catch {
+  //       // Silently ignore
+  //     }
+  //   }, 5000)
 
-    return () => clearInterval(interval)
-  }, [])
+  //   return () => clearInterval(interval)
+  // }, [])
 
   // Process refresh queue sequentially
   const processRefreshQueue = useCallback(async () => {

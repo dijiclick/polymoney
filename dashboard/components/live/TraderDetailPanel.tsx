@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { LiveTrade } from '@/lib/supabase'
 import PnlChart, { ClosedPosition } from './PnlChart'
 
@@ -86,15 +86,12 @@ export default function TraderDetailPanel({ address, trades, onClose }: TraderDe
   const [activeTab, setActiveTab] = useState<'open' | 'closed' | 'feed'>('feed')
   const [copied, setCopied] = useState(false)
 
-  useEffect(() => {
-    fetchTraderData()
-  }, [address])
-
-  const fetchTraderData = async () => {
+  const fetchTraderData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/traders/${address}?refresh=true`)
+      // Use cached data to match table score (no recalculation)
+      const res = await fetch(`/api/traders/${address}?refresh=false&lite=true`)
       if (!res.ok) throw new Error('Failed to fetch')
       const result = await res.json()
       setData(result)
@@ -103,7 +100,12 @@ export default function TraderDetailPanel({ address, trades, onClose }: TraderDe
     } finally {
       setLoading(false)
     }
-  }
+  }, [address])
+
+  // Fetch data only once when modal opens - NO auto-refresh
+  useEffect(() => {
+    fetchTraderData()
+  }, [fetchTraderData])
 
   const copyAddress = () => {
     navigator.clipboard.writeText(address)

@@ -217,7 +217,7 @@ class SupabaseClient:
         return result.data or []
 
     def get_wallets_by_source(self, source: str) -> list[dict]:
-        """Get wallets by source (goldsky, live)."""
+        """Get wallets by source (e.g. live)."""
         result = self._client.table("wallets").select("*").eq("source", source).execute()
         return result.data or []
 

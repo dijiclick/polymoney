@@ -241,7 +241,6 @@ export async function POST(request: NextRequest) {
       const stats = {
         total: wallets?.length || 0,
         analyzed: wallets?.filter(w => w.metrics_updated_at).length || 0,
-        goldsky: wallets?.filter(w => w.source === 'goldsky').length || 0,
         live: wallets?.filter(w => w.source === 'live').length || 0,
         qualified200: wallets?.filter(w => w.balance >= 200).length || 0,
         totalBalance: wallets?.reduce((sum, w) => sum + (w.balance || 0), 0) || 0,

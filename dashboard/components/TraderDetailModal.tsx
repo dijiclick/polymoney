@@ -148,36 +148,24 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
     setLoading(true)
     setError(null)
     try {
-      // Phase 1: Try cached data first (instant if positions are cached in DB)
-      const cachedRes = await fetch(`/api/traders/${address}?refresh=false`)
-      if (cachedRes.ok) {
-        const cachedResult = await cachedRes.json()
-        // If we got cached positions, show them immediately
-        if (cachedResult.closedPositions?.length > 0 || cachedResult.positions?.length > 0) {
-          setData(cachedResult)
-          onDataUpdate?.(address, cachedResult)
-          setLoading(false)
-          // Phase 2: Refresh in background with lite mode (positions only, skip activity/categories)
-          fetch(`/api/traders/${address}?refresh=true&lite=true`)
-            .then(res => res.ok ? res.json() : null)
-            .then(freshResult => {
-              if (freshResult) {
-                setData(freshResult)
-                onDataUpdate?.(address, freshResult)
-              }
-            })
-            .catch(() => {}) // Silent background refresh failure
+      // Fetch cached data only — no background refresh to avoid triggering
+      // realtime subscription loops that unmount/remount the modal
+      const res = await fetch(`/api/traders/${address}?refresh=false`)
+      if (res.ok) {
+        const result = await res.json()
+        if (result.closedPositions?.length > 0 || result.positions?.length > 0) {
+          setData(result)
+          onDataUpdate?.(address, result)
           return
         }
       }
 
-      // Phase 1 had no cached positions — fetch fresh with lite mode
-      const res = await fetch(`/api/traders/${address}?refresh=true&lite=true`)
-      if (!res.ok) throw new Error('Failed to fetch trader data')
-      const result = await res.json()
-      setData(result)
-      // Notify parent so the dashboard table row can update with fresh data
-      onDataUpdate?.(address, result)
+      // No cached positions — fetch fresh with lite mode (single request, no background refresh)
+      const freshRes = await fetch(`/api/traders/${address}?refresh=true&lite=true`)
+      if (!freshRes.ok) throw new Error('Failed to fetch trader data')
+      const freshResult = await freshRes.json()
+      setData(freshResult)
+      onDataUpdate?.(address, freshResult)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -344,6 +332,31 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                         </div>
                       )}
                     </div>
+                    {/* Hard filter warnings */}
+                    {(() => {
+                      const warnings: string[] = []
+                      const m = displayData.metrics
+                      const cm = displayData.copyMetrics
+                      if (m && cm) {
+                        if ((m.totalPnl || 0) < 0) warnings.push('Negative overall PnL')
+                        if ((m.roiPercent || 0) < 0) warnings.push('Negative overall ROI')
+                        if ((m.tradeCountAllTime || 0) < 30) warnings.push(`Only ${m.tradeCountAllTime || 0} trades (need 30+)`)
+                        if (cm.profitFactor30d < 1.2) warnings.push(`PF30d ${cm.profitFactor30d.toFixed(2)} (need 1.2+)`)
+                        if (cm.medianProfitPct == null || cm.medianProfitPct < 5.0) warnings.push(`Median profit ${cm.medianProfitPct?.toFixed(1) ?? '?'}% (need 5%+)`)
+                        if (cm.avgTradesPerDay < 0.5) warnings.push(`${cm.avgTradesPerDay.toFixed(1)} trades/day (need 0.5+)`)
+                        if (cm.avgTradesPerDay > 25) warnings.push(`${cm.avgTradesPerDay.toFixed(1)} trades/day (max 25)`)
+                      }
+                      if (warnings.length === 0) return null
+                      return (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {warnings.map((w, i) => (
+                            <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-medium bg-amber-500/10 text-amber-400/80 border border-amber-500/20">
+                              <span className="opacity-70">!</span> {w}
+                            </span>
+                          ))}
+                        </div>
+                      )
+                    })()}
                   </div>
                 )
               })()}

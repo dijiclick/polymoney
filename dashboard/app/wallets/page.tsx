@@ -1,14 +1,13 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Wallet, WalletFilter, TimePeriod } from '@/lib/supabase'
+import { Wallet, TimePeriod } from '@/lib/supabase'
 import TimePeriodSelector from '@/components/TimePeriodSelector'
 import WalletTable, { ColumnKey, COLUMNS, DEFAULT_VISIBLE } from '@/components/WalletTable'
 
 interface WalletStats {
   total: number
   analyzed: number
-  goldsky: number
   live: number
   qualified200: number
   totalBalance: number
@@ -64,6 +63,7 @@ export default function WalletsPage() {
   const reanalyzeAbortRef = useRef(false)
   const columnSettingsRef = useRef<HTMLDivElement>(null)
   const analyzeInputRef = useRef<HTMLInputElement>(null)
+
 
   const startRefreshAll = useCallback(() => {
     if (eventSourceRef.current) return // already running
@@ -495,6 +495,12 @@ export default function WalletsPage() {
       setSelectedAddresses(new Set())
     }
   }, [reanalyzeDone]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Real-time subscription DISABLED — it caused infinite reload loops:
+  // When the modal's background refresh updated a wallet row, the subscription
+  // triggered fetchWallets(null) which set loading=true, unmounting the modal.
+  // When loading went back to false the modal remounted and refetched, creating a loop.
+  // Use the Refresh All button or re-open the page to get fresh data instead.
 
   // Cleanup EventSource on unmount
   useEffect(() => {

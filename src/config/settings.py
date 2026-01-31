@@ -35,18 +35,9 @@ class PolymarketApiConfig(BaseModel):
     rate_limit: int = 60
 
 
-class GoldskyAnalyticsConfig(BaseModel):
-    """Goldsky analytics configuration."""
-    enabled: bool = True
-    compare_mode: bool = True
-    tolerance_pct: float = 1.0
-
-
 class AnalyticsConfig(BaseModel):
     """Analytics data source configuration."""
-    # Data source: "polymarket", "goldsky", or "both"
     data_source: str = "polymarket"
-    goldsky: GoldskyAnalyticsConfig = Field(default_factory=GoldskyAnalyticsConfig)
 
 
 class ApiConfig(BaseModel):
@@ -101,10 +92,8 @@ class Settings(BaseModel):
 
         # Load analytics config from yaml
         analytics_data = config_data.get("analytics", {})
-        goldsky_analytics_data = analytics_data.get("goldsky", {})
         analytics_config = AnalyticsConfig(
             data_source=analytics_data.get("data_source", "polymarket"),
-            goldsky=GoldskyAnalyticsConfig(**goldsky_analytics_data),
         )
 
         return cls(

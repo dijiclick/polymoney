@@ -49,13 +49,14 @@ export function useServerHealth(pollInterval: number = 60000) {
     intervalRef.current = setInterval(fetchHealth, ms)
   }, [fetchHealth])
 
+  // Auto-polling DISABLED - only fetch once on mount
   useEffect(() => {
     fetchHealth()
-    intervalRef.current = setInterval(fetchHealth, pollInterval)
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
-  }, [fetchHealth, pollInterval])
+    // intervalRef.current = setInterval(fetchHealth, pollInterval)
+    // return () => {
+    //   if (intervalRef.current) clearInterval(intervalRef.current)
+    // }
+  }, [fetchHealth])
 
   return { health, isLoading, error, refetch: fetchHealth, setPollInterval }
 }

@@ -129,7 +129,10 @@ export default function TrackPage() {
   const refreshWallet = useCallback(async (address: string) => {
     setRefreshingAddresses(prev => new Set(prev).add(address))
     try {
-      const refreshRes = await fetch(`/api/admin/refresh-metrics?address=${address}`, { method: 'POST' })
+      let refreshRes: Response
+
+      refreshRes = await fetch(`/api/admin/refresh-metrics?address=${address}`, { method: 'POST' })
+
       if (refreshRes.ok) {
         await fetch('/api/tracked-wallets', {
           method: 'POST',
@@ -170,23 +173,23 @@ export default function TrackPage() {
     isRefreshingAll.current = false
   }, [trackedMeta, refreshWallet, fetchTrackedWallets])
 
-  // Auto-refresh: fires at exactly the chosen interval
-  useEffect(() => {
-    if (autoRefreshTimer.current) {
-      clearInterval(autoRefreshTimer.current)
-    }
+  // Auto-refresh: DISABLED
+  // useEffect(() => {
+  //   if (autoRefreshTimer.current) {
+  //     clearInterval(autoRefreshTimer.current)
+  //   }
 
-    const intervalMs = refreshInterval * 60 * 1000
-    autoRefreshTimer.current = setInterval(() => {
-      refreshAll()
-    }, intervalMs)
+  //   const intervalMs = refreshInterval * 60 * 1000
+  //   autoRefreshTimer.current = setInterval(() => {
+  //     refreshAll()
+  //   }, intervalMs)
 
-    return () => {
-      if (autoRefreshTimer.current) {
-        clearInterval(autoRefreshTimer.current)
-      }
-    }
-  }, [refreshInterval, refreshAll])
+  //   return () => {
+  //     if (autoRefreshTimer.current) {
+  //       clearInterval(autoRefreshTimer.current)
+  //     }
+  //   }
+  // }, [refreshInterval, refreshAll])
 
   const handleIntervalChange = (value: number) => {
     setRefreshInterval(value)

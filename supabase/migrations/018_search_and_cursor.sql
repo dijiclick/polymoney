@@ -17,7 +17,6 @@ AS $$
   SELECT jsonb_build_object(
     'total', (SELECT count(*) FROM wallets),
     'analyzed', (SELECT count(*) FROM wallets WHERE metrics_updated_at IS NOT NULL),
-    'goldsky', (SELECT count(*) FROM wallets WHERE source = 'goldsky'),
     'live', (SELECT count(*) FROM wallets WHERE source = 'live'),
     'qualified200', (SELECT count(*) FROM wallets WHERE balance >= 200),
     'totalBalance', (SELECT COALESCE(sum(balance), 0) FROM wallets),

@@ -136,7 +136,7 @@ CREATE TABLE traders (
     profile_image TEXT,
 
     -- ════════════════════════════════════════════════════════════════════════
-    -- STEP 1: Goldsky Data
+    -- STEP 1: Trade Data
     -- ════════════════════════════════════════════════════════════════════════
     trade_count_30d INT DEFAULT 0,
     trade_count_alltime INT DEFAULT 0,
@@ -432,7 +432,7 @@ BEGIN
     -- Create progress entries for each step
     INSERT INTO pipeline_progress (run_id, step_number, step_name, status)
     VALUES
-        (v_run_id, 1, 'Goldsky Extraction', 'pending'),
+        (v_run_id, 1, 'Trade Extraction', 'pending'),
         (v_run_id, 2, 'Balance Check', 'pending'),
         (v_run_id, 3, 'Positions Analysis', 'pending'),
         (v_run_id, 4, 'Win Rate Calculation', 'pending'),

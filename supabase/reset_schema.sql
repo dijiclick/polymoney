@@ -292,7 +292,7 @@ BEGIN
 
     INSERT INTO pipeline_progress (run_id, step_number, step_name, status)
     VALUES
-        (v_run_id, 1, 'Goldsky Extraction', 'pending'),
+        (v_run_id, 1, 'Trade Extraction', 'pending'),
         (v_run_id, 2, 'Balance Check', 'pending'),
         (v_run_id, 3, 'Positions Analysis', 'pending'),
         (v_run_id, 4, 'Win Rate Calculation', 'pending'),

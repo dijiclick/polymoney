@@ -1,5 +1,5 @@
 -- Migration: 008_cleanup_obsolete.sql
--- Description: Clean up obsolete database objects after removing Goldsky and Leaderboard pipelines
+-- Description: Clean up obsolete database objects after removing legacy pipelines
 
 -- ============================================
 -- DROP OBSOLETE FUNCTIONS
@@ -25,9 +25,9 @@ RETURNS wallets AS $$
 DECLARE
     v_result wallets;
 BEGIN
-    -- Validate source (only 'goldsky' or 'live' allowed)
-    IF p_source NOT IN ('goldsky', 'live') THEN
-        RAISE EXCEPTION 'Invalid source: %. Must be goldsky or live', p_source;
+    -- Validate source (only 'live' allowed)
+    IF p_source NOT IN ('live') THEN
+        RAISE EXCEPTION 'Invalid source: %. Must be live', p_source;
     END IF;
 
     -- Upsert

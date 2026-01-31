@@ -7,7 +7,6 @@ Uses Polymarket Data API for all metrics calculation.
 
 import asyncio
 import logging
-import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -62,12 +61,6 @@ class WalletDiscoveryProcessor:
         self._paused = False
         self._settings_check_interval = 15  # seconds
 
-        # Analysis mode: 'main' (local Polymarket API) or 'goldsky' (delegate to dashboard API)
-        self._analysis_mode: str = os.environ.get("ANALYSIS_MODE", "main")
-
-        # Dashboard base URL for Goldsky mode delegation
-        self._dashboard_url: str = os.environ.get("DASHBOARD_URL", "http://localhost:3000")
-
         # Stats
         self._wallets_discovered = 0
         self._wallets_skipped_cooldown = 0
@@ -78,14 +71,8 @@ class WalletDiscoveryProcessor:
     async def initialize(self) -> None:
         """Load existing wallet addresses and last analysis times into memory cache."""
         try:
-            # Check DB setting for analysis_mode (overrides env var)
-            self._check_analysis_mode()
-            logger.info(f"Analysis mode: {self._analysis_mode}")
-
-            # Load from the appropriate table based on mode
-            table_name = "goldsky_wallets" if self._analysis_mode == "goldsky" else "wallets"
-            logger.info(f"Loading wallet addresses from '{table_name}' into cache...")
-            result = self.supabase.table(table_name).select("address, metrics_updated_at").execute()
+            logger.info("Loading wallet addresses from 'wallets' into cache...")
+            result = self.supabase.table("wallets").select("address, metrics_updated_at").execute()
 
             self._known_wallets = set()
             self._wallet_last_analyzed = {}
@@ -119,23 +106,6 @@ class WalletDiscoveryProcessor:
         if self._api:
             await self._api.__aexit__(None, None, None)
 
-    def _check_analysis_mode(self) -> None:
-        """Check system_settings table for analysis_mode setting. DB overrides env var."""
-        try:
-            result = self.supabase.table("system_settings").select("value").eq(
-                "key", "analysis_mode"
-            ).execute()
-
-            if result.data and len(result.data) > 0:
-                value = str(result.data[0].get("value", "main")).strip('"').strip("'")
-                if value in ("main", "goldsky"):
-                    old_mode = self._analysis_mode
-                    self._analysis_mode = value
-                    if old_mode != value:
-                        logger.info(f"Analysis mode changed: {old_mode} -> {value}")
-        except Exception as e:
-            logger.warning(f"Failed to check analysis_mode setting: {e}")
-
     def _check_enabled_flag(self) -> bool:
         """Check system_settings table for wallet_discovery_enabled flag."""
         try:
@@ -168,9 +138,6 @@ class WalletDiscoveryProcessor:
                     logger.info("Wallet discovery PAUSED via system settings")
                 elif not self._paused and was_paused:
                     logger.info("Wallet discovery RESUMED via system settings")
-
-                # Also check analysis mode changes
-                self._check_analysis_mode()
 
                 await asyncio.sleep(self._settings_check_interval)
             except asyncio.CancelledError:
@@ -283,42 +250,6 @@ class WalletDiscoveryProcessor:
 
         self._worker_last_request[worker_id] = datetime.now(timezone.utc)
 
-    async def _process_wallet_goldsky(self, address: str) -> None:
-        """
-        Process a wallet in Goldsky mode by delegating to the dashboard API.
-        The dashboard handles Goldsky subgraph queries and stores in goldsky_wallets.
-        """
-        import aiohttp
-
-        url = f"{self._dashboard_url}/api/goldsky/refresh?address={address}"
-        logger.debug(f"Delegating to Goldsky API: {address[:10]}...")
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("success"):
-                            # Update caches
-                            now = datetime.now(timezone.utc)
-                            self._known_wallets.add(address)
-                            self._wallet_last_analyzed[address] = now
-                            self._wallets_processed += 1
-                            logger.info(
-                                f"Wallet processed (Goldsky): {address[:10]}... | "
-                                f"copy_score={data.get('metrics', {}).get('copy_score', 'N/A')}"
-                            )
-                        else:
-                            logger.warning(f"Goldsky API returned failure for {address[:10]}...")
-                            self._errors += 1
-                    else:
-                        body = await resp.text()
-                        logger.error(f"Goldsky API error {resp.status} for {address[:10]}...: {body[:200]}")
-                        self._errors += 1
-        except Exception as e:
-            logger.error(f"Failed to delegate to Goldsky API for {address[:10]}...: {e}")
-            self._errors += 1
-
     async def _process_wallet(self, address: str) -> None:
         """
         Process a single wallet: fetch data, calculate metrics, store.
@@ -326,10 +257,6 @@ class WalletDiscoveryProcessor:
         Args:
             address: The wallet address to process
         """
-        # In Goldsky mode, delegate to the dashboard API
-        if self._analysis_mode == "goldsky":
-            return await self._process_wallet_goldsky(address)
-
         if not self._api:
             raise RuntimeError("Polymarket API client not initialized")
 
@@ -1234,5 +1161,4 @@ class WalletDiscoveryProcessor:
             "trades_stored": self._trades_stored,
             "errors": self._errors,
             "paused": self._paused,
-            "analysis_mode": self._analysis_mode,
         }

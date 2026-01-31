@@ -150,7 +150,6 @@ export async function GET(
       scores: undefined,
       isNewlyFetched: false,
       lastUpdatedAt: dbWallet.metrics_updated_at,
-      goldskyEnhanced: false,
     }
 
     return NextResponse.json(response)
@@ -253,18 +252,26 @@ export async function GET(
     const weeklyProfitRate = calculateWeeklyProfitRate(closedPositions)
     const avgTradesPerDay = calculateAvgTradesPerDay(closedPositions)
     const medianProfitPct = calculateMedianProfitPct(closedPositions)
-    // Always recalculate score using the 3-pillar formula
-    const copyScore = calculateCopyScore({
-      profitFactor30d,
-      roi30d: metrics30d.roi,
-      drawdown30d: metrics30d.drawdown || 0,
-      diffWinRate30d,
-      weeklyProfitRate,
-      roi7d: metrics7d.roi,
-      tradeCountAll: polymarketMetrics.tradeCount,
-      medianProfitPct,
-      avgTradesPerDay,
-    })
+    const maxSingleLossPct = calculateMaxSingleLossPct(closedPositions)
+
+    // In lite mode (modal open), preserve existing DB score to avoid fluctuation.
+    // Score is only recalculated during full sync (non-lite mode).
+    const copyScore = (liteMode && dbWallet?.copy_score != null)
+      ? dbWallet.copy_score
+      : calculateCopyScore({
+          profitFactor30d,
+          roi30d: metrics30d.roi,
+          drawdown30d: metrics30d.drawdown || 0,
+          diffWinRate30d,
+          weeklyProfitRate,
+          roi7d: metrics7d.roi,
+          tradeCountAll: polymarketMetrics.tradeCount,
+          medianProfitPct,
+          avgTradesPerDay,
+          overallPnl: polymarketMetrics.totalPnl,
+          overallRoi: polymarketMetrics.roiAll,
+          maxSingleLossPct,
+        })
 
     const copyMetrics = {
       profitFactor30d,
@@ -284,7 +291,15 @@ export async function GET(
       closed: closedPositions,
     })
     const usernameParam = request.nextUrl.searchParams.get('username')
-    if (dbWallet) {
+    if (dbWallet && liteMode) {
+      // Lite mode (modal open): only cache positions for instant loading next time.
+      // Don't overwrite metrics or copy_score — those are set during full sync.
+      if (cachedPositionsJson) {
+        await supabase.from('wallets').update({
+          cached_positions_json: cachedPositionsJson,
+        }).eq('address', address).then(() => {}, () => {})
+      }
+    } else if (dbWallet) {
       await updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, metricsAll, uniqueOpenMarkets, uniqueClosedMarkets, topCategory, copyMetrics, currentBalance, profile, cachedPositionsJson)
     } else if (polymarketMetrics.tradeCount >= 15) {
       // Insert new wallet only if it has enough trades
@@ -401,14 +416,13 @@ export async function GET(
       scores: undefined,
       isNewlyFetched: true,
       lastUpdatedAt: new Date().toISOString(),
-      goldskyEnhanced: false,
     }
 
     return NextResponse.json(response)
   } catch (error) {
     console.error('Error fetching trader data:', error)
 
-    // If Goldsky fails but we have stale cached data, return it with warning
+    // If live fetch fails but we have stale cached data, return it with warning
     if (dbWallet) {
       const stalePeriodMetrics7d: TimePeriodMetrics = {
         pnl: dbWallet.pnl_7d || 0,
@@ -483,8 +497,7 @@ export async function GET(
         isNewlyFetched: false,
         lastUpdatedAt: dbWallet.metrics_updated_at,
         warning: 'Live data unavailable, showing cached data',
-        goldskyEnhanced: false,
-      }
+        }
 
       return NextResponse.json(response)
     }
@@ -991,8 +1004,46 @@ function calculateMedianProfitPct(
 }
 
 /**
+ * Calculate maximum single loss as percentage of average position size.
+ * Used for risk management filtering.
+ */
+function calculateMaxSingleLossPct(
+  closedPositions: { size: number; avgPrice: number; realizedPnl: number }[]
+): number | null {
+  const losses: number[] = []
+  let totalInvested = 0
+  let positionCount = 0
+
+  for (const pos of closedPositions) {
+    const initialValue = pos.size * pos.avgPrice
+    if (initialValue <= 0) continue
+
+    positionCount++
+    totalInvested += initialValue
+
+    // Only track losses
+    if (pos.realizedPnl < 0) {
+      losses.push(Math.abs(pos.realizedPnl))
+    }
+  }
+
+  if (positionCount === 0 || totalInvested === 0) return null
+
+  // Find worst single loss
+  if (losses.length === 0) return 0 // No losses = perfect
+
+  const maxLoss = Math.max(...losses)
+  const avgPositionSize = totalInvested / positionCount
+
+  // Express as percentage of average position size
+  const maxLossPct = (maxLoss / avgPositionSize) * 100
+
+  return Math.round(maxLossPct * 100) / 100
+}
+
+/**
  * Calculate composite copy-trade score (0-100).
- * Optimized for small-bankroll copy-trading ($50/trade).
+ * Optimized for copy trading with comprehensive risk management.
  */
 function calculateCopyScore(params: {
   profitFactor30d: number
@@ -1004,16 +1055,22 @@ function calculateCopyScore(params: {
   tradeCountAll: number
   medianProfitPct: number | null
   avgTradesPerDay?: number
+  overallPnl: number
+  overallRoi: number
+  maxSingleLossPct: number | null
 }): number {
-  const { profitFactor30d, drawdown30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay } = params
+  const { profitFactor30d, drawdown30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay, overallPnl, overallRoi, maxSingleLossPct } = params
 
   // ── Hard Filters ────────────────────────────────────────────────
-  // All must pass or score = 0. Designed for copy trading with a bot
-  // doing $10-50 per trade, 2-15 trades/day.
+  // All must pass or score = 0. Optimized for copy trading with risk management
+  // CRITICAL: Reject traders who are losing money overall (prevents hot-streak bias)
+  if (overallPnl < 0) return 0                                        // Must be profitable overall
+  if (overallRoi < 0) return 0                                        // Must have positive overall ROI
   if (tradeCountAll < 30) return 0                                    // Statistical significance
   if (profitFactor30d < 1.2) return 0                                 // Real edge exists
   if (medianProfitPct == null || medianProfitPct < 5.0) return 0      // Per-trade quality
-  if (avgTradesPerDay != null && (avgTradesPerDay < 2 || avgTradesPerDay > 15)) return 0  // Fits bot capacity
+  if (avgTradesPerDay != null && (avgTradesPerDay < 0.5 || avgTradesPerDay > 25)) return 0  // Swing to active traders
+  if (maxSingleLossPct != null && maxSingleLossPct > 300) return 0    // Max single loss < 3x avg position (risk management)
 
   // ── Pillar 1: Edge (40%) ────────────────────────────────────────
   // Profit Factor = gross wins / gross losses. THE fundamental measure

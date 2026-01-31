@@ -3,7 +3,7 @@
 Sync token to market mapping from Polymarket APIs.
 
 This script populates the token_market_mapping table which maps
-token_id (used by Goldsky) to condition_id/outcome (used for metrics).
+token_id to condition_id/outcome (used for metrics).
 
 Data sources:
 1. Polymarket CLOB API - for active market tokens

@@ -12,20 +12,20 @@ interface ColumnFilter {
 
 export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'medianProfit' | 'avgTrades' | 'bot' | 'category' | 'joined'
 
-export const COLUMNS: { key: ColumnKey; label: string }[] = [
-  { key: 'score', label: 'Score' },
-  { key: 'chart', label: 'Chart' },
-  { key: 'roi', label: 'ROI' },
-  { key: 'winRate', label: 'Win Rate' },
-  { key: 'pnl', label: 'PnL' },
-  { key: 'dd', label: 'Drawdown' },
-  { key: 'medianProfit', label: 'Med %/Trade' },
-  { key: 'active', label: 'Active' },
-  { key: 'total', label: 'Total' },
-  { key: 'value', label: 'Value' },
-  { key: 'avgTrades', label: 'Trades/d' },
-  { key: 'category', label: 'Category' },
-  { key: 'joined', label: 'Joined' },
+export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[] = [
+  { key: 'score', label: 'Score', isBlockchain: true },
+  { key: 'chart', label: 'Chart', isBlockchain: true },
+  { key: 'roi', label: 'ROI', isBlockchain: true },
+  { key: 'winRate', label: 'Win Rate', isBlockchain: true },
+  { key: 'pnl', label: 'PnL', isBlockchain: true },
+  { key: 'dd', label: 'Drawdown', isBlockchain: true },
+  { key: 'medianProfit', label: 'Med %/Trade', isBlockchain: true },
+  { key: 'active', label: 'Active', isBlockchain: true },
+  { key: 'total', label: 'Total', isBlockchain: true },
+  { key: 'value', label: 'Value', isBlockchain: false },  // From Polymarket /value API
+  { key: 'avgTrades', label: 'Trades/d', isBlockchain: true },
+  { key: 'category', label: 'Category', isBlockchain: false },  // Not available on blockchain
+  { key: 'joined', label: 'Joined', isBlockchain: false },  // Not available on blockchain
 ]
 
 export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'medianProfit', 'active', 'total', 'value', 'avgTrades', 'category', 'joined']
@@ -497,12 +497,14 @@ export default function WalletTable({
     column,
     label,
     align = 'right',
-    filterType = 'number'
+    filterType = 'number',
+    isBlockchain = false
   }: {
     column: string
     label: string
     align?: 'left' | 'right' | 'center'
     filterType?: 'number' | 'percent' | 'money'
+    isBlockchain?: boolean
   }) => {
     const isActive = sortBy === column
     const isFilterOpen = openFilter === column
@@ -528,6 +530,12 @@ export default function WalletTable({
             onClick={() => onSort?.(column)}
             className="cursor-pointer select-none hover:text-white transition-colors flex items-center gap-0.5"
           >
+            {isBlockchain && (
+              <div
+                className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 animate-pulse mr-1"
+                title="Blockchain-verified data"
+              />
+            )}
             {label}
             <span className={`transition-opacity text-[10px] ${isActive ? 'opacity-100' : 'opacity-0'}`}>
               {sortDir === 'asc' ? '↑' : '↓'}
@@ -548,31 +556,49 @@ export default function WalletTable({
     )
   }
 
+  // Modal always rendered (even during loading) so it never unmounts and loses state
+  const modal = (
+    <TraderDetailModal
+      address={selectedTrader?.address || ''}
+      username={selectedTrader?.username}
+      walletData={selectedTrader || undefined}
+      isOpen={!!selectedTrader}
+      onClose={() => setSelectedTrader(null)}
+      onDataUpdate={onWalletUpdate}
+    />
+  )
+
   if (loading) {
     return (
-      <div className="glass rounded-xl p-10">
-        <div className="flex flex-col items-center justify-center">
-          <div className="relative w-8 h-8">
-            <div className="absolute inset-0 rounded-full border border-white/10"></div>
-            <div className="absolute inset-0 rounded-full border border-transparent border-t-white/40 animate-spin"></div>
+      <>
+        <div className="glass rounded-xl p-10">
+          <div className="flex flex-col items-center justify-center">
+            <div className="relative w-8 h-8">
+              <div className="absolute inset-0 rounded-full border border-white/10"></div>
+              <div className="absolute inset-0 rounded-full border border-transparent border-t-white/40 animate-spin"></div>
+            </div>
+            <p className="text-gray-600 mt-3 text-xs">Loading...</p>
           </div>
-          <p className="text-gray-600 mt-3 text-xs">Loading...</p>
         </div>
-      </div>
+        {modal}
+      </>
     )
   }
 
   if (wallets.length === 0) {
     return (
-      <div className="glass rounded-xl p-10 text-center">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-white/[0.02] mb-3">
-          <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+      <>
+        <div className="glass rounded-xl p-10 text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-white/[0.02] mb-3">
+            <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+          <p className="text-gray-500 text-sm">No wallets found</p>
+          <p className="text-gray-600 text-xs mt-1">Try adjusting your filters</p>
         </div>
-        <p className="text-gray-500 text-sm">No wallets found</p>
-        <p className="text-gray-600 text-xs mt-1">Try adjusting your filters</p>
-      </div>
+        {modal}
+      </>
     )
   }
 
@@ -612,19 +638,24 @@ export default function WalletTable({
                 </th>
               )}
               <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
-              {show('score') && <SortHeader column="copy_score" label="Score" filterType="number" />}
-              {show('chart') && <th className="px-1 py-2.5 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-20">Chart</th>}
-              {show('roi') && <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" />}
-              {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" />}
-              {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" />}
-              {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" />}
-              {show('medianProfit') && <SortHeader column="median_profit_pct" label="Med %/T" filterType="percent" />}
-              {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" />}
-              {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" />}
-              {show('value') && <SortHeader column="balance" label="Value" filterType="money" />}
-              {show('avgTrades') && <SortHeader column="avg_trades_per_day" label="Trades/d" filterType="number" />}
+              {show('score') && <SortHeader column="copy_score" label="Score" filterType="number" isBlockchain={true} />}
+              {show('chart') && <th className="px-1 py-2.5 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-20">
+                <div className="flex items-center justify-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 animate-pulse" title="Blockchain-verified data" />
+                  Chart
+                </div>
+              </th>}
+              {show('roi') && <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" isBlockchain={true} />}
+              {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" isBlockchain={true} />}
+              {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" isBlockchain={true} />}
+              {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" isBlockchain={true} />}
+              {show('medianProfit') && <SortHeader column="median_profit_pct" label="Med %/T" filterType="percent" isBlockchain={true} />}
+              {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" isBlockchain={true} />}
+              {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" isBlockchain={true} />}
+              {show('value') && <SortHeader column="balance" label="Value" filterType="money" isBlockchain={false} />}
+              {show('avgTrades') && <SortHeader column="avg_trades_per_day" label="Trades/d" filterType="number" isBlockchain={true} />}
               {show('category') && <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider w-16">Cat</th>}
-              {show('joined') && <SortHeader column="account_created_at" label="Joined" filterType="number" />}
+              {show('joined') && <SortHeader column="account_created_at" label="Joined" filterType="number" isBlockchain={false} />}
               {trackMode && (
                 <>
                   <th className="px-3 py-2.5 text-right text-gray-500 font-medium text-[11px] uppercase tracking-wider">Updated</th>
@@ -913,15 +944,7 @@ export default function WalletTable({
         </table>
       </div>
 
-      {/* Trader Detail Modal */}
-      <TraderDetailModal
-        address={selectedTrader?.address || ''}
-        username={selectedTrader?.username}
-        walletData={selectedTrader || undefined}
-        isOpen={!!selectedTrader}
-        onClose={() => setSelectedTrader(null)}
-        onDataUpdate={onWalletUpdate}
-      />
+      {modal}
     </div>
   )
 }

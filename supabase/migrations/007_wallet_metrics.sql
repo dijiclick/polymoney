@@ -13,11 +13,11 @@ ALTER TABLE wallets DROP CONSTRAINT IF EXISTS wallets_source_check;
 
 -- Migrate existing data before adding new constraint
 UPDATE wallets SET source = 'live' WHERE source = 'leaderboard';
-UPDATE wallets SET source = 'goldsky' WHERE source = 'both';
+UPDATE wallets SET source = 'live' WHERE source = 'both';
 
 -- Add new source constraint
 ALTER TABLE wallets ADD CONSTRAINT wallets_source_check
-    CHECK (source IN ('goldsky', 'live'));
+    CHECK (source IN ('live'));
 
 -- Add metrics columns for 7-day period
 ALTER TABLE wallets ADD COLUMN IF NOT EXISTS pnl_7d DECIMAL DEFAULT 0;

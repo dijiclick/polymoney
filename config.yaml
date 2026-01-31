@@ -17,10 +17,6 @@ platform_wallets:
 
 # Pipeline step filters
 pipeline:
-  # step1_goldsky: DISABLED - Goldsky data source not in use
-  # step1_goldsky:
-  #   min_trades: 10
-
   step2_balance:
     min_portfolio_value: 200
 
@@ -71,26 +67,8 @@ advanced:
     min_roi_30d: null
     max_losing_streak: null
 
-# Analytics Configuration
-# Controls data source for wallet analytics
-analytics:
-  # Data source: "polymarket" only (goldsky disabled)
-  data_source: "polymarket"
-
-  # goldsky: DISABLED - Goldsky data source not in use
-  goldsky:
-    enabled: false
-    compare_mode: false
-    tolerance_pct: 1.0
-
 # API Configuration
 api:
-  # goldsky: DISABLED - Goldsky data source not in use
-  # goldsky:
-  #   endpoint: "https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn"
-  #   batch_size: 1000
-  #   rate_limit: 10
-
   polymarket:
     base_url: "https://data-api.polymarket.com"
     rate_limit: 60

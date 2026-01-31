@@ -10,9 +10,9 @@ export default function TradeStatsCard() {
   useEffect(() => {
     fetchStats()
 
-    // Refresh stats every 30 seconds
-    const interval = setInterval(fetchStats, 30000)
-    return () => clearInterval(interval)
+    // Auto-refresh DISABLED - only fetch once on mount
+    // const interval = setInterval(fetchStats, 30000)
+    // return () => clearInterval(interval)
   }, [])
 
   async function fetchStats() {

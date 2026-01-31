@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS traders (
     last_updated_at TIMESTAMPTZ DEFAULT NOW(),
 
     -- ════════════════════════════════════════════════════════════════════════
-    -- STEP 1: Goldsky Data (from blockchain)
+    -- STEP 1: Trade Data (from API)
     -- ════════════════════════════════════════════════════════════════════════
     trade_count_30d INT DEFAULT 0,
     trade_count_alltime INT DEFAULT 0,
