@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect, useCallback } from 'react'
 import { HealthData } from '@/hooks/useServerHealth'
 
 type Status = 'healthy' | 'degraded' | 'down'
@@ -24,6 +25,17 @@ function timeAgo(isoString: string): string {
   if (minutes < 60) return `${minutes}m ago`
   const hours = Math.floor(minutes / 60)
   return `${hours}h ago`
+}
+
+function formatUptime(ms: number): string {
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ${minutes % 60}m`
+  const days = Math.floor(hours / 24)
+  return `${days}d ${hours % 24}h`
 }
 
 interface ServiceRowProps {
@@ -71,6 +83,46 @@ export default function ServerStatusPanel({ health, isLoading, error, onRefresh,
   const overall = health?.overall || 'down'
   const oCfg = overallConfig[isLoading ? 'healthy' : (error ? 'down' : overall)]
 
+  // Trade monitor process state
+  const [monitorRunning, setMonitorRunning] = useState<boolean | null>(null)
+  const [monitorUptime, setMonitorUptime] = useState<number | undefined>()
+  const [monitorAction, setMonitorAction] = useState<'starting' | 'stopping' | null>(null)
+
+  const fetchMonitorStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/server/trade-monitor')
+      if (res.ok) {
+        const data = await res.json()
+        setMonitorRunning(data.running)
+        setMonitorUptime(data.uptime)
+      }
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => {
+    fetchMonitorStatus()
+  }, [fetchMonitorStatus])
+
+  const handleToggleMonitor = async () => {
+    const action = monitorRunning ? 'stop' : 'start'
+    setMonitorAction(action === 'start' ? 'starting' : 'stopping')
+    try {
+      const res = await fetch('/api/server/trade-monitor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      const data = await res.json()
+      if (data.ok !== false) {
+        setMonitorRunning(data.running ?? action === 'start')
+        setMonitorUptime(data.uptime)
+        // Refresh health after a delay to pick up new trade data
+        setTimeout(onRefresh, 3000)
+      }
+    } catch { /* ignore */ }
+    setMonitorAction(null)
+  }
+
   return (
     <div className="w-72 max-w-[calc(100vw-2rem)]" style={{ background: 'var(--popover-bg)', border: '1px solid var(--popover-border)' }}
       onClick={e => e.stopPropagation()}
@@ -114,25 +166,31 @@ export default function ServerStatusPanel({ health, isLoading, error, onRefresh,
                 : undefined}
             />
 
-            {/* Wallet Discovery Toggle - disabled, use run.bat option 3 locally */}
-            {/*
+            {/* Trade Monitor Start/Stop */}
             <div className="flex items-center justify-between py-1.5 pl-10 pr-1">
-              <span className="text-[10px] text-gray-500">Wallet Detection</span>
+              <div>
+                <span className="text-[10px] text-gray-500">Process</span>
+                {monitorRunning && monitorUptime != null && (
+                  <span className="text-[9px] text-gray-600 ml-1.5">up {formatUptime(monitorUptime)}</span>
+                )}
+              </div>
               <button
-                onClick={onToggleWalletDiscovery}
-                disabled={isTogglingDiscovery}
-                className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${
-                  health.services.vps_service.wallet_discovery_enabled !== false
-                    ? 'bg-emerald-500/30'
-                    : 'bg-white/10'
-                } ${isTogglingDiscovery ? 'opacity-50 cursor-wait' : 'cursor-pointer hover:opacity-80'}`}
+                onClick={handleToggleMonitor}
+                disabled={monitorAction !== null}
+                className={`text-[10px] font-medium px-2.5 py-0.5 rounded transition-colors ${
+                  monitorAction
+                    ? 'opacity-50 cursor-wait bg-white/5 text-gray-400'
+                    : monitorRunning
+                      ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 cursor-pointer'
+                      : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 cursor-pointer'
+                }`}
               >
-                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                  health.services.vps_service.wallet_discovery_enabled !== false ? 'translate-x-4' : 'translate-x-0.5'
-                }`} />
+                {monitorAction === 'starting' ? 'Starting...'
+                  : monitorAction === 'stopping' ? 'Stopping...'
+                  : monitorRunning ? 'Stop'
+                  : 'Start'}
               </button>
             </div>
-            */}
 
             <div className="h-px bg-white/[0.03]" />
 
