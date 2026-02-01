@@ -410,6 +410,8 @@ class WalletDiscoveryProcessor:
             "volume_7d": metrics_7d["volume"],
             "trade_count_7d": metrics_7d["trade_count"],
             "drawdown_7d": metrics_7d["drawdown"],
+            "wins_7d": metrics_7d["wins"],
+            "losses_7d": metrics_7d["losses"],
             "growth_quality_7d": gq_7d,
             # 30-day metrics
             "pnl_30d": metrics_30d["pnl"],
@@ -418,6 +420,8 @@ class WalletDiscoveryProcessor:
             "volume_30d": metrics_30d["volume"],
             "trade_count_30d": metrics_30d["trade_count"],
             "drawdown_30d": metrics_30d["drawdown"],
+            "wins_30d": metrics_30d["wins"],
+            "losses_30d": metrics_30d["losses"],
             "growth_quality_30d": gq_30d,
             # All-time metrics (consistent naming)
             "pnl_all": metrics_all["pnl"],
@@ -426,6 +430,8 @@ class WalletDiscoveryProcessor:
             "volume_all": metrics_all["volume"],
             "trade_count_all": metrics_all["trade_count"],
             "drawdown_all": metrics_all["drawdown"],
+            "wins_all": metrics_all["wins"],
+            "losses_all": metrics_all["losses"],
             "growth_quality_all": gq_all,
             # Sum profit pct per period
             "sum_profit_pct_7d": metrics_7d.get("sum_profit_pct", 0),
@@ -876,12 +882,16 @@ class WalletDiscoveryProcessor:
         initial_balance = max(current_balance - pnl, current_balance, avg_position_size * 3, 1)
         drawdown = self._calculate_max_drawdown(period_positions, initial_balance)
 
+        losses = trade_count - wins
+
         return {
             "pnl": round(pnl, 2),
             "roi": round(roi, 2),
             "volume": round(volume, 2),
             "trade_count": trade_count,
             "win_rate": round(win_rate, 2),
+            "wins": wins,
+            "losses": losses,
             "drawdown": drawdown,
             "profit_factor": profit_factor,
             "diff_win_rate": round(diff_win_rate, 2),

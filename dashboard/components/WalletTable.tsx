@@ -10,7 +10,7 @@ interface ColumnFilter {
   max?: number
 }
 
-export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'growthQuality' | 'sumProfitPct' | 'medianProfit' | 'avgTrades' | 'bot' | 'category' | 'joined'
+export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'wl' | 'total' | 'dd' | 'growthQuality' | 'sumProfitPct' | 'medianProfit' | 'avgTrades' | 'bot' | 'category' | 'joined'
 
 export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[] = [
   { key: 'score', label: 'Score', isBlockchain: true },
@@ -23,6 +23,7 @@ export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[
   { key: 'sumProfitPct', label: 'Tot %', isBlockchain: true },
   { key: 'medianProfit', label: 'Med %/Trade', isBlockchain: true },
   { key: 'active', label: 'Active', isBlockchain: true },
+  { key: 'wl', label: 'W/L', isBlockchain: true },
   { key: 'total', label: 'Total', isBlockchain: true },
   { key: 'value', label: 'Value', isBlockchain: false },  // From Polymarket /value API
   { key: 'avgTrades', label: 'Trades/d', isBlockchain: true },
@@ -30,7 +31,7 @@ export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[
   { key: 'joined', label: 'Joined', isBlockchain: false },  // Not available on blockchain
 ]
 
-export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'growthQuality', 'sumProfitPct', 'medianProfit', 'active', 'total', 'value', 'avgTrades', 'category', 'joined']
+export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'growthQuality', 'sumProfitPct', 'medianProfit', 'active', 'wl', 'total', 'value', 'avgTrades', 'category', 'joined']
 
 // Module-level cache for raw positions data (not filtered by timeframe)
 const positionsCache = new Map<string, { resolvedAt?: string; realizedPnl: number }[] | null>()
@@ -655,6 +656,7 @@ export default function WalletTable({
               {show('sumProfitPct') && <SortHeader column={getColumnName('sum_profit_pct')} label="Tot %" filterType="percent" isBlockchain={true} />}
               {show('medianProfit') && <SortHeader column="median_profit_pct" label="Med %/T" filterType="percent" isBlockchain={true} />}
               {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" isBlockchain={true} />}
+              {show('wl') && <SortHeader column={getColumnName('wins')} label="W/L" align="center" filterType="number" isBlockchain={true} />}
               {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" isBlockchain={true} />}
               {show('value') && <SortHeader column="balance" label="Value" filterType="money" isBlockchain={false} />}
               {show('avgTrades') && <SortHeader column="avg_trades_per_day" label="Trades/d" filterType="number" isBlockchain={true} />}
@@ -878,6 +880,15 @@ export default function WalletTable({
                     <td className="px-3 py-2.5 text-center">
                       <span className={`text-sm font-medium tabular-nums ${(wallet.active_positions || 0) > 0 ? 'text-gray-200' : 'text-gray-600'}`}>
                         {wallet.active_positions || 0}
+                      </span>
+                    </td>
+                  )}
+                  {show('wl') && (
+                    <td className="px-3 py-2.5 text-center">
+                      <span className="text-sm font-medium tabular-nums">
+                        <span className="text-emerald-400">{getMetric(wallet, 'wins')}</span>
+                        <span className="text-gray-600">/</span>
+                        <span className="text-red-400">{getMetric(wallet, 'losses')}</span>
                       </span>
                     </td>
                   )}

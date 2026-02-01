@@ -143,8 +143,62 @@ function calculateMaxDrawdown(
   }
 }
 
+function calculateGrowthQuality(
+  positions: { realizedPnl: number; resolvedAt?: string }[],
+  roi: number
+): number {
+  // Sort positions by resolved time
+  const sorted: { ts: number; pnl: number }[] = []
+  for (const p of positions) {
+    if (!p.resolvedAt) continue
+    const ts = new Date(p.resolvedAt).getTime()
+    if (!isNaN(ts)) sorted.push({ ts, pnl: p.realizedPnl })
+  }
+  sorted.sort((a, b) => a.ts - b.ts)
+
+  if (sorted.length < 3) return 0
+
+  // Build cumulative PnL points
+  let cumPnl = 0
+  const points: [number, number][] = []
+  for (let i = 0; i < sorted.length; i++) {
+    cumPnl += sorted[i].pnl
+    points.push([i, cumPnl])
+  }
+
+  const n = points.length
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0
+  for (const [x, y] of points) {
+    sumX += x; sumY += y; sumXY += x * y; sumXX += x * x
+  }
+
+  const meanY = sumY / n
+  let ssTot = 0
+  for (const [, y] of points) ssTot += (y - meanY) ** 2
+
+  if (ssTot === 0) return roi > 0 ? 7 : 1
+
+  const denom = n * sumXX - sumX * sumX
+  if (denom === 0) return 1
+
+  const slope = (n * sumXY - sumX * sumY) / denom
+  const intercept = (sumY - slope * sumX) / n
+
+  let ssRes = 0
+  for (const [x, y] of points) ssRes += (y - (intercept + slope * x)) ** 2
+  const r2 = Math.max(1 - ssRes / ssTot, 0)
+
+  // Only reward upward trends
+  if (slope <= 0) return 1
+
+  const steadiness = r2
+  const returnScore = Math.min(Math.max(roi / 20, 0), 1.0)
+  const raw = steadiness * 0.6 + returnScore * 0.4
+  return Math.max(1, Math.min(10, Math.round(raw * 9 + 1)))
+}
+
 function calculatePeriodMetrics(
-  closedPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; realizedPnl: number; isWin: boolean; resolvedAt?: string }[],
+  closedPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; realizedPnl: number; isWin: boolean; resolvedAt?: string; initialValue?: number }[],
   days: number,
   currentBalance: number = 0
 ): TimePeriodMetrics {
@@ -158,7 +212,7 @@ function calculatePeriodMetrics(
   })
 
   if (periodPositions.length === 0) {
-    return { pnl: 0, roi: 0, volume: 0, tradeCount: 0, winRate: 0, drawdown: 0 }
+    return { pnl: 0, roi: 0, volume: 0, tradeCount: 0, winRate: 0, drawdown: 0, winningPositions: 0, losingPositions: 0, growthQuality: 0, sumProfitPct: 0 }
   }
 
   const pnl = periodPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
@@ -175,7 +229,18 @@ function calculatePeriodMetrics(
   for (const pnlVal of marketPnl.values()) {
     if (pnlVal > 0) wins++
   }
+  const losses = tradeCount - wins
   const winRate = tradeCount > 0 ? (wins / tradeCount) * 100 : 0
+
+  // Sum of per-position profit percentages
+  let sumProfitPct = 0
+  for (const p of periodPositions) {
+    let initialValue = p.initialValue || 0
+    if (initialValue <= 0) initialValue = p.size * p.avgPrice
+    if (initialValue > 0) {
+      sumProfitPct += (p.realizedPnl / initialValue) * 100
+    }
+  }
 
   // ROI = Period PnL / Starting Balance
   // Starting balance estimated as current_balance - period_pnl
@@ -192,6 +257,8 @@ function calculatePeriodMetrics(
   const initialBalance = Math.max(currentBalance - pnl, currentBalance, avgPositionSize * 3, 1)
   const drawdownResult = calculateMaxDrawdown(periodPositions, initialBalance)
 
+  const growthQuality = calculateGrowthQuality(periodPositions, roi)
+
   return {
     pnl: Math.round(pnl * 100) / 100,
     roi: Math.round(roi * 100) / 100,
@@ -200,6 +267,10 @@ function calculatePeriodMetrics(
     winRate: Math.round(winRate * 100) / 100,
     drawdown: drawdownResult.percent,
     drawdownAmount: drawdownResult.amount,
+    winningPositions: wins,
+    losingPositions: losses,
+    growthQuality,
+    sumProfitPct: Math.round(sumProfitPct * 100) / 100,
   }
 }
 
@@ -536,12 +607,20 @@ export async function refreshOneWallet(
       volume_7d: metrics7d.volume,
       trade_count_7d: metrics7d.tradeCount,
       drawdown_7d: metrics7d.drawdown,
+      wins_7d: metrics7d.winningPositions || 0,
+      losses_7d: metrics7d.losingPositions || 0,
+      growth_quality_7d: metrics7d.growthQuality || 0,
+      sum_profit_pct_7d: metrics7d.sumProfitPct || 0,
       pnl_30d: metrics30d.pnl,
       roi_30d: metrics30d.roi,
       win_rate_30d: metrics30d.winRate,
       volume_30d: metrics30d.volume,
       trade_count_30d: metrics30d.tradeCount,
       drawdown_30d: metrics30d.drawdown,
+      wins_30d: metrics30d.winningPositions || 0,
+      losses_30d: metrics30d.losingPositions || 0,
+      growth_quality_30d: metrics30d.growthQuality || 0,
+      sum_profit_pct_30d: metrics30d.sumProfitPct || 0,
       total_positions: new Set(closedPositions.map((p: any) => p.conditionId).filter(Boolean)).size,
       active_positions: new Set(openPositions.map((p: any) => p.conditionId).filter(Boolean)).size,
       total_wins: polymetrics.winCount,
@@ -560,6 +639,10 @@ export async function refreshOneWallet(
       trade_count_all: metricsAll.tradeCount,
       drawdown_all: metricsAll.drawdown,
       drawdown_amount_all: metricsAll.drawdownAmount,
+      wins_all: metricsAll.winningPositions || 0,
+      losses_all: metricsAll.losingPositions || 0,
+      growth_quality_all: metricsAll.growthQuality || 0,
+      sum_profit_pct_all: metricsAll.sumProfitPct || 0,
       top_category: topCategory || null,
       // Copy-trade metrics
       profit_factor_30d: profitFactor30d,

@@ -141,6 +141,13 @@ export interface Wallet {
   trade_count_all: number  // total trades all-time
   drawdown_all: number     // max drawdown all-time (percentage)
   drawdown_amount_all: number  // max drawdown all-time in dollar amount
+  // ===== WIN/LOSS COUNTS (positions with positive vs negative PnL) =====
+  wins_7d: number           // winning positions resolved in 7d
+  losses_7d: number         // losing positions resolved in 7d
+  wins_30d: number          // winning positions resolved in 30d
+  losses_30d: number        // losing positions resolved in 30d
+  wins_all: number          // winning positions all-time
+  losses_all: number        // losing positions all-time
   // ===== SUM PROFIT PCT (sum of per-trade profit percentages) =====
   sum_profit_pct_7d: number | null
   sum_profit_pct_30d: number | null

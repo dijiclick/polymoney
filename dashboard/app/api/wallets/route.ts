@@ -29,6 +29,12 @@ const VALID_SORT_COLUMNS = [
   'trade_count_7d',
   'trade_count_30d',
   'trade_count_all',
+  'wins_7d',
+  'wins_30d',
+  'wins_all',
+  'losses_7d',
+  'losses_30d',
+  'losses_all',
   'drawdown_7d',
   'drawdown_30d',
   'drawdown_all',
@@ -77,12 +83,12 @@ export async function GET(request: NextRequest) {
     // Validate sort column
     const safeSortBy = VALID_SORT_COLUMNS.includes(sortBy) ? sortBy : 'balance'
 
-    // Use exact count when filters are active (estimated is inaccurate with WHERE clauses)
+    // Always use exact count (table is small enough, ~11K rows)
     const columnFiltersParam = searchParams.get('columnFilters')
     const hasFilters = search || minBalance > 0 || minWinRate > 0 || (source && source !== 'all') || columnFiltersParam
     let query = supabase
       .from('wallets')
-      .select('*', { count: hasFilters ? 'exact' : 'estimated' })
+      .select('*', { count: 'exact' })
 
     // Server-side search by username or address
     if (search) {
@@ -209,7 +215,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       wallets,
       totalEstimate: count || 0,
-      isExactCount: !!hasFilters,
+      isExactCount: true,
       nextCursor,
       hasMore: wallets.length === limit,
       ...(statsData && { stats: statsData }),

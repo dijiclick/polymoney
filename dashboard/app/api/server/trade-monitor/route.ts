@@ -12,14 +12,24 @@ const STOP_CMD = `pm2 stop ${PM2_NAME}`
 const DELETE_CMD = `pm2 delete ${PM2_NAME}`
 const STATUS_CMD = `pm2 jlist`
 
-async function getPm2Status(): Promise<{ running: boolean; uptime?: number; restarts?: number; memory?: number }> {
+interface Pm2Status {
+  running: boolean
+  status?: string
+  uptime?: number
+  restarts?: number
+  memory?: number
+}
+
+async function getPm2Status(): Promise<Pm2Status> {
   try {
     const { stdout } = await execAsync(STATUS_CMD)
     const processes = JSON.parse(stdout)
     const proc = processes.find((p: any) => p.name === PM2_NAME)
     if (!proc) return { running: false }
+    const pm2Status = proc.pm2_env?.status
     return {
-      running: proc.pm2_env?.status === 'online',
+      running: pm2Status === 'online',
+      status: pm2Status,
       uptime: proc.pm2_env?.pm_uptime ? Date.now() - proc.pm2_env.pm_uptime : undefined,
       restarts: proc.pm2_env?.restart_time,
       memory: proc.monit?.memory,
@@ -29,9 +39,31 @@ async function getPm2Status(): Promise<{ running: boolean; uptime?: number; rest
   }
 }
 
-// GET — check if trade monitor is running
-export async function GET() {
+async function getPm2Logs(lines: number = 40): Promise<string> {
+  try {
+    // Flush logs first, then read last N lines (combined stdout + stderr)
+    const { stdout } = await execAsync(
+      `pm2 logs ${PM2_NAME} --nostream --lines ${lines} 2>&1`,
+      { timeout: 5000 }
+    )
+    return stdout.trim()
+  } catch {
+    return ''
+  }
+}
+
+// GET — check if trade monitor is running, optionally include logs
+export async function GET(request: NextRequest) {
+  const withLogs = request.nextUrl.searchParams.get('logs') === '1'
+  const logLines = parseInt(request.nextUrl.searchParams.get('lines') || '40', 10)
+
   const status = await getPm2Status()
+
+  if (withLogs) {
+    const logs = await getPm2Logs(Math.min(logLines, 200))
+    return NextResponse.json({ ...status, logs })
+  }
+
   return NextResponse.json(status)
 }
 

@@ -86,7 +86,13 @@ export default function ServerStatusPanel({ health, isLoading, error, onRefresh,
   // Trade monitor process state
   const [monitorRunning, setMonitorRunning] = useState<boolean | null>(null)
   const [monitorUptime, setMonitorUptime] = useState<number | undefined>()
+  const [monitorRestarts, setMonitorRestarts] = useState<number | undefined>()
+  const [monitorMemory, setMonitorMemory] = useState<number | undefined>()
+  const [monitorPm2Status, setMonitorPm2Status] = useState<string | undefined>()
   const [monitorAction, setMonitorAction] = useState<'starting' | 'stopping' | null>(null)
+  const [showLogs, setShowLogs] = useState(false)
+  const [logs, setLogs] = useState<string>('')
+  const [logsLoading, setLogsLoading] = useState(false)
 
   const fetchMonitorStatus = useCallback(async () => {
     try {
@@ -95,8 +101,31 @@ export default function ServerStatusPanel({ health, isLoading, error, onRefresh,
         const data = await res.json()
         setMonitorRunning(data.running)
         setMonitorUptime(data.uptime)
+        setMonitorRestarts(data.restarts)
+        setMonitorMemory(data.memory)
+        setMonitorPm2Status(data.status)
       }
     } catch { /* ignore */ }
+  }, [])
+
+  const fetchLogs = useCallback(async () => {
+    setLogsLoading(true)
+    try {
+      const res = await fetch('/api/server/trade-monitor?logs=1&lines=50')
+      if (res.ok) {
+        const data = await res.json()
+        setLogs(data.logs || 'No logs available')
+        // Also update status from same response
+        setMonitorRunning(data.running)
+        setMonitorUptime(data.uptime)
+        setMonitorRestarts(data.restarts)
+        setMonitorMemory(data.memory)
+        setMonitorPm2Status(data.status)
+      }
+    } catch {
+      setLogs('Failed to fetch logs')
+    }
+    setLogsLoading(false)
   }, [])
 
   useEffect(() => {
@@ -167,29 +196,85 @@ export default function ServerStatusPanel({ health, isLoading, error, onRefresh,
             />
 
             {/* Trade Monitor Start/Stop */}
-            <div className="flex items-center justify-between py-1.5 pl-10 pr-1">
-              <div>
-                <span className="text-[10px] text-gray-500">Process</span>
-                {monitorRunning && monitorUptime != null && (
-                  <span className="text-[9px] text-gray-600 ml-1.5">up {formatUptime(monitorUptime)}</span>
-                )}
+            <div className="pl-10 pr-1 py-1.5 space-y-1">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-gray-500">Process</span>
+                  {monitorRunning && monitorUptime != null && (
+                    <span className="text-[9px] text-gray-600 ml-1.5">up {formatUptime(monitorUptime)}</span>
+                  )}
+                </div>
+                <button
+                  onClick={handleToggleMonitor}
+                  disabled={monitorAction !== null}
+                  className={`text-[10px] font-medium px-2.5 py-0.5 rounded transition-colors ${
+                    monitorAction
+                      ? 'opacity-50 cursor-wait bg-white/5 text-gray-400'
+                      : monitorRunning
+                        ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 cursor-pointer'
+                        : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 cursor-pointer'
+                  }`}
+                >
+                  {monitorAction === 'starting' ? 'Starting...'
+                    : monitorAction === 'stopping' ? 'Stopping...'
+                    : monitorRunning ? 'Stop'
+                    : 'Start'}
+                </button>
               </div>
-              <button
-                onClick={handleToggleMonitor}
-                disabled={monitorAction !== null}
-                className={`text-[10px] font-medium px-2.5 py-0.5 rounded transition-colors ${
-                  monitorAction
-                    ? 'opacity-50 cursor-wait bg-white/5 text-gray-400'
-                    : monitorRunning
-                      ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 cursor-pointer'
-                      : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 cursor-pointer'
-                }`}
-              >
-                {monitorAction === 'starting' ? 'Starting...'
-                  : monitorAction === 'stopping' ? 'Stopping...'
-                  : monitorRunning ? 'Stop'
-                  : 'Start'}
-              </button>
+
+              {/* Process diagnostics */}
+              {monitorRunning !== null && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {monitorPm2Status && monitorPm2Status !== 'online' && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">
+                      {monitorPm2Status}
+                    </span>
+                  )}
+                  {monitorRestarts != null && monitorRestarts > 0 && (
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                      monitorRestarts > 5 ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'
+                    }`}>
+                      {monitorRestarts} restart{monitorRestarts !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {monitorMemory != null && monitorMemory > 0 && (
+                    <span className="text-[9px] text-gray-600">
+                      {(monitorMemory / 1024 / 1024).toFixed(0)}MB
+                    </span>
+                  )}
+                  <button
+                    onClick={() => { setShowLogs(!showLogs); if (!showLogs && !logs) fetchLogs() }}
+                    className="text-[9px] text-gray-500 hover:text-gray-300 transition-colors cursor-pointer ml-auto"
+                  >
+                    {showLogs ? 'Hide Logs' : 'Logs'}
+                  </button>
+                </div>
+              )}
+
+              {/* PM2 Logs viewer */}
+              {showLogs && (
+                <div className="mt-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[9px] text-gray-600">PM2 Logs (last 50 lines)</span>
+                    <button
+                      onClick={fetchLogs}
+                      disabled={logsLoading}
+                      className="text-[9px] text-gray-500 hover:text-gray-300 transition-colors cursor-pointer"
+                    >
+                      {logsLoading ? 'Loading...' : 'Refresh'}
+                    </button>
+                  </div>
+                  <div className="bg-black/40 rounded border border-white/5 p-2 max-h-48 overflow-y-auto font-mono">
+                    {logsLoading && !logs ? (
+                      <span className="text-[9px] text-gray-600">Loading logs...</span>
+                    ) : (
+                      <pre className="text-[8px] leading-[1.4] text-gray-400 whitespace-pre-wrap break-all">
+                        {logs || 'No logs available'}
+                      </pre>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="h-px bg-white/[0.03]" />

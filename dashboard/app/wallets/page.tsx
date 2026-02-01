@@ -560,6 +560,7 @@ export default function WalletsPage() {
   }
 
   const activeFilterCount = Object.keys(columnFilters).length
+  const isFiltered = activeFilterCount > 0 || debouncedSearch.trim().length > 0
 
   const formatMoney = (value: number) => {
     if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`
@@ -949,10 +950,10 @@ export default function WalletsPage() {
           <p className="text-[10px] text-gray-600">
             Showing <span className="text-gray-400">{wallets.length.toLocaleString()}</span>
             {totalEstimate > wallets.length && (
-              <> of {isExactCount ? '' : '~'}<span className="text-gray-400">{totalEstimate.toLocaleString()}</span></>
+              <> of <span className="text-gray-400">{totalEstimate.toLocaleString()}</span></>
             )}
             {' '}traders
-            {isExactCount && totalEstimate > 0 && (
+            {isFiltered && totalEstimate > 0 && (
               <span className="text-gray-500 ml-1">(filtered)</span>
             )}
           </p>
