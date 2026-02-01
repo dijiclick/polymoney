@@ -33,6 +33,12 @@ const VALID_SORT_COLUMNS = [
   'drawdown_30d',
   'drawdown_all',
   'drawdown_amount_all',
+  'growth_quality_7d',
+  'growth_quality_30d',
+  'growth_quality_all',
+  'sum_profit_pct_7d',
+  'sum_profit_pct_30d',
+  'sum_profit_pct_all',
   // Overall/legacy metrics
   'overall_win_rate',
   'overall_pnl',
@@ -71,10 +77,12 @@ export async function GET(request: NextRequest) {
     // Validate sort column
     const safeSortBy = VALID_SORT_COLUMNS.includes(sortBy) ? sortBy : 'balance'
 
-    // Build query with estimated count (uses planner estimate for large tables, much faster)
+    // Use exact count when filters are active (estimated is inaccurate with WHERE clauses)
+    const columnFiltersParam = searchParams.get('columnFilters')
+    const hasFilters = search || minBalance > 0 || minWinRate > 0 || (source && source !== 'all') || columnFiltersParam
     let query = supabase
       .from('wallets')
-      .select('*', { count: 'estimated' })
+      .select('*', { count: hasFilters ? 'exact' : 'estimated' })
 
     // Server-side search by username or address
     if (search) {
@@ -98,7 +106,6 @@ export async function GET(request: NextRequest) {
     }
 
     // Apply column filters (min/max ranges)
-    const columnFiltersParam = searchParams.get('columnFilters')
     if (columnFiltersParam) {
       try {
         const columnFilters = JSON.parse(columnFiltersParam) as Record<string, { min?: number; max?: number }>
@@ -202,6 +209,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       wallets,
       totalEstimate: count || 0,
+      isExactCount: !!hasFilters,
       nextCursor,
       hasMore: wallets.length === limit,
       ...(statsData && { stats: statsData }),
@@ -226,25 +234,39 @@ export async function POST(request: NextRequest) {
       const { data: rpcData, error: rpcError } = await supabase.rpc('get_wallet_stats')
 
       if (!rpcError && rpcData) {
-        return NextResponse.json({ stats: rpcData })
+        // Add analyze speed: count wallets analyzed in the last hour
+        const oneHourAgo = new Date(Date.now() - 3600000).toISOString()
+        const { count: recentCount } = await supabase
+          .from('wallets')
+          .select('*', { count: 'exact', head: true })
+          .gte('metrics_updated_at', oneHourAgo)
+        const analyzedPerHour = recentCount || 0
+        const avgSecondsPerWallet = analyzedPerHour > 0 ? Math.round(3600 / analyzedPerHour) : 0
+
+        return NextResponse.json({ stats: { ...rpcData, avgAnalyzeSpeed: avgSecondsPerWallet, analyzedPerHour } })
       }
 
-      // Fallback: fetch minimal columns for stats
-      const { data: wallets, error } = await supabase
-        .from('wallets')
-        .select('source, balance, metrics_updated_at')
+      // Fallback: use count queries to avoid Supabase 1000-row default limit
+      const [totalRes, analyzedRes, speedRes] = await Promise.all([
+        supabase.from('wallets').select('*', { count: 'exact', head: true }),
+        supabase.from('wallets').select('*', { count: 'exact', head: true }).not('metrics_updated_at', 'is', null),
+        supabase.from('wallets').select('*', { count: 'exact', head: true }).gte('metrics_updated_at', new Date(Date.now() - 3600000).toISOString()),
+      ])
 
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
+      if (totalRes.error) {
+        return NextResponse.json({ error: totalRes.error.message }, { status: 500 })
       }
+
+      const total = totalRes.count || 0
+      const analyzed = analyzedRes.count || 0
+      const analyzedPerHour = speedRes.count || 0
+      const avgSecondsPerWallet = analyzedPerHour > 0 ? Math.round(3600 / analyzedPerHour) : 0
 
       const stats = {
-        total: wallets?.length || 0,
-        analyzed: wallets?.filter(w => w.metrics_updated_at).length || 0,
-        live: wallets?.filter(w => w.source === 'live').length || 0,
-        qualified200: wallets?.filter(w => w.balance >= 200).length || 0,
-        totalBalance: wallets?.reduce((sum, w) => sum + (w.balance || 0), 0) || 0,
-        avgBalance: wallets?.length ? wallets.reduce((sum, w) => sum + (w.balance || 0), 0) / wallets.length : 0
+        total,
+        analyzed,
+        avgAnalyzeSpeed: avgSecondsPerWallet,
+        analyzedPerHour,
       }
 
       return NextResponse.json({ stats })

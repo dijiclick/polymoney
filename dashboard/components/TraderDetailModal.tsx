@@ -488,6 +488,12 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                                 </span>
                               </div>
                             </div>
+                            <div className="flex-shrink-0 text-center">
+                              <p className="text-xs text-gray-400">
+                                {formatMoney(position.size * position.avgPrice)}
+                              </p>
+                              <p className="text-[10px] text-gray-600 mt-1">invested</p>
+                            </div>
                             <div className="flex-shrink-0 text-right">
                               <p className={`text-xs ${getPnlColor(position.realizedPnl || 0)}`}>
                                 {position.size > 0 && position.avgPrice > 0 && (

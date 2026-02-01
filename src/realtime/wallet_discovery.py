@@ -427,6 +427,10 @@ class WalletDiscoveryProcessor:
             "trade_count_all": metrics_all["trade_count"],
             "drawdown_all": metrics_all["drawdown"],
             "growth_quality_all": gq_all,
+            # Sum profit pct per period
+            "sum_profit_pct_7d": metrics_7d.get("sum_profit_pct", 0),
+            "sum_profit_pct_30d": metrics_30d.get("sum_profit_pct", 0),
+            "sum_profit_pct_all": metrics_all.get("sum_profit_pct", 0),
             # Position counts
             "total_positions": metrics.get("closed_count", 0),
             "active_positions": metrics.get("open_count", 0),
@@ -787,7 +791,8 @@ class WalletDiscoveryProcessor:
         if not period_positions:
             return {
                 "pnl": 0, "roi": 0, "volume": 0,
-                "trade_count": 0, "win_rate": 0, "drawdown": 0
+                "trade_count": 0, "win_rate": 0, "drawdown": 0,
+                "sum_profit_pct": 0,
             }
 
         # Group by conditionId to count unique markets (not raw entries)
@@ -814,6 +819,18 @@ class WalletDiscoveryProcessor:
             float(p.get("totalBought", 0)) or float(p.get("initialValue", 0)) or (float(p.get("size", 0)) * float(p.get("avgPrice", 0)))
             for p in period_positions
         )
+
+        # Sum of per-trade profit percentages
+        sum_profit_pct = 0.0
+        for p in period_positions:
+            realized_pnl = float(p.get("realizedPnl", 0))
+            initial_value = float(p.get("totalBought", 0) or 0)
+            if initial_value <= 0:
+                initial_value = float(p.get("initialValue", 0))
+            if initial_value <= 0:
+                initial_value = float(p.get("size", 0)) * float(p.get("avgPrice", 0))
+            if initial_value > 0:
+                sum_profit_pct += (realized_pnl / initial_value) * 100
 
         # Calculate win rate from unique markets
         wins = sum(1 for v in market_pnl.values() if v > 0)
@@ -868,6 +885,7 @@ class WalletDiscoveryProcessor:
             "drawdown": drawdown,
             "profit_factor": profit_factor,
             "diff_win_rate": round(diff_win_rate, 2),
+            "sum_profit_pct": round(sum_profit_pct, 2),
         }
 
     def _calculate_weekly_profit_rate(self, closed_positions: list[dict]) -> float:

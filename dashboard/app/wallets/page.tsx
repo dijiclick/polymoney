@@ -12,6 +12,8 @@ interface WalletStats {
   qualified200: number
   totalBalance: number
   avgBalance: number
+  avgAnalyzeSpeed: number
+  analyzedPerHour: number
 }
 
 interface ColumnFilter {
@@ -41,6 +43,7 @@ export default function WalletsPage() {
   const [nextCursor, setNextCursor] = useState<Cursor | null>(null)
   const [hasMore, setHasMore] = useState(true)
   const [totalEstimate, setTotalEstimate] = useState(0)
+  const [isExactCount, setIsExactCount] = useState(false)
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('30d')
   const [sortBy, setSortBy] = useState('copy_score')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -424,7 +427,7 @@ export default function WalletsPage() {
         minBalance: '0',
         minWinRate: '0',
         period: timePeriod,
-        limit: '50',
+        limit: '100',
         sortBy,
         sortDir,
         ...(debouncedSearch.trim() && { search: debouncedSearch.trim() }),
@@ -455,6 +458,7 @@ export default function WalletsPage() {
         setNextCursor(data.nextCursor)
         setHasMore(data.hasMore)
         setTotalEstimate(data.totalEstimate || 0)
+        setIsExactCount(data.isExactCount || false)
       }
     } catch (error) {
       console.error('Error fetching wallets:', error)
@@ -567,7 +571,7 @@ export default function WalletsPage() {
     <div className="min-h-screen">
       {/* Stats Overview */}
       {stats && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3 mb-4 md:mb-6">
+        <div className="grid grid-cols-3 gap-2 md:gap-3 mb-4 md:mb-6">
           <div className="glass rounded-xl p-3 md:p-4">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
@@ -603,28 +607,19 @@ export default function WalletsPage() {
 
           <div className="glass rounded-xl p-3 md:p-4">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-[10px] text-gray-600 uppercase tracking-wider">Total Value</p>
-                <p className="text-lg font-semibold text-white">{formatMoney(stats.totalBalance)}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="glass rounded-xl p-3 md:p-4">
-            <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
                 <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
               <div>
-                <p className="text-[10px] text-gray-600 uppercase tracking-wider">Avg Portfolio</p>
-                <p className="text-lg font-semibold text-white">{formatMoney(stats.avgBalance)}</p>
+                <p className="text-[10px] text-gray-600 uppercase tracking-wider">Avg Speed</p>
+                <p className="text-lg font-semibold text-white">
+                  {stats.avgAnalyzeSpeed > 0 ? `${stats.avgAnalyzeSpeed}s` : '—'}
+                  <span className="text-xs font-normal text-gray-600 ml-1">
+                    /wallet {stats.analyzedPerHour > 0 && `(${stats.analyzedPerHour}/hr)`}
+                  </span>
+                </p>
               </div>
             </div>
           </div>
@@ -835,9 +830,12 @@ export default function WalletsPage() {
           <div className="text-xs text-gray-600">
             <span className="text-gray-400">{wallets.length.toLocaleString()}</span>
             {totalEstimate > wallets.length && (
-              <span> of ~{totalEstimate.toLocaleString()}</span>
+              <span> of {isExactCount ? '' : '~'}{totalEstimate.toLocaleString()}</span>
             )}
             {' '}traders
+            {isExactCount && totalEstimate > 0 && (
+              <span className="text-gray-500 ml-1">(filtered)</span>
+            )}
           </div>
         </div>
 
@@ -951,9 +949,12 @@ export default function WalletsPage() {
           <p className="text-[10px] text-gray-600">
             Showing <span className="text-gray-400">{wallets.length.toLocaleString()}</span>
             {totalEstimate > wallets.length && (
-              <> of ~<span className="text-gray-400">{totalEstimate.toLocaleString()}</span></>
+              <> of {isExactCount ? '' : '~'}<span className="text-gray-400">{totalEstimate.toLocaleString()}</span></>
             )}
             {' '}traders
+            {isExactCount && totalEstimate > 0 && (
+              <span className="text-gray-500 ml-1">(filtered)</span>
+            )}
           </p>
           {isFetchingMore && (
             <p className="text-[10px] text-gray-500">Loading more...</p>

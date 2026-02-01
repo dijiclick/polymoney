@@ -34,8 +34,8 @@
   --input-border: rgba(255, 255, 255, 0.05);
   --popover-bg: #12121a;
   --popover-border: rgba(255, 255, 255, 0.1);
-  --scrollbar-thumb: rgba(255, 255, 255, 0.1);
-  --scrollbar-hover: rgba(255, 255, 255, 0.2);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.25);
+  --scrollbar-hover: rgba(255, 255, 255, 0.4);
   --gradient-text-from: #ffffff;
   --gradient-text-to: #9ca3af;
 }
@@ -59,23 +59,28 @@ footer {
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
-/* Custom scrollbar - minimal style */
+/* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: 3px;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-hover);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 /* Smooth animations */

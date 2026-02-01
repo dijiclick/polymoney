@@ -10,7 +10,7 @@ interface ColumnFilter {
   max?: number
 }
 
-export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'growthQuality' | 'medianProfit' | 'avgTrades' | 'bot' | 'category' | 'joined'
+export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'total' | 'dd' | 'growthQuality' | 'sumProfitPct' | 'medianProfit' | 'avgTrades' | 'bot' | 'category' | 'joined'
 
 export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[] = [
   { key: 'score', label: 'Score', isBlockchain: true },
@@ -20,6 +20,7 @@ export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[
   { key: 'pnl', label: 'PnL', isBlockchain: true },
   { key: 'dd', label: 'Drawdown', isBlockchain: true },
   { key: 'growthQuality', label: 'Growth', isBlockchain: true },
+  { key: 'sumProfitPct', label: 'Tot %', isBlockchain: true },
   { key: 'medianProfit', label: 'Med %/Trade', isBlockchain: true },
   { key: 'active', label: 'Active', isBlockchain: true },
   { key: 'total', label: 'Total', isBlockchain: true },
@@ -29,7 +30,7 @@ export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[
   { key: 'joined', label: 'Joined', isBlockchain: false },  // Not available on blockchain
 ]
 
-export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'growthQuality', 'medianProfit', 'active', 'total', 'value', 'avgTrades', 'category', 'joined']
+export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'growthQuality', 'sumProfitPct', 'medianProfit', 'active', 'total', 'value', 'avgTrades', 'category', 'joined']
 
 // Module-level cache for raw positions data (not filtered by timeframe)
 const positionsCache = new Map<string, { resolvedAt?: string; realizedPnl: number }[] | null>()
@@ -442,15 +443,15 @@ export default function WalletTable({
 
   const getCategoryStyle = (category: string) => {
     switch (category) {
-      case 'Sports': return 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-      case 'Crypto': return 'bg-purple-500/10 text-purple-400 border-purple-500/20'
-      case 'Politics': return 'bg-red-500/10 text-red-400 border-red-500/20'
-      case 'Tech': case 'AI': return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
-      case 'Finance': case 'Business': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-      case 'Pop Culture': case 'Entertainment': return 'bg-pink-500/10 text-pink-400 border-pink-500/20'
-      case 'Science': case 'Health': return 'bg-teal-500/10 text-teal-400 border-teal-500/20'
-      case 'World': case 'Geopolitics': return 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-      default: return 'bg-white/5 text-gray-400 border-white/10'
+      case 'Sports': return 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+      case 'Crypto': return 'bg-purple-500/15 text-purple-300 border-purple-500/30'
+      case 'Politics': return 'bg-red-500/15 text-red-300 border-red-500/30'
+      case 'Tech': case 'AI': return 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+      case 'Finance': case 'Business': return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+      case 'Pop Culture': case 'Entertainment': return 'bg-pink-500/15 text-pink-300 border-pink-500/30'
+      case 'Science': case 'Health': return 'bg-teal-500/15 text-teal-300 border-teal-500/30'
+      case 'World': case 'Geopolitics': return 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+      default: return 'bg-white/10 text-gray-300 border-white/15'
     }
   }
 
@@ -651,6 +652,7 @@ export default function WalletTable({
               {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" isBlockchain={true} />}
               {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" isBlockchain={true} />}
               {show('growthQuality') && <SortHeader column={getColumnName('growth_quality')} label="GQ" filterType="number" isBlockchain={true} />}
+              {show('sumProfitPct') && <SortHeader column={getColumnName('sum_profit_pct')} label="Tot %" filterType="percent" isBlockchain={true} />}
               {show('medianProfit') && <SortHeader column="median_profit_pct" label="Med %/T" filterType="percent" isBlockchain={true} />}
               {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" isBlockchain={true} />}
               {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" isBlockchain={true} />}
@@ -679,6 +681,7 @@ export default function WalletTable({
               const drawdown = getMetric(wallet, 'drawdown')
               const winRate = getMetric(wallet, 'win_rate')
               const growthQuality = getMetric(wallet, 'growth_quality')
+              const sumProfitPct = getMetric(wallet, 'sum_profit_pct')
 
               const formatCreatedDate = (dateStr: string | undefined) => {
                 if (!dateStr) return '-'
@@ -743,7 +746,7 @@ export default function WalletTable({
                             href={`https://polymarket.com/profile/${wallet.address}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-[11px] text-gray-300 hover:text-white transition-colors flex items-center gap-1 truncate"
+                            className="text-xs font-medium text-gray-200 hover:text-white transition-colors flex items-center gap-1 truncate"
                           >
                             <span className="truncate">{getDisplayName(wallet)}</span>
                             <svg className="w-2.5 h-2.5 flex-shrink-0 opacity-0 group-hover:opacity-50 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -788,7 +791,7 @@ export default function WalletTable({
                   )}
                   {show('roi') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                      <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
                         roi > 0 ? 'bg-emerald-500/10' : roi < 0 ? 'bg-red-500/10' : ''
                       } ${getPnlColor(roi)}`}>
                         {formatPercent(roi)}
@@ -797,7 +800,7 @@ export default function WalletTable({
                   )}
                   {show('winRate') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                      <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
                         winRate >= 60 ? 'bg-emerald-500/10' : winRate >= 50 ? 'bg-amber-500/10' : 'bg-red-500/10'
                       } ${getWinRateColor(winRate)}`}>
                         {formatPercentPlain(winRate)}
@@ -806,7 +809,7 @@ export default function WalletTable({
                   )}
                   {show('pnl') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className={`text-xs tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                      <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
                         pnl > 0 ? 'bg-emerald-500/10' : pnl < 0 ? 'bg-red-500/10' : ''
                       } ${getPnlColor(pnl)}`}>
                         {formatMoney(pnl)}
@@ -817,7 +820,7 @@ export default function WalletTable({
                     <td className="px-3 py-2.5 text-right">
                       {drawdown > 0 ? (
                         <span
-                          className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded cursor-default ${
+                          className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded cursor-default ${
                             drawdown <= 10 ? 'bg-emerald-500/10' : drawdown <= 25 ? 'bg-amber-500/10' : 'bg-red-500/10'
                           } ${getDrawdownColor(drawdown)}`}
                           title={`Max drawdown: ${formatMoney(wallet.drawdown_amount_all)}`}
@@ -832,13 +835,26 @@ export default function WalletTable({
                   {show('growthQuality') && (
                     <td className="px-3 py-2.5 text-center">
                       {growthQuality > 0 ? (
-                        <span className={`text-xs font-bold tabular-nums inline-flex items-center justify-center w-6 h-5 rounded ${
-                          growthQuality >= 8 ? 'bg-emerald-500/15 text-emerald-400'
-                          : growthQuality >= 5 ? 'bg-blue-500/10 text-blue-400'
-                          : growthQuality >= 3 ? 'bg-amber-500/10 text-amber-400'
-                          : 'bg-red-500/10 text-red-400'
+                        <span className={`text-sm font-bold tabular-nums inline-flex items-center justify-center w-7 h-6 rounded ${
+                          growthQuality >= 8 ? 'bg-emerald-500/15 text-emerald-300'
+                          : growthQuality >= 5 ? 'bg-blue-500/10 text-blue-300'
+                          : growthQuality >= 3 ? 'bg-amber-500/10 text-amber-300'
+                          : 'bg-red-500/10 text-red-300'
                         }`}>
                           {growthQuality}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
+                    </td>
+                  )}
+                  {show('sumProfitPct') && (
+                    <td className="px-3 py-2.5 text-right">
+                      {sumProfitPct !== 0 ? (
+                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                          sumProfitPct > 0 ? 'bg-emerald-500/10' : sumProfitPct < 0 ? 'bg-red-500/10' : ''
+                        } ${getPnlColor(sumProfitPct)}`}>
+                          {sumProfitPct > 0 ? '+' : ''}{Math.round(sumProfitPct)}%
                         </span>
                       ) : (
                         <span className="text-xs text-gray-600">-</span>
@@ -848,7 +864,7 @@ export default function WalletTable({
                   {show('medianProfit') && (
                     <td className="px-3 py-2.5 text-right">
                       {wallet.median_profit_pct != null ? (
-                        <span className={`text-xs font-medium tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
                           wallet.median_profit_pct > 0 ? 'bg-emerald-500/10' : wallet.median_profit_pct < 0 ? 'bg-red-500/10' : ''
                         } ${getPnlColor(wallet.median_profit_pct)}`}>
                           {wallet.median_profit_pct > 0 ? '+' : ''}{Math.round(wallet.median_profit_pct)}%
@@ -860,26 +876,26 @@ export default function WalletTable({
                   )}
                   {show('active') && (
                     <td className="px-3 py-2.5 text-center">
-                      <span className={`text-xs tabular-nums ${(wallet.active_positions || 0) > 0 ? 'text-gray-300' : 'text-gray-600'}`}>
+                      <span className={`text-sm font-medium tabular-nums ${(wallet.active_positions || 0) > 0 ? 'text-gray-200' : 'text-gray-600'}`}>
                         {wallet.active_positions || 0}
                       </span>
                     </td>
                   )}
                   {show('total') && (
                     <td className="px-3 py-2.5 text-center">
-                      <span className="text-gray-400 text-xs tabular-nums">
+                      <span className="text-gray-200 text-sm font-medium tabular-nums">
                         {getMetric(wallet, 'trade_count') || 0}
                       </span>
                     </td>
                   )}
                   {show('value') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className="text-gray-300 text-xs tabular-nums font-medium">{formatMoney(wallet.balance)}</span>
+                      <span className="text-gray-200 text-sm tabular-nums font-semibold">{formatMoney(wallet.balance)}</span>
                     </td>
                   )}
                   {show('avgTrades') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className="text-gray-400 text-xs tabular-nums">
+                      <span className="text-gray-200 text-sm font-medium tabular-nums">
                         {(wallet.avg_trades_per_day || 0).toFixed(1)}/d
                       </span>
                     </td>
@@ -887,17 +903,17 @@ export default function WalletTable({
                   {show('category') && (
                     <td className="px-2 py-2.5 text-left w-16">
                       {(wallet as any).top_category ? (
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded border ${getCategoryStyle((wallet as any).top_category)}`}>
+                        <span className={`text-xs font-semibold px-2 py-1 rounded border ${getCategoryStyle((wallet as any).top_category)}`}>
                           {getShortCategory((wallet as any).top_category)}
                         </span>
                       ) : (
-                        <span className="text-gray-600 text-[9px]">-</span>
+                        <span className="text-gray-600 text-xs">-</span>
                       )}
                     </td>
                   )}
                   {show('joined') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className="text-gray-500 text-xs tabular-nums">
+                      <span className="text-gray-300 text-sm tabular-nums">
                         {formatCreatedDate(wallet.account_created_at)}
                       </span>
                     </td>

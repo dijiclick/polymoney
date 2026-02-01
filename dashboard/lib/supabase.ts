@@ -141,6 +141,10 @@ export interface Wallet {
   trade_count_all: number  // total trades all-time
   drawdown_all: number     // max drawdown all-time (percentage)
   drawdown_amount_all: number  // max drawdown all-time in dollar amount
+  // ===== SUM PROFIT PCT (sum of per-trade profit percentages) =====
+  sum_profit_pct_7d: number | null
+  sum_profit_pct_30d: number | null
+  sum_profit_pct_all: number | null
   // ===== OVERALL/LEGACY METRICS (matches Polymarket profile) =====
   total_positions: number   // closed positions (all-time)
   active_positions: number  // currently open positions

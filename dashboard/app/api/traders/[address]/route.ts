@@ -331,6 +331,9 @@ export async function GET(
           trade_count_all: metricsAll.tradeCount,
           drawdown_all: metricsAll.drawdown,
           drawdown_amount_all: metricsAll.drawdownAmount,
+          sum_profit_pct_7d: metrics7d.sumProfitPct,
+          sum_profit_pct_30d: metrics30d.sumProfitPct,
+          sum_profit_pct_all: metricsAll.sumProfitPct,
           total_positions: uniqueClosedMarkets,
           active_positions: uniqueOpenMarkets,
           total_wins: polymarketMetrics.winCount,
@@ -654,6 +657,7 @@ function calculatePeriodMetrics(
       tradeCount: 0,
       winRate: 0,
       drawdown: 0,
+      sumProfitPct: 0,
     }
   }
 
@@ -662,6 +666,15 @@ function calculatePeriodMetrics(
 
   // Calculate volume (total bought)
   const volume = periodPositions.reduce((sum, p) => sum + (p.size * p.avgPrice), 0)
+
+  // Sum of per-trade profit percentages
+  let sumProfitPct = 0
+  for (const p of periodPositions) {
+    const initialValue = p.size * p.avgPrice
+    if (initialValue > 0) {
+      sumProfitPct += (p.realizedPnl / initialValue) * 100
+    }
+  }
 
   // Group by conditionId to count unique markets (not raw YES/NO entries)
   const marketPnl = new Map<string, number>()
@@ -708,6 +721,7 @@ function calculatePeriodMetrics(
     drawdown: drawdownResult.percent,
     drawdownAmount: drawdownResult.amount,
     growthQuality,
+    sumProfitPct: Math.round(sumProfitPct * 100) / 100,
   }
 }
 
@@ -1241,6 +1255,9 @@ async function updateWalletMetrics(
       trade_count_all: metricsAll.tradeCount,
       drawdown_all: metricsAll.drawdown,
       drawdown_amount_all: metricsAll.drawdownAmount,
+      sum_profit_pct_7d: metrics7d.sumProfitPct,
+      sum_profit_pct_30d: metrics30d.sumProfitPct,
+      sum_profit_pct_all: metricsAll.sumProfitPct,
       // Overall metrics
       total_positions: closedPositionCount,
       active_positions: activePositionCount,

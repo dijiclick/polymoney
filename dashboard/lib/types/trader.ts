@@ -41,6 +41,7 @@ export interface TimePeriodMetrics {
   drawdown?: number  // maximum peak-to-trough decline (%)
   drawdownAmount?: number  // maximum peak-to-trough decline in dollars
   growthQuality?: number  // 1-10 score: steadiness (R²) + return magnitude
+  sumProfitPct?: number   // sum of (realizedPnl / initialValue * 100) for each position
   // Optional fields
   positionsResolved?: number  // positions resolved in this period
   winningPositions?: number

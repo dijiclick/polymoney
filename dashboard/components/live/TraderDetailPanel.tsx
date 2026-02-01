@@ -383,6 +383,12 @@ export default function TraderDetailPanel({ address, trades, onClose }: TraderDe
                               <span className="text-[9px] text-gray-600">{pos.outcome} @ {(pos.avgPrice * 100).toFixed(0)}c</span>
                             </div>
                           </div>
+                          <div className="flex-shrink-0 text-center">
+                            <p className="text-[11px] text-gray-400 tabular-nums">
+                              {formatMoney(pos.size * pos.avgPrice)}
+                            </p>
+                            <p className="text-[9px] text-gray-600 mt-0.5">invested</p>
+                          </div>
                           <div className="text-right flex-shrink-0">
                             <p className={`text-[11px] tabular-nums ${getPnlColor(pos.realizedPnl || 0)}`}>
                               {pos.size > 0 && pos.avgPrice > 0 && (
