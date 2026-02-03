@@ -45,6 +45,9 @@ const VALID_SORT_COLUMNS = [
   'sum_profit_pct_7d',
   'sum_profit_pct_30d',
   'sum_profit_pct_all',
+  // Copy-trade detection metrics
+  'sell_ratio',
+  'trades_per_market',
   // Overall/legacy metrics
   'overall_win_rate',
   'overall_pnl',

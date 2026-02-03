@@ -515,6 +515,45 @@ function calculateCopyScore(params: {
   return Math.min(Math.round(rawScore * confidence), 100)
 }
 
+async function fetchTradeStats(address: string): Promise<{ sellRatio: number; tradesPerMarket: number }> {
+  try {
+    const allTrades: any[] = []
+    let offset = 0
+    const limit = 500
+
+    while (allTrades.length < 2000) {
+      const res = await fetch(
+        `https://data-api.polymarket.com/trades?user=${address}&limit=${limit}&offset=${offset}`,
+        { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': 'application/json' } }
+      )
+      if (!res.ok) break
+      const data = await res.json()
+      if (!data || !Array.isArray(data) || data.length === 0) break
+      allTrades.push(...data)
+      if (data.length < limit) break
+      offset += limit
+    }
+
+    if (allTrades.length === 0) return { sellRatio: 0, tradesPerMarket: 0 }
+
+    let buyCount = 0, sellCount = 0
+    const markets = new Set<string>()
+    for (const t of allTrades) {
+      if (t.side === 'BUY') buyCount++
+      else if (t.side === 'SELL') sellCount++
+      if (t.conditionId) markets.add(t.conditionId)
+    }
+
+    const total = buyCount + sellCount
+    const sellRatio = total > 0 ? Math.round((sellCount / total) * 10000) / 100 : 0
+    const tradesPerMarket = markets.size > 0 ? Math.round((total / markets.size) * 100) / 100 : 0
+
+    return { sellRatio, tradesPerMarket }
+  } catch {
+    return { sellRatio: 0, tradesPerMarket: 0 }
+  }
+}
+
 // --- Per-wallet refresh function ---
 
 export interface RefreshResult {
@@ -579,6 +618,9 @@ export async function refreshOneWallet(
     ].filter(Boolean)
     const categoryMap = await fetchEventCategories(allEventSlugs)
     const topCategory = getTopCategory(allEventSlugs, categoryMap)
+
+    // Fetch sell ratio and trades per market from raw trades
+    const tradeStats = await fetchTradeStats(wallet.address)
 
     // Calculate copy-trade metrics
     const profitFactor30d = calculateProfitFactor(closedPositions, 30)
@@ -653,6 +695,8 @@ export async function refreshOneWallet(
       copy_score: copyScore,
       avg_trades_per_day: avgTradesPerDay,
       median_profit_pct: medianProfitPct,
+      sell_ratio: tradeStats.sellRatio,
+      trades_per_market: tradeStats.tradesPerMarket,
       metrics_updated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('address', wallet.address)

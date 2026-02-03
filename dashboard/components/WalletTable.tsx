@@ -10,7 +10,7 @@ interface ColumnFilter {
   max?: number
 }
 
-export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'wl' | 'total' | 'dd' | 'growthQuality' | 'sumProfitPct' | 'medianProfit' | 'avgTrades' | 'bot' | 'category' | 'joined'
+export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'wl' | 'total' | 'dd' | 'growthQuality' | 'sumProfitPct' | 'medianProfit' | 'avgTrades' | 'sellRatio' | 'tradesPerMarket' | 'bot' | 'category' | 'joined'
 
 export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[] = [
   { key: 'score', label: 'Score', isBlockchain: true },
@@ -25,13 +25,37 @@ export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[
   { key: 'active', label: 'Active', isBlockchain: true },
   { key: 'wl', label: 'W/L', isBlockchain: true },
   { key: 'total', label: 'Total', isBlockchain: true },
-  { key: 'value', label: 'Value', isBlockchain: false },  // From Polymarket /value API
+  { key: 'value', label: 'Value', isBlockchain: false },
   { key: 'avgTrades', label: 'Trades/d', isBlockchain: true },
-  { key: 'category', label: 'Category', isBlockchain: false },  // Not available on blockchain
-  { key: 'joined', label: 'Joined', isBlockchain: false },  // Not available on blockchain
+  { key: 'sellRatio', label: 'Sell %', isBlockchain: false },
+  { key: 'tradesPerMarket', label: 'T/Mkt', isBlockchain: false },
+  { key: 'category', label: 'Category', isBlockchain: false },
+  { key: 'joined', label: 'Joined', isBlockchain: false },
 ]
 
-export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'growthQuality', 'sumProfitPct', 'medianProfit', 'active', 'wl', 'total', 'value', 'avgTrades', 'category', 'joined']
+export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'growthQuality', 'sumProfitPct', 'medianProfit', 'active', 'wl', 'total', 'value', 'avgTrades', 'sellRatio', 'tradesPerMarket', 'category', 'joined']
+
+// Tooltip descriptions for all columns (shown on hover)
+const COLUMN_TOOLTIPS: Record<string, string> = {
+  copy_score: 'Copy-trade score (0-100). Edge + consistency + risk.',
+  chart: 'Cumulative PnL equity curve for the period.',
+  roi: 'Return on investment for the selected period.',
+  win_rate: 'Win rate of resolved positions.',
+  pnl: 'Realized profit/loss for the period.',
+  drawdown: 'Max peak-to-trough equity decline.',
+  growth_quality: 'Growth steadiness (1-10). Higher = smoother curve.',
+  sum_profit_pct: 'Sum of per-trade profit percentages.',
+  median_profit_pct: 'Median profit % per trade (outliers removed).',
+  active_positions: 'Number of currently open positions.',
+  wins: 'Wins / losses in the selected period.',
+  trade_count: 'Unique markets traded in the period.',
+  balance: 'Portfolio value (positions + cash).',
+  avg_trades_per_day: 'Markets traded per active day.',
+  sell_ratio: 'Sell order %. High (>30%) = active trader.',
+  trades_per_market: 'Orders per market. High (>2.5) = scalper.',
+  category: 'Most traded market category.',
+  account_created_at: 'Account creation date on Polymarket.',
+}
 
 // Module-level cache for raw positions data (not filtered by timeframe)
 const positionsCache = new Map<string, { resolvedAt?: string; realizedPnl: number }[] | null>()
@@ -512,10 +536,13 @@ export default function WalletTable({
     const isActive = sortBy === column
     const isFilterOpen = openFilter === column
     const hasActiveFilter = hasFilter(column)
+    // Resolve tooltip: strip period suffix to match COLUMN_TOOLTIPS keys
+    const tooltipKey = column.replace(/_(7d|30d|all)$/, '')
+    const tooltip = COLUMN_TOOLTIPS[tooltipKey]
 
     return (
       <th
-        className={`px-3 py-2.5 font-medium relative text-[11px] uppercase tracking-wider
+        className={`px-3 py-2.5 font-medium relative text-[11px] uppercase tracking-wider group/hdr
           ${align === 'left' ? 'text-left' : align === 'center' ? 'text-center' : 'text-right'}
           ${isActive ? 'text-white' : 'text-gray-500'}`}
       >
@@ -545,6 +572,11 @@ export default function WalletTable({
             </span>
           </button>
         </div>
+        {tooltip && (
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded bg-gray-900 border border-white/10 text-[10px] text-gray-300 font-normal normal-case tracking-normal whitespace-nowrap opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50">
+            {tooltip}
+          </div>
+        )}
         {isFilterOpen && onColumnFilterChange && (
           <FilterPopover
             column={column}
@@ -642,10 +674,13 @@ export default function WalletTable({
               )}
               <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
               {show('score') && <SortHeader column="copy_score" label="Score" filterType="number" isBlockchain={true} />}
-              {show('chart') && <th className="px-1 py-2.5 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-20">
+              {show('chart') && <th className="px-1 py-2.5 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-20 relative group/hdr">
                 <div className="flex items-center justify-center gap-1">
                   <div className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 animate-pulse" title="Blockchain-verified data" />
                   Chart
+                </div>
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded bg-gray-900 border border-white/10 text-[10px] text-gray-300 font-normal normal-case tracking-normal whitespace-nowrap opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50">
+                  {COLUMN_TOOLTIPS.chart}
                 </div>
               </th>}
               {show('roi') && <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" isBlockchain={true} />}
@@ -660,7 +695,14 @@ export default function WalletTable({
               {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" isBlockchain={true} />}
               {show('value') && <SortHeader column="balance" label="Value" filterType="money" isBlockchain={false} />}
               {show('avgTrades') && <SortHeader column="avg_trades_per_day" label="Trades/d" filterType="number" isBlockchain={true} />}
-              {show('category') && <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider w-16">Cat</th>}
+              {show('sellRatio') && <SortHeader column="sell_ratio" label="Sell %" filterType="percent" isBlockchain={false} />}
+              {show('tradesPerMarket') && <SortHeader column="trades_per_market" label="T/Mkt" filterType="number" isBlockchain={false} />}
+              {show('category') && <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider w-16 relative group/hdr">
+                Cat
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded bg-gray-900 border border-white/10 text-[10px] text-gray-300 font-normal normal-case tracking-normal whitespace-nowrap opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50">
+                  {COLUMN_TOOLTIPS.category}
+                </div>
+              </th>}
               {show('joined') && <SortHeader column="account_created_at" label="Joined" filterType="number" isBlockchain={false} />}
               {trackMode && (
                 <>
@@ -743,6 +785,16 @@ export default function WalletTable({
                           </svg>
                         </button>
                       )}
+                      <a
+                        href={`/simulate?address=${wallet.address}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex-shrink-0 p-0.5 rounded transition-all text-gray-600 opacity-0 group-hover:opacity-100 hover:text-purple-400"
+                        title="Simulate copy trading"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                      </a>
                       <div className="flex flex-col min-w-0">
                           <a
                             href={`https://polymarket.com/profile/${wallet.address}`}
@@ -909,6 +961,36 @@ export default function WalletTable({
                       <span className="text-gray-200 text-sm font-medium tabular-nums">
                         {(wallet.avg_trades_per_day || 0).toFixed(1)}/d
                       </span>
+                    </td>
+                  )}
+                  {show('sellRatio') && (
+                    <td className="px-3 py-2.5 text-right">
+                      {wallet.sell_ratio != null && wallet.sell_ratio > 0 ? (
+                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                          wallet.sell_ratio > 30 ? 'bg-red-500/10 text-red-400'
+                          : wallet.sell_ratio > 20 ? 'bg-amber-500/10 text-amber-400'
+                          : 'bg-emerald-500/10 text-emerald-400'
+                        }`}>
+                          {wallet.sell_ratio.toFixed(0)}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
+                    </td>
+                  )}
+                  {show('tradesPerMarket') && (
+                    <td className="px-3 py-2.5 text-right">
+                      {wallet.trades_per_market != null && wallet.trades_per_market > 0 ? (
+                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                          wallet.trades_per_market > 2.5 ? 'bg-red-500/10 text-red-400'
+                          : wallet.trades_per_market > 1.5 ? 'bg-amber-500/10 text-amber-400'
+                          : 'bg-emerald-500/10 text-emerald-400'
+                        }`}>
+                          {wallet.trades_per_market.toFixed(1)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
                     </td>
                   )}
                   {show('category') && (

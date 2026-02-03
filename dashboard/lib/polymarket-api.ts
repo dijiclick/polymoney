@@ -457,7 +457,10 @@ interface ActivityTrade {
   title?: string
   slug?: string
   outcome?: string
+  outcomeIndex?: string | number
   transactionHash?: string
+  conditionId?: string
+  asset?: string
 }
 
 /**
@@ -475,6 +478,9 @@ export function parseTrades(activity: unknown[]): ParsedTrade[] {
     price: parseFloat(String(t.price || 0)),
     usdValue: parseFloat(String(t.usdcSize || 0)),
     txHash: t.transactionHash,
+    conditionId: t.conditionId,
+    asset: t.asset,
+    outcomeIndex: t.outcomeIndex !== undefined ? parseInt(String(t.outcomeIndex)) : undefined,
   })).sort((a, b) => b.timestamp - a.timestamp) // Most recent first
 }
 

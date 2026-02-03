@@ -174,6 +174,8 @@ export interface Wallet {
   copy_score: number          // composite copy-trade score (0-100)
   avg_trades_per_day: number  // average trades per active day
   median_profit_pct: number | null  // median profit % per trade (IQR outlier removal)
+  sell_ratio: number | null         // % of orders that are sells (high = active trader/scalper)
+  trades_per_market: number | null  // avg orders per unique market (high = frequent re-entry)
   metrics_updated_at?: string
   created_at: string
   updated_at: string

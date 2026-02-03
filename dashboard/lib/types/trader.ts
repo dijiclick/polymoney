@@ -204,4 +204,7 @@ export interface ParsedTrade {
   price: number
   usdValue: number
   txHash?: string
+  conditionId?: string
+  asset?: string
+  outcomeIndex?: number
 }

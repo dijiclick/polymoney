@@ -369,6 +369,9 @@ class WalletDiscoveryProcessor:
         avg_trades_per_day = self._calculate_avg_trades_per_day(closed_positions)
         median_profit_pct = self._calculate_median_profit_pct(closed_positions)
 
+        # Fetch sell ratio and trades per market from raw trades
+        sell_ratio, trades_per_market = await self._fetch_trade_stats(address)
+
         # Top category from event slugs
         all_event_slugs = []
         for p in open_positions:
@@ -461,6 +464,8 @@ class WalletDiscoveryProcessor:
             "avg_trades_per_day": avg_trades_per_day,
             "top_category": top_category,
             "median_profit_pct": median_profit_pct,
+            "sell_ratio": sell_ratio,
+            "trades_per_market": trades_per_market,
             "metrics_updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -1208,6 +1213,63 @@ class WalletDiscoveryProcessor:
         # Confidence multiplier
         confidence = min(1.0, trade_count_all / 50)
         return min(round(raw_score * confidence), 100)
+
+    async def _fetch_trade_stats(self, address: str) -> tuple[float, float]:
+        """
+        Fetch sell_ratio and trades_per_market from Polymarket data API trades endpoint.
+
+        Returns (sell_ratio, trades_per_market) or (0, 0) on failure.
+        sell_ratio = sell_count / total * 100
+        trades_per_market = total_trades / unique_markets
+        """
+        if not self._api:
+            return 0, 0
+
+        import aiohttp
+
+        try:
+            await self._api._ensure_session()
+
+            all_trades: list[dict] = []
+            offset = 0
+            limit = 500
+
+            while len(all_trades) < 2000:
+                url = (
+                    f"https://data-api.polymarket.com/trades"
+                    f"?user={address}&limit={limit}&offset={offset}"
+                )
+                async with self._api._session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status != 200:
+                        break
+                    data = await resp.json()
+                    if not data or not isinstance(data, list):
+                        break
+                    all_trades.extend(data)
+                    if len(data) < limit:
+                        break
+                    offset += limit
+
+            if not all_trades:
+                return 0, 0
+
+            buy_count = sum(1 for t in all_trades if t.get("side") == "BUY")
+            sell_count = sum(1 for t in all_trades if t.get("side") == "SELL")
+            total = buy_count + sell_count
+            sell_ratio = (sell_count / total * 100) if total > 0 else 0
+
+            unique_markets = len(set(
+                t.get("conditionId", "") for t in all_trades if t.get("conditionId")
+            ))
+            tpm = (total / unique_markets) if unique_markets > 0 else 0
+
+            return round(sell_ratio, 2), round(tpm, 2)
+
+        except Exception as e:
+            logger.debug(f"Failed to fetch trade stats for {address[:10]}: {e}")
+            return 0, 0
 
     async def _fetch_top_category(self, event_slugs: list[str]) -> str | None:
         """
