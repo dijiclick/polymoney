@@ -10,50 +10,42 @@ interface ColumnFilter {
   max?: number
 }
 
-export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'roi' | 'pnl' | 'active' | 'wl' | 'total' | 'dd' | 'growthQuality' | 'sumProfitPct' | 'medianProfit' | 'avgTrades' | 'sellRatio' | 'tradesPerMarket' | 'bot' | 'category' | 'joined'
+export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'pnl' | 'active' | 'wl' | 'dd' | 'medianProfit' | 'avgTrades' | 'sellRatio' | 'tradesPerMarket' | 'bot' | 'category' | 'joined'
 
 export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[] = [
   { key: 'score', label: 'Score', isBlockchain: true },
   { key: 'chart', label: 'Chart', isBlockchain: true },
-  { key: 'roi', label: 'ROI', isBlockchain: true },
+  { key: 'sellRatio', label: 'Sell %', isBlockchain: false },
+  { key: 'tradesPerMarket', label: 'T/Mkt', isBlockchain: false },
   { key: 'winRate', label: 'Win Rate', isBlockchain: true },
   { key: 'pnl', label: 'PnL', isBlockchain: true },
   { key: 'dd', label: 'Drawdown', isBlockchain: true },
-  { key: 'growthQuality', label: 'Growth', isBlockchain: true },
-  { key: 'sumProfitPct', label: 'Tot %', isBlockchain: true },
   { key: 'medianProfit', label: 'Med %/Trade', isBlockchain: true },
   { key: 'active', label: 'Active', isBlockchain: true },
   { key: 'wl', label: 'W/L', isBlockchain: true },
-  { key: 'total', label: 'Total', isBlockchain: true },
   { key: 'value', label: 'Value', isBlockchain: false },
-  { key: 'avgTrades', label: 'Trades/d', isBlockchain: true },
-  { key: 'sellRatio', label: 'Sell %', isBlockchain: false },
-  { key: 'tradesPerMarket', label: 'T/Mkt', isBlockchain: false },
+  { key: 'avgTrades', label: 'Trades', isBlockchain: true },
   { key: 'category', label: 'Category', isBlockchain: false },
   { key: 'joined', label: 'Joined', isBlockchain: false },
 ]
 
-export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'roi', 'winRate', 'pnl', 'dd', 'growthQuality', 'sumProfitPct', 'medianProfit', 'active', 'wl', 'total', 'value', 'avgTrades', 'sellRatio', 'tradesPerMarket', 'category', 'joined']
+export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'sellRatio', 'tradesPerMarket', 'winRate', 'pnl', 'dd', 'medianProfit', 'active', 'wl', 'value', 'avgTrades', 'category', 'joined']
 
 // Tooltip descriptions for all columns (shown on hover)
 const COLUMN_TOOLTIPS: Record<string, string> = {
-  copy_score: 'Copy-trade score (0-100). Edge + consistency + risk.',
-  chart: 'Cumulative PnL equity curve for the period.',
-  roi: 'Return on investment for the selected period.',
-  win_rate: 'Win rate of resolved positions.',
-  pnl: 'Realized profit/loss for the period.',
-  drawdown: 'Max peak-to-trough equity decline.',
-  growth_quality: 'Growth steadiness (1-10). Higher = smoother curve.',
-  sum_profit_pct: 'Sum of per-trade profit percentages.',
-  median_profit_pct: 'Median profit % per trade (outliers removed).',
-  active_positions: 'Number of currently open positions.',
-  wins: 'Wins / losses in the selected period.',
-  trade_count: 'Unique markets traded in the period.',
-  balance: 'Portfolio value (positions + cash).',
-  avg_trades_per_day: 'Markets traded per active day.',
-  sell_ratio: 'Sell order %. High (>30%) = active trader.',
-  trades_per_market: 'Orders per market. High (>2.5) = scalper.',
-  category: 'Most traded market category.',
+  copy_score: 'Copy Score = 40% Edge (profit factor) + 35% Consistency (weekly profit rate) + 25% Risk (inverse drawdown). Requires: 30+ trades, PF>1.2, median profit>5%.',
+  chart: 'Cumulative PnL curve. Groups positions by day, sums daily PnL, plots running total.',
+  win_rate: 'Win Rate = (winning markets / total resolved markets) × 100. A market wins if its total PnL > 0.',
+  pnl: 'Realized PnL = sum of all closed position profits/losses in the period.',
+  drawdown: 'Max Drawdown = highest peak-to-trough decline. Calculated as ((peak - current) / peak) × 100.',
+  median_profit_pct: 'Median of (realizedPnl / initialValue × 100) for each position. Outliers removed via IQR method.',
+  active_positions: 'Count of open positions with currentValue > 0.',
+  wins: 'W/L = markets with PnL>0 / markets with PnL<0 in the period.',
+  balance: 'Portfolio value = sum of all position values + available cash.',
+  avg_trades_per_day: 'Trades = unique markets / active trading days.',
+  sell_ratio: 'Sell % = (sell orders / total orders) × 100. High (>30%) indicates active position management.',
+  trades_per_market: 'T/Mkt = total orders / unique markets. High (>2.5) suggests scalping behavior.',
+  category: 'Most frequently traded market category.',
   account_created_at: 'Account creation date on Polymarket.',
 }
 
@@ -297,13 +289,14 @@ function FilterPopover({
   return (
     <div
       ref={ref}
-      className="absolute top-full left-0 mt-2 z-50 bg-[#12121a] border border-white/10 rounded-lg shadow-2xl p-3 min-w-[180px] max-w-[calc(100vw-2rem)]"
+      className="absolute top-full left-0 mt-2 z-50 rounded-lg shadow-2xl p-3 min-w-[180px] max-w-[calc(100vw-2rem)]"
+      style={{ background: 'var(--popover-bg)', border: '1px solid var(--popover-border)' }}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="text-[10px] font-medium text-gray-500 mb-2.5 uppercase tracking-wider">{label}</div>
       <div className="space-y-2.5">
         <div>
-          <label className="text-[10px] text-gray-600 mb-1 block">Min</label>
+          <label className="text-[10px] text-gray-500 mb-1 block">Min</label>
           <div className="relative">
             {prefix && <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{prefix}</span>}
             <input
@@ -311,13 +304,14 @@ function FilterPopover({
               value={min}
               onChange={(e) => setMin(e.target.value)}
               placeholder="No min"
-              className={`w-full bg-white/[0.03] border border-white/5 rounded-md py-1.5 text-xs text-white focus:border-white/20 focus:outline-none transition-colors ${prefix ? 'pl-5' : 'pl-2.5'} ${suffix ? 'pr-5' : 'pr-2.5'}`}
+              className={`w-full rounded-md py-1.5 text-xs focus:outline-none transition-colors ${prefix ? 'pl-5' : 'pl-2.5'} ${suffix ? 'pr-5' : 'pr-2.5'}`}
+              style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)' }}
             />
             {suffix && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{suffix}</span>}
           </div>
         </div>
         <div>
-          <label className="text-[10px] text-gray-600 mb-1 block">Max</label>
+          <label className="text-[10px] text-gray-500 mb-1 block">Max</label>
           <div className="relative">
             {prefix && <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{prefix}</span>}
             <input
@@ -325,7 +319,8 @@ function FilterPopover({
               value={max}
               onChange={(e) => setMax(e.target.value)}
               placeholder="No max"
-              className={`w-full bg-white/[0.03] border border-white/5 rounded-md py-1.5 text-xs text-white focus:border-white/20 focus:outline-none transition-colors ${prefix ? 'pl-5' : 'pl-2.5'} ${suffix ? 'pr-5' : 'pr-2.5'}`}
+              className={`w-full rounded-md py-1.5 text-xs focus:outline-none transition-colors ${prefix ? 'pl-5' : 'pl-2.5'} ${suffix ? 'pr-5' : 'pr-2.5'}`}
+              style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)' }}
             />
             {suffix && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{suffix}</span>}
           </div>
@@ -339,7 +334,7 @@ function FilterPopover({
           </button>
           <button
             onClick={handleApply}
-            className="flex-1 px-2 py-1 text-[10px] text-white bg-white/10 rounded-md hover:bg-white/15 transition-colors"
+            className="flex-1 px-2 py-1 text-[10px] bg-blue-500/20 text-blue-400 rounded-md hover:bg-blue-500/30 transition-colors font-medium"
           >
             Apply
           </button>
@@ -573,7 +568,10 @@ export default function WalletTable({
           </button>
         </div>
         {tooltip && (
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded bg-gray-900 border border-white/10 text-[10px] text-gray-300 font-normal normal-case tracking-normal whitespace-nowrap opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50">
+          <div
+            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded text-[10px] text-gray-300 font-normal normal-case tracking-normal whitespace-nowrap opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50"
+            style={{ background: 'var(--popover-bg)', border: '1px solid var(--popover-border)' }}
+          >
             {tooltip}
           </div>
         )}
@@ -679,27 +677,29 @@ export default function WalletTable({
                   <div className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 animate-pulse" title="Blockchain-verified data" />
                   Chart
                 </div>
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded bg-gray-900 border border-white/10 text-[10px] text-gray-300 font-normal normal-case tracking-normal whitespace-nowrap opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50">
+                <div
+                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded text-[10px] text-gray-300 font-normal normal-case tracking-normal whitespace-nowrap opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50 max-w-[280px] whitespace-normal text-left"
+                  style={{ background: 'var(--popover-bg)', border: '1px solid var(--popover-border)' }}
+                >
                   {COLUMN_TOOLTIPS.chart}
                 </div>
               </th>}
-              {show('roi') && <SortHeader column={getColumnName('roi')} label="ROI" filterType="percent" isBlockchain={true} />}
+              {show('sellRatio') && <SortHeader column="sell_ratio" label="Sell %" filterType="percent" isBlockchain={false} />}
+              {show('tradesPerMarket') && <SortHeader column="trades_per_market" label="T/Mkt" filterType="number" isBlockchain={false} />}
               {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" isBlockchain={true} />}
               {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" isBlockchain={true} />}
               {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" isBlockchain={true} />}
-              {show('growthQuality') && <SortHeader column={getColumnName('growth_quality')} label="GQ" filterType="number" isBlockchain={true} />}
-              {show('sumProfitPct') && <SortHeader column={getColumnName('sum_profit_pct')} label="Tot %" filterType="percent" isBlockchain={true} />}
               {show('medianProfit') && <SortHeader column="median_profit_pct" label="Med %/T" filterType="percent" isBlockchain={true} />}
               {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" isBlockchain={true} />}
               {show('wl') && <SortHeader column={getColumnName('wins')} label="W/L" align="center" filterType="number" isBlockchain={true} />}
-              {show('total') && <SortHeader column={getColumnName('trade_count')} label="Total" align="center" filterType="number" isBlockchain={true} />}
               {show('value') && <SortHeader column="balance" label="Value" filterType="money" isBlockchain={false} />}
-              {show('avgTrades') && <SortHeader column="avg_trades_per_day" label="Trades/d" filterType="number" isBlockchain={true} />}
-              {show('sellRatio') && <SortHeader column="sell_ratio" label="Sell %" filterType="percent" isBlockchain={false} />}
-              {show('tradesPerMarket') && <SortHeader column="trades_per_market" label="T/Mkt" filterType="number" isBlockchain={false} />}
+              {show('avgTrades') && <SortHeader column="avg_trades_per_day" label="Trades" filterType="number" isBlockchain={true} />}
               {show('category') && <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider w-16 relative group/hdr">
                 Cat
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded bg-gray-900 border border-white/10 text-[10px] text-gray-300 font-normal normal-case tracking-normal whitespace-nowrap opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50">
+                <div
+                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded text-[10px] text-gray-300 font-normal normal-case tracking-normal whitespace-nowrap opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50"
+                  style={{ background: 'var(--popover-bg)', border: '1px solid var(--popover-border)' }}
+                >
                   {COLUMN_TOOLTIPS.category}
                 </div>
               </th>}
@@ -721,11 +721,8 @@ export default function WalletTable({
               const wallet = wallets[virtualRow.index]
               const index = virtualRow.index
               const pnl = getMetric(wallet, 'pnl')
-              const roi = getMetric(wallet, 'roi')
               const drawdown = getMetric(wallet, 'drawdown')
               const winRate = getMetric(wallet, 'win_rate')
-              const growthQuality = getMetric(wallet, 'growth_quality')
-              const sumProfitPct = getMetric(wallet, 'sum_profit_pct')
 
               const formatCreatedDate = (dateStr: string | undefined) => {
                 if (!dateStr) return '-'
@@ -843,13 +840,34 @@ export default function WalletTable({
                       <InlineMiniChart address={wallet.address} timePeriod={timePeriod} />
                     </td>
                   )}
-                  {show('roi') && (
+                  {show('sellRatio') && (
                     <td className="px-3 py-2.5 text-right">
-                      <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
-                        roi > 0 ? 'bg-emerald-500/10' : roi < 0 ? 'bg-red-500/10' : ''
-                      } ${getPnlColor(roi)}`}>
-                        {formatPercent(roi)}
-                      </span>
+                      {wallet.sell_ratio != null && wallet.sell_ratio > 0 ? (
+                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                          wallet.sell_ratio > 30 ? 'bg-red-500/10 text-red-400'
+                          : wallet.sell_ratio > 20 ? 'bg-amber-500/10 text-amber-400'
+                          : 'bg-emerald-500/10 text-emerald-400'
+                        }`}>
+                          {wallet.sell_ratio.toFixed(0)}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
+                    </td>
+                  )}
+                  {show('tradesPerMarket') && (
+                    <td className="px-3 py-2.5 text-right">
+                      {wallet.trades_per_market != null && wallet.trades_per_market > 0 ? (
+                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                          wallet.trades_per_market > 2.5 ? 'bg-red-500/10 text-red-400'
+                          : wallet.trades_per_market > 1.5 ? 'bg-amber-500/10 text-amber-400'
+                          : 'bg-emerald-500/10 text-emerald-400'
+                        }`}>
+                          {wallet.trades_per_market.toFixed(1)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
                     </td>
                   )}
                   {show('winRate') && (
@@ -886,35 +904,6 @@ export default function WalletTable({
                       )}
                     </td>
                   )}
-                  {show('growthQuality') && (
-                    <td className="px-3 py-2.5 text-center">
-                      {growthQuality > 0 ? (
-                        <span className={`text-sm font-bold tabular-nums inline-flex items-center justify-center w-7 h-6 rounded ${
-                          growthQuality >= 8 ? 'bg-emerald-500/15 text-emerald-300'
-                          : growthQuality >= 5 ? 'bg-blue-500/10 text-blue-300'
-                          : growthQuality >= 3 ? 'bg-amber-500/10 text-amber-300'
-                          : 'bg-red-500/10 text-red-300'
-                        }`}>
-                          {growthQuality}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-600">-</span>
-                      )}
-                    </td>
-                  )}
-                  {show('sumProfitPct') && (
-                    <td className="px-3 py-2.5 text-right">
-                      {sumProfitPct !== 0 ? (
-                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
-                          sumProfitPct > 0 ? 'bg-emerald-500/10' : sumProfitPct < 0 ? 'bg-red-500/10' : ''
-                        } ${getPnlColor(sumProfitPct)}`}>
-                          {sumProfitPct > 0 ? '+' : ''}{Math.round(sumProfitPct)}%
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-600">-</span>
-                      )}
-                    </td>
-                  )}
                   {show('medianProfit') && (
                     <td className="px-3 py-2.5 text-right">
                       {wallet.median_profit_pct != null ? (
@@ -944,13 +933,6 @@ export default function WalletTable({
                       </span>
                     </td>
                   )}
-                  {show('total') && (
-                    <td className="px-3 py-2.5 text-center">
-                      <span className="text-gray-200 text-sm font-medium tabular-nums">
-                        {getMetric(wallet, 'trade_count') || 0}
-                      </span>
-                    </td>
-                  )}
                   {show('value') && (
                     <td className="px-3 py-2.5 text-right">
                       <span className="text-gray-200 text-sm tabular-nums font-semibold">{formatMoney(wallet.balance)}</span>
@@ -959,38 +941,8 @@ export default function WalletTable({
                   {show('avgTrades') && (
                     <td className="px-3 py-2.5 text-right">
                       <span className="text-gray-200 text-sm font-medium tabular-nums">
-                        {(wallet.avg_trades_per_day || 0).toFixed(1)}/d
+                        {(wallet.avg_trades_per_day || 0).toFixed(1)}
                       </span>
-                    </td>
-                  )}
-                  {show('sellRatio') && (
-                    <td className="px-3 py-2.5 text-right">
-                      {wallet.sell_ratio != null && wallet.sell_ratio > 0 ? (
-                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
-                          wallet.sell_ratio > 30 ? 'bg-red-500/10 text-red-400'
-                          : wallet.sell_ratio > 20 ? 'bg-amber-500/10 text-amber-400'
-                          : 'bg-emerald-500/10 text-emerald-400'
-                        }`}>
-                          {wallet.sell_ratio.toFixed(0)}%
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-600">-</span>
-                      )}
-                    </td>
-                  )}
-                  {show('tradesPerMarket') && (
-                    <td className="px-3 py-2.5 text-right">
-                      {wallet.trades_per_market != null && wallet.trades_per_market > 0 ? (
-                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
-                          wallet.trades_per_market > 2.5 ? 'bg-red-500/10 text-red-400'
-                          : wallet.trades_per_market > 1.5 ? 'bg-amber-500/10 text-amber-400'
-                          : 'bg-emerald-500/10 text-emerald-400'
-                        }`}>
-                          {wallet.trades_per_market.toFixed(1)}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-600">-</span>
-                      )}
                     </td>
                   )}
                   {show('category') && (

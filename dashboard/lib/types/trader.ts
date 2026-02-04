@@ -34,14 +34,11 @@ export interface PolymarketClosedPosition {
 // Time-period specific metrics (7d, 30d)
 export interface TimePeriodMetrics {
   pnl: number
-  roi: number
   volume: number  // total trade volume
   tradeCount: number
   winRate: number
   drawdown?: number  // maximum peak-to-trough decline (%)
   drawdownAmount?: number  // maximum peak-to-trough decline in dollars
-  growthQuality?: number  // 1-10 score: steadiness (R²) + return magnitude
-  sumProfitPct?: number   // sum of (realizedPnl / initialValue * 100) for each position
   // Optional fields
   positionsResolved?: number  // positions resolved in this period
   winningPositions?: number
@@ -65,7 +62,6 @@ export interface TraderMetrics {
   // Legacy fields (kept for compatibility)
   winRate30d: number
   winRateAllTime: number
-  roiPercent: number
   tradeCount30d: number
   tradeCountAllTime: number
   uniqueMarkets30d: number

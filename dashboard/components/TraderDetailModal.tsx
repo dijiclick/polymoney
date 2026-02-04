@@ -50,12 +50,9 @@ interface WalletData {
   diff_win_rate_all?: number
   weekly_profit_rate?: number
   avg_trades_per_day?: number
-  roi_7d?: number
-  roi_30d?: number
   drawdown_30d?: number
   balance?: number
   overall_pnl?: number
-  overall_roi?: number
   overall_win_rate?: number
   total_positions?: number
   active_positions?: number
@@ -91,7 +88,6 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
       portfolioValue: walletData.balance || 0,
       totalPnl: walletData.overall_pnl || 0,
       winRateAllTime: walletData.overall_win_rate || 0,
-      roiPercent: walletData.overall_roi || 0,
       activePositions: walletData.active_positions || 0,
       maxDrawdown: walletData.drawdown_all || 0,
     },
@@ -104,12 +100,8 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
       weeklyProfitRate: walletData.weekly_profit_rate || 0,
       avgTradesPerDay: walletData.avg_trades_per_day || 0,
       medianProfitPct: walletData.median_profit_pct ?? null,
-      edgeTrend: (walletData.roi_30d || 0) > 0
-        ? Math.round(((walletData.roi_7d || 0) / walletData.roi_30d!) * 100) / 100
-        : 0,
-      calmarRatio: (walletData.drawdown_30d || 0) > 0
-        ? Math.round(((walletData.roi_30d || 0) / walletData.drawdown_30d!) * 100) / 100
-        : (walletData.roi_30d || 0) > 0 ? 5.0 : 0,
+      edgeTrend: 0,
+      calmarRatio: 0,
     },
   } : null
 
@@ -345,7 +337,6 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                       const cm = displayData.copyMetrics
                       if (m && cm) {
                         if ((m.totalPnl || 0) < 0) warnings.push('Negative overall PnL')
-                        if ((m.roiPercent || 0) < 0) warnings.push('Negative overall ROI')
                         if ((m.tradeCountAllTime || 0) < 30) warnings.push(`Only ${m.tradeCountAllTime || 0} trades (need 30+)`)
                         if (cm.profitFactor30d < 1.2) warnings.push(`PF30d ${cm.profitFactor30d.toFixed(2)} (need 1.2+)`)
                         if (cm.medianProfitPct == null || cm.medianProfitPct < 5.0) warnings.push(`Median profit ${cm.medianProfitPct?.toFixed(1) ?? '?'}% (need 5%+)`)

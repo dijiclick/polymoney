@@ -6,7 +6,7 @@
  * only offers 1-minute fidelity (insufficient for sub-minute delay simulation).
  */
 
-import { ParsedTrade, PolymarketClosedPosition } from './types/trader'
+import { ParsedTrade, PolymarketClosedPosition } from '@/lib/types/trader'
 import {
   SlippageParams,
   SlippageResult,
@@ -16,7 +16,7 @@ import {
   EquityCurvePoint,
   SimulationResult,
   DEFAULT_SLIPPAGE_PARAMS,
-} from './types/simulation'
+} from './types'
 
 // ============================================
 // Slippage Estimation

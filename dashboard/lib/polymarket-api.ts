@@ -518,15 +518,8 @@ function calculatePeriodMetrics(
     ? (winningPositions.length / periodClosedPositions.length) * 100
     : 0
 
-  // Calculate ROI: PnL / invested amount for positions resolved in period
-  const invested = periodTrades
-    .filter(t => t.side === 'BUY')
-    .reduce((sum, t) => sum + t.usdValue, 0)
-  const roi = invested > 0 ? (realizedPnl / invested) * 100 : 0
-
   return {
     pnl: realizedPnl,
-    roi,
     volume,
     tradeCount: periodTrades.length,
     winRate,
@@ -590,10 +583,6 @@ export function calculateMetrics(
     ? (totalWins / closedPositions.length) * 100
     : 0
 
-  // ROI calculation
-  const totalInvested = portfolioValue + Math.abs(realizedPnl) - unrealizedPnl
-  const roiPercent = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0
-
   // Unique markets
   const marketSet = new Set<string>()
   positions.forEach((p) => marketSet.add(p.conditionId))
@@ -614,7 +603,6 @@ export function calculateMetrics(
     // Legacy fields for compatibility
     winRate30d: metrics30d.winRate,
     winRateAllTime,
-    roiPercent,
     tradeCount30d: metrics30d.tradeCount,
     tradeCountAllTime: allTrades.length,
     uniqueMarkets30d: marketSet.size,

@@ -68,22 +68,18 @@ export async function GET(
   if (dbWallet && (cacheOnly || (isFresh && !forceRefresh))) {
     const metrics7d: TimePeriodMetrics = {
       pnl: dbWallet.pnl_7d || 0,
-      roi: dbWallet.roi_7d || 0,
       volume: dbWallet.volume_7d || 0,
       tradeCount: dbWallet.trade_count_7d || 0,
       winRate: dbWallet.win_rate_7d || 0,
       drawdown: dbWallet.drawdown_7d || 0,
-      growthQuality: dbWallet.growth_quality_7d || 0,
     }
 
     const metrics30d: TimePeriodMetrics = {
       pnl: dbWallet.pnl_30d || 0,
-      roi: dbWallet.roi_30d || 0,
       volume: dbWallet.volume_30d || 0,
       tradeCount: dbWallet.trade_count_30d || 0,
       winRate: dbWallet.win_rate_30d || 0,
       drawdown: dbWallet.drawdown_30d || 0,
-      growthQuality: dbWallet.growth_quality_30d || 0,
     }
 
     // Parse cached positions if available
@@ -120,7 +116,6 @@ export async function GET(
         activePositions: dbWallet.active_positions || 0,
         winRate30d: dbWallet.win_rate_30d || 0,
         winRateAllTime: dbWallet.overall_win_rate || 0,
-        roiPercent: dbWallet.overall_roi || 0,
         tradeCount30d: dbWallet.trade_count_30d || 0,
         tradeCountAllTime: dbWallet.total_trades || 0,
         uniqueMarkets30d: 0,
@@ -142,12 +137,8 @@ export async function GET(
         weeklyProfitRate: dbWallet.weekly_profit_rate || 0,
         avgTradesPerDay: dbWallet.avg_trades_per_day || 0,
         medianProfitPct: dbWallet.median_profit_pct ?? null,
-        edgeTrend: (dbWallet.roi_30d || 0) > 0
-          ? Math.round(((dbWallet.roi_7d || 0) / dbWallet.roi_30d) * 100) / 100
-          : 0,
-        calmarRatio: (dbWallet.drawdown_30d || 0) > 0
-          ? Math.round(((dbWallet.roi_30d || 0) / dbWallet.drawdown_30d) * 100) / 100
-          : (dbWallet.roi_30d || 0) > 0 ? 5.0 : 0,
+        edgeTrend: 0,
+        calmarRatio: 0,
       },
       scores: undefined,
       isNewlyFetched: false,
@@ -262,17 +253,11 @@ export async function GET(
       ? dbWallet.copy_score
       : calculateCopyScore({
           profitFactor30d,
-          roi30d: metrics30d.roi,
           drawdown30d: metrics30d.drawdown || 0,
-          diffWinRate30d,
           weeklyProfitRate,
-          roi7d: metrics7d.roi,
           tradeCountAll: polymarketMetrics.tradeCount,
           medianProfitPct,
           avgTradesPerDay,
-          overallPnl: polymarketMetrics.totalPnl,
-          overallRoi: polymarketMetrics.roiAll,
-          maxSingleLossPct,
         })
 
     const copyMetrics = {
@@ -313,27 +298,21 @@ export async function GET(
           username: (profile as any).name || (profile as any).pseudonym || usernameParam || undefined,
           account_created_at: (profile as any).createdAt || undefined,
           pnl_7d: metrics7d.pnl,
-          roi_7d: metrics7d.roi,
           win_rate_7d: metrics7d.winRate,
           volume_7d: metrics7d.volume,
           trade_count_7d: metrics7d.tradeCount,
           drawdown_7d: metrics7d.drawdown,
           pnl_30d: metrics30d.pnl,
-          roi_30d: metrics30d.roi,
           win_rate_30d: metrics30d.winRate,
           volume_30d: metrics30d.volume,
           trade_count_30d: metrics30d.tradeCount,
           drawdown_30d: metrics30d.drawdown,
           pnl_all: metricsAll.pnl,
-          roi_all: metricsAll.roi,
           win_rate_all: metricsAll.winRate,
           volume_all: metricsAll.volume,
           trade_count_all: metricsAll.tradeCount,
           drawdown_all: metricsAll.drawdown,
           drawdown_amount_all: metricsAll.drawdownAmount,
-          sum_profit_pct_7d: metrics7d.sumProfitPct,
-          sum_profit_pct_30d: metrics30d.sumProfitPct,
-          sum_profit_pct_all: metricsAll.sumProfitPct,
           total_positions: uniqueClosedMarkets,
           active_positions: uniqueOpenMarkets,
           total_wins: polymarketMetrics.winCount,
@@ -341,7 +320,6 @@ export async function GET(
           realized_pnl: polymarketMetrics.realizedPnl,
           unrealized_pnl: polymarketMetrics.unrealizedPnl,
           overall_pnl: polymarketMetrics.totalPnl,
-          overall_roi: polymarketMetrics.roiAll,
           overall_win_rate: polymarketMetrics.winRateAll,
           total_volume: polymarketMetrics.totalBought,
           total_trades: polymarketMetrics.tradeCount,
@@ -363,12 +341,6 @@ export async function GET(
             cached_positions_json: cachedPositionsJson,
           }).eq('address', address).then(() => {}, () => {})
         }
-        // Growth quality columns (may not exist yet - fails silently)
-        await supabase.from('wallets').update({
-          growth_quality_7d: metrics7d.growthQuality,
-          growth_quality_30d: metrics30d.growthQuality,
-          growth_quality_all: metricsAll.growthQuality,
-        }).eq('address', address).then(() => {}, () => {})
       } catch (error) {
         console.error('Error inserting new wallet:', error)
       }
@@ -397,7 +369,6 @@ export async function GET(
         activePositions: uniqueOpenMarkets,
         winRate30d: metrics30d.winRate,
         winRateAllTime: polymarketMetrics.winRateAll,
-        roiPercent: polymarketMetrics.roiAll,
         tradeCount30d: metrics30d.tradeCount,
         tradeCountAllTime: polymarketMetrics.tradeCount,
         uniqueMarkets30d: uniqueMarkets,
@@ -419,10 +390,8 @@ export async function GET(
         weeklyProfitRate,
         avgTradesPerDay,
         medianProfitPct,
-        edgeTrend: metrics30d.roi > 0 ? Math.round((metrics7d.roi / metrics30d.roi) * 100) / 100 : 0,
-        calmarRatio: (metrics30d.drawdown || 0) > 0
-          ? Math.round((metrics30d.roi / metrics30d.drawdown!) * 100) / 100
-          : metrics30d.roi > 0 ? 5.0 : 0,
+        edgeTrend: 0,
+        calmarRatio: 0,
       },
       scores: undefined,
       isNewlyFetched: true,
@@ -437,7 +406,6 @@ export async function GET(
     if (dbWallet) {
       const stalePeriodMetrics7d: TimePeriodMetrics = {
         pnl: dbWallet.pnl_7d || 0,
-        roi: dbWallet.roi_7d || 0,
         volume: dbWallet.volume_7d || 0,
         tradeCount: dbWallet.trade_count_7d || 0,
         winRate: dbWallet.win_rate_7d || 0,
@@ -446,7 +414,6 @@ export async function GET(
 
       const stalePeriodMetrics30d: TimePeriodMetrics = {
         pnl: dbWallet.pnl_30d || 0,
-        roi: dbWallet.roi_30d || 0,
         volume: dbWallet.volume_30d || 0,
         tradeCount: dbWallet.trade_count_30d || 0,
         winRate: dbWallet.win_rate_30d || 0,
@@ -475,7 +442,6 @@ export async function GET(
           activePositions: dbWallet.active_positions || 0,
           winRate30d: dbWallet.win_rate_30d || 0,
           winRateAllTime: dbWallet.overall_win_rate || 0,
-          roiPercent: dbWallet.overall_roi || 0,
           tradeCount30d: dbWallet.trade_count_30d || 0,
           tradeCountAllTime: dbWallet.total_trades || 0,
           uniqueMarkets30d: 0,
@@ -497,12 +463,8 @@ export async function GET(
           weeklyProfitRate: dbWallet.weekly_profit_rate || 0,
           avgTradesPerDay: dbWallet.avg_trades_per_day || 0,
           medianProfitPct: dbWallet.median_profit_pct ?? null,
-          edgeTrend: (dbWallet.roi_30d || 0) > 0
-            ? Math.round(((dbWallet.roi_7d || 0) / dbWallet.roi_30d) * 100) / 100
-            : 0,
-          calmarRatio: (dbWallet.drawdown_30d || 0) > 0
-            ? Math.round(((dbWallet.roi_30d || 0) / dbWallet.drawdown_30d) * 100) / 100
-            : (dbWallet.roi_30d || 0) > 0 ? 5.0 : 0,
+          edgeTrend: 0,
+          calmarRatio: 0,
         },
         scores: undefined,
         isNewlyFetched: false,
@@ -652,12 +614,10 @@ function calculatePeriodMetrics(
   if (periodPositions.length === 0) {
     return {
       pnl: 0,
-      roi: 0,
       volume: 0,
       tradeCount: 0,
       winRate: 0,
       drawdown: 0,
-      sumProfitPct: 0,
     }
   }
 
@@ -666,15 +626,6 @@ function calculatePeriodMetrics(
 
   // Calculate volume (total bought)
   const volume = periodPositions.reduce((sum, p) => sum + (p.size * p.avgPrice), 0)
-
-  // Sum of per-trade profit percentages
-  let sumProfitPct = 0
-  for (const p of periodPositions) {
-    const initialValue = p.size * p.avgPrice
-    if (initialValue > 0) {
-      sumProfitPct += (p.realizedPnl / initialValue) * 100
-    }
-  }
 
   // Group by conditionId to count unique markets (not raw YES/NO entries)
   const marketPnl = new Map<string, number>()
@@ -691,37 +642,18 @@ function calculatePeriodMetrics(
   }
   const winRate = tradeCount > 0 ? (wins / tradeCount) * 100 : 0
 
-  // ROI = Period PnL / Starting Balance
-  // Starting balance estimated as current_balance - period_pnl
-  const estimatedStart = currentBalance - pnl
-  let roi: number
-  if (estimatedStart > 0) {
-    roi = (pnl / estimatedStart) * 100
-  } else if (pnl > 0 && volume > 0) {
-    roi = (pnl / volume) * 100
-  } else {
-    roi = 0
-  }
-
   // Estimate the starting balance for the drawdown equity curve.
-  // Use the average position size * 3 as a floor to handle cases where
-  // currentBalance is tiny relative to trading volume (e.g., profits withdrawn,
-  // capital rotated rapidly in high-frequency trading).
   const avgPositionSize = tradeCount > 0 ? volume / tradeCount : 0
   const initialBalance = Math.max(currentBalance - pnl, currentBalance, avgPositionSize * 3, 1)
   const drawdownResult = calculateMaxDrawdown(periodPositions, initialBalance)
-  const growthQuality = calculateGrowthQuality(periodPositions, roi)
 
   return {
     pnl: Math.round(pnl * 100) / 100,
-    roi: Math.round(roi * 100) / 100,
     volume: Math.round(volume * 100) / 100,
     tradeCount,
     winRate: Math.round(winRate * 100) / 100,
     drawdown: drawdownResult.percent,
     drawdownAmount: drawdownResult.amount,
-    growthQuality,
-    sumProfitPct: Math.round(sumProfitPct * 100) / 100,
   }
 }
 
@@ -766,76 +698,11 @@ function calculateMaxDrawdown(
 }
 
 /**
- * Calculate Growth Quality score (1-10).
- * Combines equity curve steadiness (R² of cumulative PnL) with return magnitude.
- * 10 = smooth, strong upward curve. 1 = erratic or losing.
- */
-function calculateGrowthQuality(
-  closedPositions: { realizedPnl: number; resolvedAt?: string }[],
-  roi: number,
-): number {
-  // Sort chronologically
-  const sorted = [...closedPositions]
-    .filter(p => p.resolvedAt)
-    .sort((a, b) => new Date(a.resolvedAt!).getTime() - new Date(b.resolvedAt!).getTime())
-
-  if (sorted.length < 3) return 0  // Not enough data
-
-  // Build cumulative PnL points (x = trade index, y = cumPnl)
-  let cumPnl = 0
-  const points: { x: number; y: number }[] = []
-  for (let i = 0; i < sorted.length; i++) {
-    cumPnl += sorted[i].realizedPnl
-    points.push({ x: i, y: cumPnl })
-  }
-
-  // Linear regression: calculate R² and slope
-  const n = points.length
-  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0
-  for (const p of points) {
-    sumX += p.x
-    sumY += p.y
-    sumXY += p.x * p.y
-    sumXX += p.x * p.x
-  }
-  const meanY = sumY / n
-  let ssTot = 0
-  for (const p of points) ssTot += (p.y - meanY) ** 2
-  if (ssTot === 0) return roi > 0 ? 7 : 1  // Flat line
-
-  const denom = n * sumXX - sumX * sumX
-  if (denom === 0) return 1
-  const slope = (n * sumXY - sumX * sumY) / denom
-  const intercept = (sumY - slope * sumX) / n
-
-  let ssRes = 0
-  for (const p of points) ssRes += (p.y - (intercept + slope * p.x)) ** 2
-  const r2 = Math.max(1 - ssRes / ssTot, 0)  // Clamp negative R² to 0
-
-  // If slope is negative (losing money), score is low regardless
-  if (slope <= 0) return 1
-
-  // Steadiness: R² directly (0 to 1)
-  const steadiness = r2
-
-  // Return magnitude: scale ROI to 0-1, capped at 20%
-  const returnScore = Math.min(Math.max(roi / 20, 0), 1)
-
-  // Combined: 60% steadiness + 40% return, mapped to 1-10
-  const raw = steadiness * 0.6 + returnScore * 0.4
-  return Math.max(1, Math.min(10, Math.round(raw * 9 + 1)))
-}
-
-/**
  * Calculate metrics from Polymarket positions data
  *
  * Trade counting:
  * - Same conditionId + different outcomes (hedging) = 1 trade
  * - Same conditionId + same outcome (re-entry) = separate trades
- *
- * ROI calculation:
- * - Account ROI = Total PnL / Initial Balance * 100
- * - Initial Balance = Current Balance - Total PnL (estimated from portfolio value)
  */
 function calculatePolymarketMetrics(
   closedPositions: { conditionId: string; outcome?: string; size: number; avgPrice: number; realizedPnl: number; isWin: boolean; resolvedAt?: string }[],
@@ -846,7 +713,6 @@ function calculatePolymarketMetrics(
   unrealizedPnl: number
   totalPnl: number
   totalBought: number
-  roiAll: number
   winRateAll: number
   winCount: number
   lossCount: number
@@ -870,7 +736,7 @@ function calculatePolymarketMetrics(
 
   for (const trade of trades) {
     if (trade.isResolved) {
-      // Resolved trade: count in win rate and ROI
+      // Resolved trade: count in win rate
       realizedPnl += trade.totalPnl
       totalBoughtResolved += trade.totalBought
       if (trade.totalPnl > 0) {
@@ -888,18 +754,6 @@ function calculatePolymarketMetrics(
   const totalPnl = realizedPnl + unrealizedPnl
   const tradeCount = winCount + lossCount
 
-  // ROI = Total PnL / Initial Capital
-  // Initial Capital estimated as current_balance - total_pnl (what was deposited)
-  const initialCapital = currentBalance - totalPnl
-  let roiAll: number
-  if (initialCapital > 0) {
-    roiAll = (totalPnl / initialCapital) * 100
-  } else if (totalPnl > 0 && totalBoughtResolved > 0) {
-    roiAll = (totalPnl / totalBoughtResolved) * 100
-  } else {
-    roiAll = 0
-  }
-
   // Win rate from resolved trades
   const winRateAll = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0
 
@@ -914,7 +768,6 @@ function calculatePolymarketMetrics(
     unrealizedPnl: Math.round(unrealizedPnl * 100) / 100,
     totalPnl: Math.round(totalPnl * 100) / 100,
     totalBought: Math.round(totalBoughtResolved * 100) / 100,
-    roiAll: Math.round(roiAll * 100) / 100,
     winRateAll: Math.round(winRateAll * 100) / 100,
     winCount,
     lossCount,
@@ -1132,30 +985,20 @@ function calculateMaxSingleLossPct(
  */
 function calculateCopyScore(params: {
   profitFactor30d: number
-  roi30d: number
   drawdown30d: number
-  diffWinRate30d: number
   weeklyProfitRate: number
-  roi7d: number
   tradeCountAll: number
   medianProfitPct: number | null
   avgTradesPerDay?: number
-  overallPnl: number
-  overallRoi: number
-  maxSingleLossPct: number | null
 }): number {
-  const { profitFactor30d, drawdown30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay, overallPnl, overallRoi, maxSingleLossPct } = params
+  const { profitFactor30d, drawdown30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay } = params
 
   // ── Hard Filters ────────────────────────────────────────────────
   // All must pass or score = 0. Optimized for copy trading with risk management
-  // CRITICAL: Reject traders who are losing money overall (prevents hot-streak bias)
-  if (overallPnl < 0) return 0                                        // Must be profitable overall
-  if (overallRoi < 0) return 0                                        // Must have positive overall ROI
   if (tradeCountAll < 30) return 0                                    // Statistical significance
   if (profitFactor30d < 1.2) return 0                                 // Real edge exists
   if (medianProfitPct == null || medianProfitPct < 5.0) return 0      // Per-trade quality
-  if (avgTradesPerDay != null && (avgTradesPerDay < 0.5 || avgTradesPerDay > 25)) return 0  // Swing to active traders
-  if (maxSingleLossPct != null && maxSingleLossPct > 300) return 0    // Max single loss < 3x avg position (risk management)
+  if (avgTradesPerDay != null && (avgTradesPerDay < 2 || avgTradesPerDay > 15)) return 0  // Active traders range
 
   // ── Pillar 1: Edge (40%) ────────────────────────────────────────
   // Profit Factor = gross wins / gross losses. THE fundamental measure
@@ -1195,7 +1038,6 @@ async function updateWalletMetrics(
     unrealizedPnl: number
     totalPnl: number
     totalBought: number
-    roiAll: number
     winRateAll: number
     winCount: number
     lossCount: number
@@ -1235,29 +1077,23 @@ async function updateWalletMetrics(
       ...(currentBalance != null && currentBalance > 0 && { balance: currentBalance }),
       // 7-day metrics
       pnl_7d: metrics7d.pnl,
-      roi_7d: metrics7d.roi,
       win_rate_7d: metrics7d.winRate,
       volume_7d: metrics7d.volume,
       trade_count_7d: metrics7d.tradeCount,
       drawdown_7d: metrics7d.drawdown,
       // 30-day metrics
       pnl_30d: metrics30d.pnl,
-      roi_30d: metrics30d.roi,
       win_rate_30d: metrics30d.winRate,
       volume_30d: metrics30d.volume,
       trade_count_30d: metrics30d.tradeCount,
       drawdown_30d: metrics30d.drawdown,
       // All-time period metrics
       pnl_all: metricsAll.pnl,
-      roi_all: metricsAll.roi,
       win_rate_all: metricsAll.winRate,
       volume_all: metricsAll.volume,
       trade_count_all: metricsAll.tradeCount,
       drawdown_all: metricsAll.drawdown,
       drawdown_amount_all: metricsAll.drawdownAmount,
-      sum_profit_pct_7d: metrics7d.sumProfitPct,
-      sum_profit_pct_30d: metrics30d.sumProfitPct,
-      sum_profit_pct_all: metricsAll.sumProfitPct,
       // Overall metrics
       total_positions: closedPositionCount,
       active_positions: activePositionCount,
@@ -1266,7 +1102,6 @@ async function updateWalletMetrics(
       realized_pnl: polymarketMetrics.realizedPnl,
       unrealized_pnl: polymarketMetrics.unrealizedPnl,
       overall_pnl: polymarketMetrics.totalPnl,
-      overall_roi: polymarketMetrics.roiAll,
       overall_win_rate: polymarketMetrics.winRateAll,
       total_volume: polymarketMetrics.totalBought,
       total_trades: polymarketMetrics.tradeCount,
@@ -1292,13 +1127,6 @@ async function updateWalletMetrics(
         cached_positions_json: cachedPositionsJson,
       }).eq('address', address).then(() => {}, () => {})
     }
-
-    // Growth quality columns (may not exist yet - fails silently)
-    await supabase.from('wallets').update({
-      growth_quality_7d: metrics7d.growthQuality,
-      growth_quality_30d: metrics30d.growthQuality,
-      growth_quality_all: metricsAll.growthQuality,
-    }).eq('address', address).then(() => {}, () => {})
   } catch (error) {
     console.error('Error updating wallet metrics:', error)
   }

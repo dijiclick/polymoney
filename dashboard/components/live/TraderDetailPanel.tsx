@@ -266,9 +266,12 @@ export default function TraderDetailPanel({ address, trades, onClose }: TraderDe
                 </p>
               </div>
               <div className="bg-[var(--background)] px-4 py-3">
-                <p className="text-[9px] text-gray-600 uppercase tracking-wider">ROI</p>
-                <p className={`text-sm font-semibold tabular-nums mt-0.5 ${getPnlColor(data.metrics?.roiPercent || 0)}`}>
-                  {data.metrics?.roiPercent ? formatPercent(data.metrics.roiPercent) : '-'}
+                <p className="text-[9px] text-gray-600 uppercase tracking-wider">Max DD</p>
+                <p className={`text-sm font-semibold tabular-nums mt-0.5 ${
+                  (data.metrics?.maxDrawdown || 0) <= 10 ? 'text-emerald-400' :
+                  (data.metrics?.maxDrawdown || 0) <= 25 ? 'text-amber-400' : 'text-red-400'
+                }`}>
+                  {data.metrics?.maxDrawdown ? `${data.metrics.maxDrawdown.toFixed(1)}%` : '-'}
                 </p>
               </div>
             </div>

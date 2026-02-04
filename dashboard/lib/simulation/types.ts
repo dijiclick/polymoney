@@ -1,4 +1,4 @@
-import { ParsedTrade, PolymarketClosedPosition } from './trader'
+import { ParsedTrade, PolymarketClosedPosition } from '@/lib/types/trader'
 
 // ============================================
 // Slippage Model

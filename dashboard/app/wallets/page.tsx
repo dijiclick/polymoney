@@ -134,14 +134,12 @@ export default function WalletsPage() {
         drawdown_all: m.maxDrawdown ?? w.drawdown_all,
         // 7-day metrics
         pnl_7d: m7d.pnl ?? w.pnl_7d,
-        roi_7d: m7d.roi ?? w.roi_7d,
         win_rate_7d: m7d.winRate ?? w.win_rate_7d,
         trade_count_7d: m7d.tradeCount ?? w.trade_count_7d,
         drawdown_7d: m7d.drawdown ?? w.drawdown_7d,
         volume_7d: m7d.volume ?? w.volume_7d,
         // 30-day metrics
         pnl_30d: m30d.pnl ?? w.pnl_30d,
-        roi_30d: m30d.roi ?? w.roi_30d,
         win_rate_30d: m30d.winRate ?? w.win_rate_30d,
         trade_count_30d: m30d.tradeCount ?? w.trade_count_30d,
         drawdown_30d: m30d.drawdown ?? w.drawdown_30d,
@@ -570,63 +568,6 @@ export default function WalletsPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Stats Overview */}
-      {stats && (
-        <div className="grid grid-cols-3 gap-2 md:gap-3 mb-4 md:mb-6">
-          <div className="glass rounded-xl p-3 md:p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-[10px] text-gray-600 uppercase tracking-wider">Discovered</p>
-                <p className="text-lg font-semibold text-white">{stats.total.toLocaleString()}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="glass rounded-xl p-3 md:p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-[10px] text-gray-600 uppercase tracking-wider">Analyzed</p>
-                <p className="text-lg font-semibold text-white">
-                  {stats.analyzed.toLocaleString()}
-                  <span className="text-xs font-normal text-gray-600 ml-1">
-                    ({stats.total > 0 ? Math.round(stats.analyzed / stats.total * 100) : 0}%)
-                  </span>
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="glass rounded-xl p-3 md:p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-[10px] text-gray-600 uppercase tracking-wider">Avg Speed</p>
-                <p className="text-lg font-semibold text-white">
-                  {stats.avgAnalyzeSpeed > 0 ? `${stats.avgAnalyzeSpeed}s` : '—'}
-                  <span className="text-xs font-normal text-gray-600 ml-1">
-                    /wallet {stats.analyzedPerHour > 0 && `(${stats.analyzedPerHour}/hr)`}
-                  </span>
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Refresh All Progress */}
       {refreshProgress && (
         <div className="glass rounded-xl p-4 mb-4">
@@ -785,7 +726,10 @@ export default function WalletsPage() {
               </svg>
             </button>
             {showColumnSettings && (
-              <div className="absolute top-full left-0 mt-2 z-50 bg-[#12121a] border border-white/10 rounded-lg shadow-2xl p-2 min-w-[160px]">
+              <div
+                className="absolute top-full left-0 mt-2 z-50 rounded-lg shadow-2xl p-2 min-w-[160px]"
+                style={{ background: 'var(--popover-bg)', border: '1px solid var(--popover-border)' }}
+              >
                 <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider px-2 py-1.5">Columns</div>
                 {COLUMNS.map(col => (
                   <button
