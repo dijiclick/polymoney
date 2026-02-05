@@ -103,7 +103,7 @@ class TradeMonitorService:
 
         logger.info("Trade monitor service started")
         logger.info(f"Whale threshold: ${self.processor.WHALE_THRESHOLD_USD:,}")
-        logger.info(f"Wallet discovery: $100+ trades, {self.processor._discovery_processor.NUM_WORKERS} workers")
+        logger.info(f"Wallet discovery: $50+ trades, {self.processor._discovery_processor.NUM_WORKERS} workers")
         logger.info(f"Re-analysis cooldown: {self.processor._discovery_processor.REANALYSIS_COOLDOWN_DAYS} day(s)")
         logger.info("=" * 60)
 
@@ -163,7 +163,7 @@ class TradeMonitorService:
         logger.info(
             f"[STATS] "
             f"Trades: {processor_stats['trades_processed']:,} seen, "
-            f"{processor_stats['trades_stored']:,} saved (>=$100) | "
+            f"{processor_stats['trades_stored']:,} saved (>=$50) | "
             f"Wallets: {discovered:,} discovered, {analyzed:,} analyzed | "
             f"Errors: {processor_stats['errors']} | "
             f"Uptime: {uptime_str}"

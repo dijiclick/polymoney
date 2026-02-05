@@ -194,11 +194,11 @@ class TradeProcessor:
         self._trades_processed += 1
 
         # Wallet discovery threshold
-        DISCOVERY_THRESHOLD_USD = 100
-        # Trade storage threshold (higher to avoid database bloat)
-        STORAGE_THRESHOLD_USD = 100
+        DISCOVERY_THRESHOLD_USD = 50
+        # Trade storage threshold
+        STORAGE_THRESHOLD_USD = 50
 
-        # Check for new wallet discovery (non-blocking, for trades >= $100)
+        # Check for new wallet discovery (non-blocking, for trades >= $50)
         if trade.usd_value >= DISCOVERY_THRESHOLD_USD and self._discovery_processor:
             await self._discovery_processor.check_and_queue(
                 trade.trader_address,
@@ -215,7 +215,7 @@ class TradeProcessor:
         # Check insider
         is_insider = trade_record.get("is_insider_suspect", False)
 
-        # Store trades >= $100 to database for live feed display
+        # Store trades >= $50 to database for live feed display
         should_store = trade.usd_value >= STORAGE_THRESHOLD_USD or is_whale or is_insider
 
         if should_store:

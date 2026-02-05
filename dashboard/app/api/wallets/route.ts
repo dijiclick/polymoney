@@ -50,6 +50,7 @@ const VALID_SORT_COLUMNS = [
   'total_trades',
   'total_wins',
   'total_losses',
+  'avg_hold_duration_hours',
   'account_created_at',
   'created_at',
   'updated_at'

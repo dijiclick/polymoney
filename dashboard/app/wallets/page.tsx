@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { Wallet, TimePeriod } from '@/lib/supabase'
 import TimePeriodSelector from '@/components/TimePeriodSelector'
 import WalletTable, { ColumnKey, COLUMNS, DEFAULT_VISIBLE } from '@/components/WalletTable'
@@ -35,7 +36,56 @@ interface RefreshProgress {
   username?: string
 }
 
-export default function WalletsPage() {
+// Helper to get default filters based on time period
+const getDefaultFilters = (period: TimePeriod): Record<string, ColumnFilter> => ({
+  [`pnl_${period}`]: { min: 700 }
+})
+
+// Parse filters from URL search params
+const parseFiltersFromURL = (searchParams: URLSearchParams): Record<string, ColumnFilter> => {
+  const filters: Record<string, ColumnFilter> = {}
+  for (const [key, value] of searchParams.entries()) {
+    // Pattern: min_pnl_30d=700, max_win_rate_7d=90
+    const match = key.match(/^(min|max)_(.+)$/)
+    if (match) {
+      const [, type, column] = match
+      const numValue = parseFloat(value)
+      if (!isNaN(numValue)) {
+        filters[column] = filters[column] || {}
+        filters[column][type as 'min' | 'max'] = numValue
+      }
+    }
+  }
+  return filters
+}
+
+// Wrapper component with Suspense for useSearchParams
+export default function WalletsPageWrapper() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="relative w-8 h-8">
+          <div className="absolute inset-0 rounded-full border border-white/10"></div>
+          <div className="absolute inset-0 rounded-full border border-transparent border-t-white/40 animate-spin"></div>
+        </div>
+      </div>
+    }>
+      <WalletsPage />
+    </Suspense>
+  )
+}
+
+function WalletsPage() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+
+  // Initialize state from URL params or defaults
+  const initialPeriod = (searchParams.get('period') as TimePeriod) || '30d'
+  const initialSort = searchParams.get('sort') || 'copy_score'
+  const initialDir = (searchParams.get('dir') as 'asc' | 'desc') || 'desc'
+  const urlFilters = parseFiltersFromURL(searchParams)
+  const initialFilters = Object.keys(urlFilters).length > 0 ? urlFilters : getDefaultFilters(initialPeriod)
+
   const [wallets, setWallets] = useState<Wallet[]>([])
   const [stats, setStats] = useState<WalletStats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -44,10 +94,10 @@ export default function WalletsPage() {
   const [hasMore, setHasMore] = useState(true)
   const [totalEstimate, setTotalEstimate] = useState(0)
   const [isExactCount, setIsExactCount] = useState(false)
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>('30d')
-  const [sortBy, setSortBy] = useState('copy_score')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const [columnFilters, setColumnFilters] = useState<Record<string, ColumnFilter>>({})
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>(initialPeriod)
+  const [sortBy, setSortBy] = useState(initialSort)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(initialDir)
+  const [columnFilters, setColumnFilters] = useState<Record<string, ColumnFilter>>(initialFilters)
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [analyzeAddress, setAnalyzeAddress] = useState('')
@@ -221,14 +271,26 @@ export default function WalletsPage() {
     reanalyzeAbortRef.current = true
   }, [])
 
-  // Load column preferences from localStorage
+  // Load column preferences from localStorage, merging in any new default columns
+  // Bump COLUMN_VERSION when adding new columns to DEFAULT_VISIBLE
+  const COLUMN_VERSION = 2
   useEffect(() => {
     try {
       const saved = localStorage.getItem('polymarket-visible-columns')
       if (saved) {
         const parsed = JSON.parse(saved) as ColumnKey[]
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setVisibleColumns(parsed)
+          const savedVersion = parseInt(localStorage.getItem('polymarket-columns-version') || '1')
+          if (savedVersion < COLUMN_VERSION) {
+            // Merge new default columns that weren't in saved preferences
+            const newCols = DEFAULT_VISIBLE.filter(k => !parsed.includes(k))
+            const merged = [...parsed, ...newCols]
+            localStorage.setItem('polymarket-visible-columns', JSON.stringify(merged))
+            localStorage.setItem('polymarket-columns-version', String(COLUMN_VERSION))
+            setVisibleColumns(merged)
+          } else {
+            setVisibleColumns(parsed)
+          }
         }
       }
     } catch {}
@@ -420,6 +482,20 @@ export default function WalletsPage() {
     }
 
     try {
+      // Convert hold duration filter: UI is in minutes, DB is in hours
+      let serializedFilters: string | undefined
+      if (Object.keys(columnFilters).length > 0) {
+        const apiFilters = { ...columnFilters }
+        if (apiFilters['avg_hold_duration_hours']) {
+          const f = apiFilters['avg_hold_duration_hours']
+          apiFilters['avg_hold_duration_hours'] = {
+            ...(f.min !== undefined && { min: f.min / 60 }),
+            ...(f.max !== undefined && { max: f.max / 60 }),
+          }
+        }
+        serializedFilters = JSON.stringify(apiFilters)
+      }
+
       const params = new URLSearchParams({
         source: 'all',
         minBalance: '0',
@@ -429,7 +505,7 @@ export default function WalletsPage() {
         sortBy,
         sortDir,
         ...(debouncedSearch.trim() && { search: debouncedSearch.trim() }),
-        ...(Object.keys(columnFilters).length > 0 && { columnFilters: JSON.stringify(columnFilters) }),
+        ...(serializedFilters && { columnFilters: serializedFilters }),
         ...(cursor && {
           cursorSortValue: cursor.sortValue,
           cursorAddress: cursor.address,
@@ -549,13 +625,35 @@ export default function WalletsPage() {
 
   const handleColumnFilterChange = (column: string, filter: ColumnFilter) => {
     setColumnFilters(prev => {
-      if (!filter.min && !filter.max) {
+      // Use strict undefined check to allow min=0 as a valid filter
+      if (filter.min === undefined && filter.max === undefined) {
         const { [column]: _, ...rest } = prev
         return rest
       }
       return { ...prev, [column]: filter }
     })
   }
+
+  // Sync state to URL so filters/sort/period are always reflected
+  useEffect(() => {
+    const params = new URLSearchParams()
+    params.set('period', timePeriod)
+    params.set('sort', sortBy)
+    params.set('dir', sortDir)
+
+    // Add filter params
+    for (const [col, filter] of Object.entries(columnFilters)) {
+      if (filter.min !== undefined) params.set(`min_${col}`, String(filter.min))
+      if (filter.max !== undefined) params.set(`max_${col}`, String(filter.max))
+    }
+
+    const newUrl = `/wallets?${params.toString()}`
+    const currentParams = new URLSearchParams(window.location.search)
+    // Only replace if URL actually changed to avoid unnecessary renders
+    if (params.toString() !== currentParams.toString()) {
+      router.replace(newUrl, { scroll: false })
+    }
+  }, [timePeriod, sortBy, sortDir, columnFilters, router])
 
   const activeFilterCount = Object.keys(columnFilters).length
   const isFiltered = activeFilterCount > 0 || debouncedSearch.trim().length > 0
@@ -784,20 +882,35 @@ export default function WalletsPage() {
           </div>
         </div>
 
-        {(activeFilterCount > 0 || searchQuery) && (
+        <div className="flex items-center gap-2">
+          {(activeFilterCount > 0 || searchQuery) && (
+            <button
+              onClick={() => {
+                setColumnFilters({})
+                setSearchQuery('')
+              }}
+              className="text-[10px] text-gray-500 hover:text-white flex items-center gap-1 px-2 py-1 rounded-md hover:bg-white/5 transition-colors"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              Clear All
+            </button>
+          )}
           <button
             onClick={() => {
-              setColumnFilters({})
+              setColumnFilters(getDefaultFilters(timePeriod))
               setSearchQuery('')
             }}
-            className="text-[10px] text-gray-500 hover:text-white flex items-center gap-1 px-2 py-1 rounded-md hover:bg-white/5 transition-colors"
+            className="text-[10px] text-gray-500 hover:text-blue-400 flex items-center gap-1 px-2 py-1 rounded-md hover:bg-white/5 transition-colors"
+            title="Reset to default filters (min PnL $700)"
           >
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            Clear
+            Defaults
           </button>
-        )}
+        </div>
       </div>
 
       {/* Selection Action Bar */}

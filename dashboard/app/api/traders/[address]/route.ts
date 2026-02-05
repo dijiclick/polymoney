@@ -3,15 +3,17 @@ import { createClient } from '@supabase/supabase-js'
 import {
   getPositions,
   getClosedPositions,
+  getActivity,
   getProfile,
   getPortfolioValue,
   parsePositions,
   parseClosedPositions,
+  parseTrades,
   isValidEthAddress,
   fetchEventCategories,
   getTopCategory,
 } from '@/lib/polymarket-api'
-import { TraderProfileResponse, TraderFetchError, TimePeriodMetrics } from '@/lib/types/trader'
+import { TraderProfileResponse, TraderFetchError, TimePeriodMetrics, PolymarketClosedPosition } from '@/lib/types/trader'
 
 // Cache duration: 5 minutes
 const CACHE_DURATION_MS = 5 * 60 * 1000
@@ -152,9 +154,10 @@ export async function GET(
   // Lite mode: only fetch positions + portfolio value (skip profile, categories)
   // Full mode: fetch everything including profile and categories
   try {
-    const [rawPositions, rawClosedPositions, profile, portfolioValue] = await Promise.all([
+    const [rawPositions, rawClosedPositions, rawActivity, profile, portfolioValue] = await Promise.all([
       getPositions(address).catch(() => []),
       getClosedPositions(address).catch(() => []),
+      getActivity(address).catch(() => []),
       liteMode ? Promise.resolve(dbWallet ? { name: dbWallet.username } : {}) : getProfile(address).catch(() => ({})),
       getPortfolioValue(address).catch(() => 0),
     ])
@@ -164,9 +167,6 @@ export async function GET(
     // IMPORTANT: /closed-positions only returns WINNING positions (where outcome paid out)
     // Losing positions appear in /positions with redeemable=true and cashPnl < 0
     const apiClosedPositions = parseClosedPositions(rawClosedPositions)
-
-    console.log(`[${address}] Raw positions: ${rawPositions.length}, Raw closed: ${rawClosedPositions.length}`)
-    console.log(`[${address}] Parsed positions: ${allPositions.length}, API closed (wins): ${apiClosedPositions.length}`)
 
     // Separate open positions (currentValue > 0) from resolved positions (currentValue = 0)
     const openPositions = allPositions.filter(p => p.currentValue > 0)
@@ -193,8 +193,6 @@ export async function GET(
         isWin: false,
       }))
 
-    console.log(`[${address}] Unredeemed losses found: ${unredeemedLosses.length}`)
-
     // Combine API closed positions (wins) with unredeemed losses
     const closedPositions = [...apiClosedPositions, ...unredeemedLosses]
       .sort((a, b) => {
@@ -204,7 +202,12 @@ export async function GET(
         return dateB - dateA
       })
 
-    console.log(`[${address}] Open: ${openPositions.length}, Total Closed (wins+losses): ${closedPositions.length}`)
+    // Compute hold durations from activity data
+    const parsedTrades = parseTrades(rawActivity)
+    computeHoldDurations(closedPositions, parsedTrades)
+
+    // Compute average hold duration for wallet-level metric
+    const avgHoldDurationHours = computeAvgHoldDuration(closedPositions)
 
     // Get current balance for ROI calculation (prefer live portfolio value)
     const currentBalance = portfolioValue || dbWallet?.balance || 0
@@ -287,7 +290,7 @@ export async function GET(
         }).eq('address', address).then(() => {}, () => {})
       }
     } else if (dbWallet) {
-      await updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, metricsAll, uniqueOpenMarkets, uniqueClosedMarkets, topCategory, copyMetrics, currentBalance, profile, cachedPositionsJson)
+      await updateWalletMetrics(address, polymarketMetrics, metrics7d, metrics30d, metricsAll, uniqueOpenMarkets, uniqueClosedMarkets, topCategory, copyMetrics, currentBalance, profile, cachedPositionsJson, avgHoldDurationHours)
     } else if (polymarketMetrics.tradeCount >= 15) {
       // Insert new wallet only if it has enough trades
       try {
@@ -333,6 +336,7 @@ export async function GET(
           copy_score: copyScore,
           avg_trades_per_day: avgTradesPerDay,
           median_profit_pct: medianProfitPct,
+          ...(avgHoldDurationHours != null && { avg_hold_duration_hours: avgHoldDurationHours }),
           metrics_updated_at: new Date().toISOString(),
         })
         // Cache positions separately (column may not exist yet - fails silently)
@@ -1065,6 +1069,7 @@ async function updateWalletMetrics(
   currentBalance?: number,
   profile?: any,
   cachedPositionsJson?: string,
+  avgHoldDurationHours?: number | null,
 ) {
   try {
     await supabase.from('wallets').update({
@@ -1117,6 +1122,7 @@ async function updateWalletMetrics(
         avg_trades_per_day: copyMetrics.avgTradesPerDay,
         median_profit_pct: copyMetrics.medianProfitPct,
       }),
+      ...(avgHoldDurationHours != null && { avg_hold_duration_hours: avgHoldDurationHours }),
       metrics_updated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('address', address)
@@ -1130,4 +1136,54 @@ async function updateWalletMetrics(
   } catch (error) {
     console.error('Error updating wallet metrics:', error)
   }
+}
+
+/**
+ * Compute hold duration for each closed position by correlating
+ * activity trade timestamps with resolution dates.
+ * Mutates the closedPositions array in-place to add holdDurationMs.
+ */
+function computeHoldDurations(
+  closedPositions: PolymarketClosedPosition[],
+  trades: { timestamp: number; side: 'BUY' | 'SELL'; conditionId?: string }[]
+): void {
+  // Build map: conditionId -> earliest BUY timestamp (in ms)
+  const firstBuyMap = new Map<string, number>()
+
+  for (const trade of trades) {
+    if (trade.side !== 'BUY' || !trade.conditionId) continue
+    const tsMs = trade.timestamp * 1000
+    const existing = firstBuyMap.get(trade.conditionId)
+    if (!existing || tsMs < existing) {
+      firstBuyMap.set(trade.conditionId, tsMs)
+    }
+  }
+
+  for (const pos of closedPositions) {
+    const firstBuy = firstBuyMap.get(pos.conditionId)
+    if (!firstBuy || !pos.resolvedAt) continue
+
+    const resolvedMs = new Date(pos.resolvedAt).getTime()
+    const duration = resolvedMs - firstBuy
+    if (duration > 0) {
+      pos.holdDurationMs = duration
+    }
+  }
+}
+
+/**
+ * Compute average hold duration in hours from closed positions that have holdDurationMs.
+ * Returns null if no positions have duration data.
+ */
+function computeAvgHoldDuration(
+  closedPositions: PolymarketClosedPosition[]
+): number | null {
+  const durations = closedPositions
+    .filter(p => p.holdDurationMs != null && p.holdDurationMs > 0)
+    .map(p => p.holdDurationMs!)
+
+  if (durations.length === 0) return null
+
+  const avgMs = durations.reduce((sum, d) => sum + d, 0) / durations.length
+  return Math.round((avgMs / (1000 * 60 * 60)) * 10) / 10 // hours, 1 decimal
 }

@@ -113,50 +113,6 @@ class SupabaseClient:
         return counts
 
     # =========================================================================
-    # Position Operations
-    # =========================================================================
-
-    def upsert_positions(self, positions: list[dict]) -> list[dict]:
-        """Batch upsert positions."""
-        if not positions:
-            return []
-        result = self._client.table("trader_positions").upsert(
-            positions,
-            on_conflict="address,condition_id,outcome_index"
-        ).execute()
-        return result.data or []
-
-    def upsert_closed_positions(self, positions: list[dict]) -> list[dict]:
-        """Batch upsert closed positions."""
-        if not positions:
-            return []
-        result = self._client.table("trader_closed_positions").upsert(
-            positions,
-            on_conflict="address,condition_id,outcome"
-        ).execute()
-        return result.data or []
-
-    def get_positions(self, address: str) -> list[dict]:
-        """Get all open positions for a trader."""
-        result = (
-            self._client.table("trader_positions")
-            .select("*")
-            .eq("address", address)
-            .execute()
-        )
-        return result.data or []
-
-    def get_closed_positions(self, address: str) -> list[dict]:
-        """Get all closed positions for a trader."""
-        result = (
-            self._client.table("trader_closed_positions")
-            .select("*")
-            .eq("address", address)
-            .execute()
-        )
-        return result.data or []
-
-    # =========================================================================
     # Pipeline Run Operations
     # =========================================================================
 
@@ -317,19 +273,6 @@ class SupabaseClient:
             return True
         except Exception:
             return False
-
-    def get_wallet_trade_stats(self) -> dict:
-        """Get aggregate statistics about wallet trades."""
-        result = self._client.table("wallet_trades").select("address", count="exact").execute()
-        total_trades = result.count or 0
-
-        result = self._client.table("wallet_trades").select("address").execute()
-        unique_wallets = len(set(t["address"] for t in result.data)) if result.data else 0
-
-        return {
-            "total_trades": total_trades,
-            "unique_wallets_with_trades": unique_wallets
-        }
 
     # =========================================================================
     # Raw Query Operations

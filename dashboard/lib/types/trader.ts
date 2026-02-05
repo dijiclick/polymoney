@@ -29,6 +29,7 @@ export interface PolymarketClosedPosition {
   realizedPnl: number
   resolvedAt?: string
   isWin: boolean
+  holdDurationMs?: number  // Time from first BUY to resolution (milliseconds)
 }
 
 // Time-period specific metrics (7d, 30d)
@@ -174,20 +175,6 @@ export interface RawPolymarketClosedPosition {
   resolvedOutcome?: string
   timestamp?: number  // Unix timestamp of resolution
   endDate?: string
-}
-
-export interface RawPolymarketActivity {
-  timestamp: number
-  type: string
-  conditionId: string
-  size: string
-  price: string
-  side: 'BUY' | 'SELL'
-  usdcSize?: string
-  title?: string
-  slug?: string
-  outcome?: string
-  transactionHash?: string
 }
 
 // Parsed trade for display

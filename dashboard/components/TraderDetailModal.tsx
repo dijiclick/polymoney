@@ -140,21 +140,24 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
     setLoading(true)
     setError(null)
     try {
-      // Fetch cached data only — no background refresh to avoid triggering
-      // realtime subscription loops that unmount/remount the modal
+      // Load cached data for instant display
       const res = await fetch(`/api/traders/${address}?refresh=false`)
+      let hasCached = false
       if (res.ok) {
         const result = await res.json()
         if (result.closedPositions?.length > 0 || result.positions?.length > 0) {
           setData(result)
           onDataUpdate?.(address, result)
-          return
+          hasCached = true
         }
       }
 
-      // No cached positions — fetch fresh with lite mode (single request, no background refresh)
+      // Always fetch fresh data (computes hold durations, updates cache)
       const freshRes = await fetch(`/api/traders/${address}?refresh=true&lite=true`)
-      if (!freshRes.ok) throw new Error('Failed to fetch trader data')
+      if (!freshRes.ok) {
+        if (!hasCached) throw new Error('Failed to fetch trader data')
+        return // cached data is good enough
+      }
       const freshResult = await freshRes.json()
       setData(freshResult)
       onDataUpdate?.(address, freshResult)
@@ -185,6 +188,15 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
     return value > 0 ? 'text-emerald-400' : 'text-red-400'
   }
 
+  const formatDuration = (ms: number | undefined) => {
+    if (!ms || ms <= 0) return null
+    const mins = Math.round(ms / (1000 * 60))
+    if (mins < 1440) return `${mins}m`
+    const days = ms / (1000 * 60 * 60 * 24)
+    if (days < 30) return `${days.toFixed(1)}d`
+    return `${Math.round(days)}d`
+  }
+
   const displayName = username && !username.startsWith('0x')
     ? username
     : `${address.slice(0, 6)}...${address.slice(-4)}`
@@ -200,7 +212,7 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
       />
 
       {/* Modal — nearly full size */}
-      <div className="relative bg-[#0d0d12] border border-white/10 rounded-t-xl md:rounded-xl shadow-2xl w-full max-w-5xl max-h-[100vh] md:max-h-[95vh] overflow-hidden">
+      <div className="relative border border-white/10 rounded-t-xl md:rounded-xl shadow-2xl w-full max-w-5xl max-h-[100vh] md:max-h-[95vh] overflow-hidden" style={{ background: 'var(--popover-bg)' }}>
         {/* Header */}
         <div className="flex items-center justify-between px-4 md:px-6 py-3.5 border-b border-white/5">
           <div className="flex items-center gap-3">
@@ -494,9 +506,14 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                                 )}
                                 {formatMoney(position.realizedPnl || 0)}
                               </p>
-                              {position.resolvedAt && (
+                              {(position.resolvedAt || (position as any).holdDurationMs) && (
                                 <p className="text-[10px] text-gray-500 mt-1">
-                                  {new Date(position.resolvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  {position.resolvedAt && new Date(position.resolvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  {(position as any).holdDurationMs && (
+                                    <span className="ml-1 text-gray-600">
+                                      · {formatDuration((position as any).holdDurationMs)}
+                                    </span>
+                                  )}
                                 </p>
                               )}
                             </div>

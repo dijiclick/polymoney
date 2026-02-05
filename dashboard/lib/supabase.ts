@@ -5,27 +5,6 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-// Types for our database tables
-
-export interface WatchlistEntry {
-  id: number
-  address: string
-  list_type: 'copytrade' | 'bot' | 'custom'
-  priority: number
-  notes?: string
-  alert_on_new_trade: boolean
-  alert_threshold_usd: number
-  added_at: string
-}
-
-export interface TrackedWallet {
-  id: number
-  address: string
-  update_interval_hours: number
-  last_refreshed_at: string | null
-  added_at: string
-}
-
 // Live Trade Monitoring Types
 export interface LiveTrade {
   id: number
@@ -176,6 +155,7 @@ export interface Wallet {
   median_profit_pct: number | null  // median profit % per trade (IQR outlier removal)
   sell_ratio: number | null         // % of orders that are sells (high = active trader/scalper)
   trades_per_market: number | null  // avg orders per unique market (high = frequent re-entry)
+  avg_hold_duration_hours: number | null  // average time holding positions (hours)
   metrics_updated_at?: string
   created_at: string
   updated_at: string
@@ -221,10 +201,6 @@ export interface WalletFilter {
   timePeriod: TimePeriod
 }
 
-export interface WalletWithMetrics extends Wallet {
-  metrics?: WalletMetrics
-}
-
 // Helper to get days from time period
 export function getTimePeriodDays(period: TimePeriod): number {
   switch (period) {
@@ -234,10 +210,3 @@ export function getTimePeriodDays(period: TimePeriod): number {
   }
 }
 
-// Helper to get start date from time period
-export function getTimePeriodStartDate(period: TimePeriod): Date {
-  const days = getTimePeriodDays(period)
-  const date = new Date()
-  date.setDate(date.getDate() - days)
-  return date
-}

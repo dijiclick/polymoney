@@ -341,33 +341,6 @@ export async function getActivity(
 }
 
 /**
- * Get all trader data in parallel
- */
-export async function getFullTraderData(address: string): Promise<{
-  portfolioValue: number
-  positions: RawPolymarketPosition[]
-  closedPositions: RawPolymarketClosedPosition[]
-  activity: unknown[]
-  profile: TraderProfile
-}> {
-  const [portfolioValue, positions, closedPositions, activity, profile] = await Promise.all([
-    getPortfolioValue(address),
-    getPositions(address),
-    getClosedPositions(address),
-    getActivity(address),
-    getProfile(address),
-  ])
-
-  return {
-    portfolioValue,
-    positions,
-    closedPositions,
-    activity,
-    profile,
-  }
-}
-
-/**
  * Parse raw positions into typed positions
  */
 export function parsePositions(rawPositions: RawPolymarketPosition[]): PolymarketPosition[] {

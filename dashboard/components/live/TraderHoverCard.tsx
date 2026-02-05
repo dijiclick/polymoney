@@ -231,8 +231,8 @@ export default function TraderHoverCard({ address, children }: TraderHoverCardPr
           ref={cardRef}
           onMouseEnter={handleCardEnter}
           onMouseLeave={handleCardLeave}
-          className="fixed z-[9998] bg-[#12121a] border border-white/10 rounded-lg shadow-2xl overflow-hidden"
-          style={{ left: adjustedPos.x, top: adjustedPos.y, width: 268 }}
+          className="fixed z-[9998] border border-white/10 rounded-lg shadow-2xl overflow-hidden"
+          style={{ left: adjustedPos.x, top: adjustedPos.y, width: 268, background: 'var(--popover-bg)' }}
         >
           {loading ? (
             <div className="flex items-center justify-center py-6">

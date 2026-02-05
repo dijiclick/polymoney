@@ -10,26 +10,27 @@ interface ColumnFilter {
   max?: number
 }
 
-export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'pnl' | 'active' | 'wl' | 'dd' | 'medianProfit' | 'avgTrades' | 'sellRatio' | 'tradesPerMarket' | 'bot' | 'category' | 'joined'
+export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'pnl' | 'active' | 'wl' | 'dd' | 'medianProfit' | 'avgTrades' | 'sellRatio' | 'tradesPerMarket' | 'bot' | 'holdDuration' | 'category' | 'joined'
 
-export const COLUMNS: { key: ColumnKey; label: string; isBlockchain?: boolean }[] = [
-  { key: 'score', label: 'Score', isBlockchain: true },
-  { key: 'chart', label: 'Chart', isBlockchain: true },
-  { key: 'sellRatio', label: 'Sell %', isBlockchain: false },
-  { key: 'tradesPerMarket', label: 'T/Mkt', isBlockchain: false },
-  { key: 'winRate', label: 'Win Rate', isBlockchain: true },
-  { key: 'pnl', label: 'PnL', isBlockchain: true },
-  { key: 'dd', label: 'Drawdown', isBlockchain: true },
-  { key: 'medianProfit', label: 'Med %/Trade', isBlockchain: true },
-  { key: 'active', label: 'Active', isBlockchain: true },
-  { key: 'wl', label: 'W/L', isBlockchain: true },
-  { key: 'value', label: 'Value', isBlockchain: false },
-  { key: 'avgTrades', label: 'Trades', isBlockchain: true },
-  { key: 'category', label: 'Category', isBlockchain: false },
-  { key: 'joined', label: 'Joined', isBlockchain: false },
+export const COLUMNS: { key: ColumnKey; label: string }[] = [
+  { key: 'score', label: 'Score' },
+  { key: 'chart', label: 'Chart' },
+  { key: 'sellRatio', label: 'Sell %' },
+  { key: 'tradesPerMarket', label: 'T/Mkt' },
+  { key: 'winRate', label: 'Win Rate' },
+  { key: 'pnl', label: 'PnL' },
+  { key: 'dd', label: 'Drawdown' },
+  { key: 'medianProfit', label: 'Med %/Trade' },
+  { key: 'active', label: 'Active' },
+  { key: 'wl', label: 'W/L' },
+  { key: 'value', label: 'Value' },
+  { key: 'avgTrades', label: 'Trades' },
+  { key: 'holdDuration', label: 'Hold Time' },
+  { key: 'category', label: 'Category' },
+  { key: 'joined', label: 'Joined' },
 ]
 
-export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'sellRatio', 'tradesPerMarket', 'winRate', 'pnl', 'dd', 'medianProfit', 'active', 'wl', 'value', 'avgTrades', 'category', 'joined']
+export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'sellRatio', 'tradesPerMarket', 'winRate', 'pnl', 'dd', 'medianProfit', 'active', 'wl', 'value', 'avgTrades', 'holdDuration', 'category', 'joined']
 
 // Tooltip descriptions for all columns (shown on hover)
 const COLUMN_TOOLTIPS: Record<string, string> = {
@@ -45,6 +46,7 @@ const COLUMN_TOOLTIPS: Record<string, string> = {
   avg_trades_per_day: 'Trades = unique markets / active trading days.',
   sell_ratio: 'Sell % = (sell orders / total orders) × 100. High (>30%) indicates active position management.',
   trades_per_market: 'T/Mkt = total orders / unique markets. High (>2.5) suggests scalping behavior.',
+  avg_hold_duration_hours: 'Average time from first buy to market resolution. Calculated from activity timestamps.',
   category: 'Most frequently traded market category.',
   account_created_at: 'Account creation date on Polymarket.',
 }
@@ -161,19 +163,19 @@ function InlineMiniChart({ address, timePeriod }: { address: string; timePeriod:
   // Build chart data based on current timeframe
   const chartData = positions ? buildDayData(positions, timePeriod) : null
 
-  const W = 80
-  const H = 24
+  const W = 64
+  const H = 20
 
   if (loading) {
     return (
-      <div ref={containerRef} className="w-20 h-6 flex items-center justify-center">
+      <div ref={containerRef} className="w-16 h-5 flex items-center justify-center">
         <div className="w-3 h-3 rounded-full border border-white/10 border-t-white/30 animate-spin" />
       </div>
     )
   }
 
   if (!chartData || chartData.values.length < 2) {
-    return <div ref={containerRef} className="w-20 h-6 flex items-center justify-center text-[9px] text-gray-600">-</div>
+    return <div ref={containerRef} className="w-16 h-5 flex items-center justify-center text-[9px] text-gray-600">-</div>
   }
 
   const { values, isPositive } = chartData
@@ -190,7 +192,7 @@ function InlineMiniChart({ address, timePeriod }: { address: string; timePeriod:
   const strokeColor = isPositive ? '#34d399' : '#f87171'
 
   return (
-    <div ref={containerRef} className="w-20 h-6">
+    <div ref={containerRef} className="w-16 h-5">
       <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>
         <polyline
           points={points}
@@ -500,6 +502,15 @@ export default function WalletTable({
     return `${days}d ago`
   }
 
+  const formatHoldDuration = (hours: number | null | undefined) => {
+    if (hours == null || hours <= 0) return '-'
+    const mins = Math.round(hours * 60)
+    if (mins < 1440) return `${mins}m`
+    const days = hours / 24
+    if (days < 30) return `${days.toFixed(1)}d`
+    return `${Math.round(days)}d`
+  }
+
   const getMetric = (wallet: Wallet, metric: string): number => {
     const suffix = timePeriod === 'all' ? '_all' : timePeriod === '30d' ? '_30d' : '_7d'
     return (wallet as any)[metric + suffix] || 0
@@ -520,13 +531,13 @@ export default function WalletTable({
     label,
     align = 'right',
     filterType = 'number',
-    isBlockchain = false
+    className: extraClass = ''
   }: {
     column: string
     label: string
     align?: 'left' | 'right' | 'center'
     filterType?: 'number' | 'percent' | 'money'
-    isBlockchain?: boolean
+    className?: string
   }) => {
     const isActive = sortBy === column
     const isFilterOpen = openFilter === column
@@ -537,9 +548,9 @@ export default function WalletTable({
 
     return (
       <th
-        className={`px-3 py-2.5 font-medium relative text-[11px] uppercase tracking-wider group/hdr
+        className={`px-1.5 py-2 font-medium relative text-[11px] uppercase tracking-wider group/hdr
           ${align === 'left' ? 'text-left' : align === 'center' ? 'text-center' : 'text-right'}
-          ${isActive ? 'text-white' : 'text-gray-500'}`}
+          ${isActive ? 'text-white' : 'text-gray-500'} ${extraClass}`}
       >
         <div className="flex items-center justify-end gap-1">
           <button
@@ -555,12 +566,6 @@ export default function WalletTable({
             onClick={() => onSort?.(column)}
             className="cursor-pointer select-none hover:text-white transition-colors flex items-center gap-0.5"
           >
-            {isBlockchain && (
-              <div
-                className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 animate-pulse mr-1"
-                title="Blockchain-verified data"
-              />
-            )}
             {label}
             <span className={`transition-opacity text-[10px] ${isActive ? 'opacity-100' : 'opacity-0'}`}>
               {sortDir === 'asc' ? '↑' : '↓'}
@@ -642,15 +647,15 @@ export default function WalletTable({
     <div className="glass rounded-xl overflow-hidden">
       <div
         ref={scrollContainerRef}
-        className="overflow-auto"
+        className="overflow-y-auto overflow-x-hidden"
         data-scroll-container
-        style={{ maxHeight: 'calc(100vh - 240px)' }}
+        style={{ maxHeight: 'calc(100vh - 160px)' }}
       >
-        <table className="w-full min-w-[800px]">
+        <table className="w-full">
           <thead className="sticky top-0 z-20" style={{ background: 'var(--background)' }}>
             <tr className="border-b border-white/5">
               {onToggleSelect && (
-                <th className="px-2 py-2.5 w-8">
+                <th className="px-1 py-2 w-[30px]">
                   <button
                     onClick={onSelectAll}
                     className="flex items-center justify-center"
@@ -670,11 +675,10 @@ export default function WalletTable({
                   </button>
                 </th>
               )}
-              <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
-              {show('score') && <SortHeader column="copy_score" label="Score" filterType="number" isBlockchain={true} />}
-              {show('chart') && <th className="px-1 py-2.5 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-20 relative group/hdr">
+              <th className="px-1 py-2 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider">Trader</th>
+              {show('score') && <SortHeader column="copy_score" label="Score" filterType="number" className="min-w-[52px]" />}
+              {show('chart') && <th className="px-1 py-2 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider min-w-[70px] relative group/hdr">
                 <div className="flex items-center justify-center gap-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 animate-pulse" title="Blockchain-verified data" />
                   Chart
                 </div>
                 <div
@@ -684,18 +688,19 @@ export default function WalletTable({
                   {COLUMN_TOOLTIPS.chart}
                 </div>
               </th>}
-              {show('sellRatio') && <SortHeader column="sell_ratio" label="Sell %" filterType="percent" isBlockchain={false} />}
-              {show('tradesPerMarket') && <SortHeader column="trades_per_market" label="T/Mkt" filterType="number" isBlockchain={false} />}
-              {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" isBlockchain={true} />}
-              {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" isBlockchain={true} />}
-              {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" isBlockchain={true} />}
-              {show('medianProfit') && <SortHeader column="median_profit_pct" label="Med %/T" filterType="percent" isBlockchain={true} />}
-              {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" isBlockchain={true} />}
-              {show('wl') && <SortHeader column={getColumnName('wins')} label="W/L" align="center" filterType="number" isBlockchain={true} />}
-              {show('value') && <SortHeader column="balance" label="Value" filterType="money" isBlockchain={false} />}
-              {show('avgTrades') && <SortHeader column="avg_trades_per_day" label="Trades" filterType="number" isBlockchain={true} />}
-              {show('category') && <th className="px-2 py-2.5 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider w-16 relative group/hdr">
-                Cat
+              {show('sellRatio') && <SortHeader column="sell_ratio" label="Sell %" filterType="percent" className="min-w-[56px]" />}
+              {show('tradesPerMarket') && <SortHeader column="trades_per_market" label="T/Mkt" filterType="number" className="min-w-[52px]" />}
+              {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" className="min-w-[68px]" />}
+              {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" className="min-w-[62px]" />}
+              {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" className="min-w-[52px]" />}
+              {show('medianProfit') && <SortHeader column="median_profit_pct" label="Med %/T" filterType="percent" className="min-w-[60px]" />}
+              {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" className="min-w-[48px]" />}
+              {show('wl') && <SortHeader column={getColumnName('wins')} label="W/L" align="center" filterType="number" className="min-w-[56px]" />}
+              {show('value') && <SortHeader column="balance" label="Value" filterType="money" className="min-w-[62px]" />}
+              {show('avgTrades') && <SortHeader column="avg_trades_per_day" label="Trades" filterType="number" className="min-w-[52px]" />}
+              {show('holdDuration') && <SortHeader column="avg_hold_duration_hours" label="Hold" filterType="number" className="min-w-[56px]" />}
+              {show('category') && <th className="px-1 py-2 text-left text-gray-500 font-medium text-[11px] uppercase tracking-wider min-w-[72px] relative group/hdr">
+                CAT
                 <div
                   className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded text-[10px] text-gray-300 font-normal normal-case tracking-normal whitespace-nowrap opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50"
                   style={{ background: 'var(--popover-bg)', border: '1px solid var(--popover-border)' }}
@@ -703,11 +708,11 @@ export default function WalletTable({
                   {COLUMN_TOOLTIPS.category}
                 </div>
               </th>}
-              {show('joined') && <SortHeader column="account_created_at" label="Joined" filterType="number" isBlockchain={false} />}
+              {show('joined') && <SortHeader column="account_created_at" label="Joined" filterType="number" className="min-w-[72px]" />}
               {trackMode && (
                 <>
-                  <th className="px-3 py-2.5 text-right text-gray-500 font-medium text-[11px] uppercase tracking-wider">Updated</th>
-                  <th className="px-3 py-2.5 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-10"></th>
+                  <th className="px-1.5 py-2 text-right text-gray-500 font-medium text-[11px] uppercase tracking-wider">Updated</th>
+                  <th className="px-1.5 py-2 text-center text-gray-500 font-medium text-[11px] uppercase tracking-wider w-8"></th>
                 </>
               )}
             </tr>
@@ -739,7 +744,7 @@ export default function WalletTable({
                   className="group hover:bg-white/[0.02] transition-colors border-b border-white/[0.02]"
                 >
                   {onToggleSelect && (
-                    <td className="px-2 py-2.5 w-8">
+                    <td className="px-1 py-2 w-[30px]">
                       <button
                         onClick={(e) => { e.stopPropagation(); onToggleSelect(wallet.address) }}
                         className="flex items-center justify-center"
@@ -758,11 +763,11 @@ export default function WalletTable({
                       </button>
                     </td>
                   )}
-                  <td className="px-2 py-2.5 max-w-[160px]">
-                    <div className="flex items-center gap-1.5">
+                  <td className="px-1 py-2 overflow-hidden">
+                    <div className="flex items-center gap-1">
                       <button
                         onClick={() => setSelectedTrader(wallet)}
-                        className="w-5 h-5 rounded-md bg-white/[0.03] hover:bg-white/[0.08] flex-shrink-0 flex items-center justify-center text-[9px] font-medium text-gray-500 hover:text-white transition-all cursor-pointer"
+                        className="w-4 h-4 rounded bg-white/[0.03] hover:bg-white/[0.08] flex-shrink-0 flex items-center justify-center text-[8px] font-medium text-gray-500 hover:text-white transition-all cursor-pointer"
                         title="View details"
                       >
                         {index + 1}
@@ -782,22 +787,12 @@ export default function WalletTable({
                           </svg>
                         </button>
                       )}
-                      <a
-                        href={`/simulate?address=${wallet.address}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="flex-shrink-0 p-0.5 rounded transition-all text-gray-600 opacity-0 group-hover:opacity-100 hover:text-purple-400"
-                        title="Simulate copy trading"
-                      >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                        </svg>
-                      </a>
                       <div className="flex flex-col min-w-0">
                           <a
                             href={`https://polymarket.com/profile/${wallet.address}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-xs font-medium text-gray-200 hover:text-white transition-colors flex items-center gap-1 truncate"
+                            className="text-[11px] font-medium text-gray-200 hover:text-white transition-colors flex items-center gap-1 truncate"
                           >
                             <span className="truncate">{getDisplayName(wallet)}</span>
                             <svg className="w-2.5 h-2.5 flex-shrink-0 opacity-0 group-hover:opacity-50 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -828,22 +823,22 @@ export default function WalletTable({
                       scoreText = 'text-gray-500'
                     }
                     return (
-                      <td className="px-2 py-2.5 text-center">
-                        <span className={`text-sm font-extrabold tabular-nums inline-flex items-center justify-center w-10 h-6 rounded-md ${scoreBg} ${scoreText}`}>
+                      <td className="px-1 py-2 text-center">
+                        <span className={`text-xs font-extrabold tabular-nums inline-flex items-center justify-center w-9 h-5 rounded-md ${scoreBg} ${scoreText}`}>
                           {scoreInt}
                         </span>
                       </td>
                     )
                   })()}
                   {show('chart') && (
-                    <td className="px-1 py-2.5">
+                    <td className="px-0.5 py-2">
                       <InlineMiniChart address={wallet.address} timePeriod={timePeriod} />
                     </td>
                   )}
                   {show('sellRatio') && (
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-1 py-2 text-right">
                       {wallet.sell_ratio != null && wallet.sell_ratio > 0 ? (
-                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                        <span className={`text-xs font-semibold tabular-nums inline-block px-1 py-0.5 rounded ${
                           wallet.sell_ratio > 30 ? 'bg-red-500/10 text-red-400'
                           : wallet.sell_ratio > 20 ? 'bg-amber-500/10 text-amber-400'
                           : 'bg-emerald-500/10 text-emerald-400'
@@ -856,9 +851,9 @@ export default function WalletTable({
                     </td>
                   )}
                   {show('tradesPerMarket') && (
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-1 py-2 text-right">
                       {wallet.trades_per_market != null && wallet.trades_per_market > 0 ? (
-                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                        <span className={`text-xs font-semibold tabular-nums inline-block px-1 py-0.5 rounded ${
                           wallet.trades_per_market > 2.5 ? 'bg-red-500/10 text-red-400'
                           : wallet.trades_per_market > 1.5 ? 'bg-amber-500/10 text-amber-400'
                           : 'bg-emerald-500/10 text-emerald-400'
@@ -871,8 +866,8 @@ export default function WalletTable({
                     </td>
                   )}
                   {show('winRate') && (
-                    <td className="px-3 py-2.5 text-right">
-                      <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                    <td className="px-1 py-2 text-right">
+                      <span className={`text-xs font-semibold tabular-nums inline-block px-1 py-0.5 rounded ${
                         winRate >= 60 ? 'bg-emerald-500/10' : winRate >= 50 ? 'bg-amber-500/10' : 'bg-red-500/10'
                       } ${getWinRateColor(winRate)}`}>
                         {formatPercentPlain(winRate)}
@@ -880,8 +875,8 @@ export default function WalletTable({
                     </td>
                   )}
                   {show('pnl') && (
-                    <td className="px-3 py-2.5 text-right">
-                      <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                    <td className="px-1 py-2 text-right">
+                      <span className={`text-xs font-semibold tabular-nums inline-block px-1 py-0.5 rounded ${
                         pnl > 0 ? 'bg-emerald-500/10' : pnl < 0 ? 'bg-red-500/10' : ''
                       } ${getPnlColor(pnl)}`}>
                         {formatMoney(pnl)}
@@ -889,10 +884,10 @@ export default function WalletTable({
                     </td>
                   )}
                   {show('dd') && (
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-1 py-2 text-right">
                       {drawdown > 0 ? (
                         <span
-                          className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded cursor-default ${
+                          className={`text-xs font-semibold tabular-nums inline-block px-1 py-0.5 rounded cursor-default ${
                             drawdown <= 10 ? 'bg-emerald-500/10' : drawdown <= 25 ? 'bg-amber-500/10' : 'bg-red-500/10'
                           } ${getDrawdownColor(drawdown)}`}
                           title={`Max drawdown: ${formatMoney(wallet.drawdown_amount_all)}`}
@@ -905,9 +900,9 @@ export default function WalletTable({
                     </td>
                   )}
                   {show('medianProfit') && (
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-1 py-2 text-right">
                       {wallet.median_profit_pct != null ? (
-                        <span className={`text-sm font-semibold tabular-nums inline-block px-1.5 py-0.5 rounded ${
+                        <span className={`text-xs font-semibold tabular-nums inline-block px-1 py-0.5 rounded ${
                           wallet.median_profit_pct > 0 ? 'bg-emerald-500/10' : wallet.median_profit_pct < 0 ? 'bg-red-500/10' : ''
                         } ${getPnlColor(wallet.median_profit_pct)}`}>
                           {wallet.median_profit_pct > 0 ? '+' : ''}{Math.round(wallet.median_profit_pct)}%
@@ -918,15 +913,15 @@ export default function WalletTable({
                     </td>
                   )}
                   {show('active') && (
-                    <td className="px-3 py-2.5 text-center">
-                      <span className={`text-sm font-medium tabular-nums ${(wallet.active_positions || 0) > 0 ? 'text-gray-200' : 'text-gray-600'}`}>
+                    <td className="px-1 py-2 text-center">
+                      <span className={`text-xs font-medium tabular-nums ${(wallet.active_positions || 0) > 0 ? 'text-gray-200' : 'text-gray-600'}`}>
                         {wallet.active_positions || 0}
                       </span>
                     </td>
                   )}
                   {show('wl') && (
-                    <td className="px-3 py-2.5 text-center">
-                      <span className="text-sm font-medium tabular-nums">
+                    <td className="px-1 py-2 text-center">
+                      <span className="text-xs font-medium tabular-nums">
                         <span className="text-emerald-400">{getMetric(wallet, 'wins')}</span>
                         <span className="text-gray-600">/</span>
                         <span className="text-red-400">{getMetric(wallet, 'losses')}</span>
@@ -934,21 +929,28 @@ export default function WalletTable({
                     </td>
                   )}
                   {show('value') && (
-                    <td className="px-3 py-2.5 text-right">
-                      <span className="text-gray-200 text-sm tabular-nums font-semibold">{formatMoney(wallet.balance)}</span>
+                    <td className="px-1 py-2 text-right">
+                      <span className="text-gray-200 text-xs tabular-nums font-semibold">{formatMoney(wallet.balance)}</span>
                     </td>
                   )}
                   {show('avgTrades') && (
-                    <td className="px-3 py-2.5 text-right">
-                      <span className="text-gray-200 text-sm font-medium tabular-nums">
+                    <td className="px-1 py-2 text-right">
+                      <span className="text-gray-200 text-xs font-medium tabular-nums">
                         {(wallet.avg_trades_per_day || 0).toFixed(1)}
                       </span>
                     </td>
                   )}
+                  {show('holdDuration') && (
+                    <td className="px-1 py-2 text-right">
+                      <span className="text-gray-300 text-xs tabular-nums">
+                        {formatHoldDuration((wallet as any).avg_hold_duration_hours)}
+                      </span>
+                    </td>
+                  )}
                   {show('category') && (
-                    <td className="px-2 py-2.5 text-left w-16">
+                    <td className="px-1 py-2 text-left">
                       {(wallet as any).top_category ? (
-                        <span className={`text-xs font-semibold px-2 py-1 rounded border ${getCategoryStyle((wallet as any).top_category)}`}>
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${getCategoryStyle((wallet as any).top_category)}`}>
                           {getShortCategory((wallet as any).top_category)}
                         </span>
                       ) : (
@@ -957,8 +959,8 @@ export default function WalletTable({
                     </td>
                   )}
                   {show('joined') && (
-                    <td className="px-3 py-2.5 text-right">
-                      <span className="text-gray-300 text-sm tabular-nums">
+                    <td className="px-1 py-2 text-right">
+                      <span className="text-gray-300 text-xs tabular-nums">
                         {formatCreatedDate(wallet.account_created_at)}
                       </span>
                     </td>
@@ -968,12 +970,12 @@ export default function WalletTable({
                     const isRefreshing = refreshingAddresses?.has(wallet.address)
                     return (
                       <>
-                        <td className="px-3 py-2.5 text-right">
+                        <td className="px-1.5 py-2 text-right">
                           <span className={`text-xs tabular-nums ${meta?.last_refreshed_at ? 'text-gray-400' : 'text-gray-600'}`}>
                             {formatRelativeTime(meta?.last_refreshed_at)}
                           </span>
                         </td>
-                        <td className="px-3 py-2.5 text-center">
+                        <td className="px-1.5 py-2 text-center">
                           {isRefreshing ? (
                             <div className="inline-flex items-center justify-center w-5 h-5">
                               <div className="w-3.5 h-3.5 rounded-full border border-white/10 border-t-white/40 animate-spin" />

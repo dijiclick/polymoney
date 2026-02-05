@@ -113,7 +113,7 @@ export default function ServerStatusButton() {
             d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
         </svg>
         {/* Status dot overlay */}
-        <span className={`absolute top-1 right-1 w-2 h-2 rounded-full ${dot} ring-2 ring-[#0a0a0f]`} />
+        <span className={`absolute top-1 right-1 w-2 h-2 rounded-full ${dot} ring-2`} style={{ ['--tw-ring-color' as any]: 'var(--background)' }} />
       </button>
 
       {open && (

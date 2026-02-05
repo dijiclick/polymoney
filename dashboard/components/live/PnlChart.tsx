@@ -13,6 +13,7 @@ export interface ClosedPosition {
   realizedPnl: number
   resolvedAt?: string
   isWin: boolean
+  holdDurationMs?: number  // Time from first BUY to resolution (milliseconds)
 }
 
 type Timeframe = '1h' | '6h' | '1d' | '7d' | '30d' | 'all'
@@ -455,7 +456,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
         <div
           ref={scrollRef}
           className={isScrollable ? 'overflow-x-auto' : ''}
-          style={isScrollable ? { scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' } : undefined}
+          style={isScrollable ? { scrollbarWidth: 'thin', scrollbarColor: 'var(--scrollbar-thumb) transparent' } : undefined}
         >
           <div style={isScrollable ? { minWidth: W } : undefined}>
             <div className="relative">
@@ -483,7 +484,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
                 <>
                   {lineChart.min < 0 && lineChart.max > 0 && (
                     <line x1={PX} y1={lineChart.zeroY} x2={W - PR} y2={lineChart.zeroY}
-                      stroke="white" strokeOpacity="0.06" strokeDasharray="4,4" vectorEffect="non-scaling-stroke" />
+                      stroke="var(--text-muted)" strokeOpacity="0.15" strokeDasharray="4,4" vectorEffect="non-scaling-stroke" />
                   )}
 
                   <path d={lineChart.areaPath}
@@ -505,7 +506,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
                         r="2"
                         fill={lineChart.points[i].cumPnl >= 0 ? strokeColor : strokeColorNeg}
                         fillOpacity="0.6"
-                        stroke="#0d0d12"
+                        stroke="var(--background)"
                         strokeWidth="1"
                         vectorEffect="non-scaling-stroke"
                       />
@@ -517,14 +518,14 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
                       <line
                         x1={lineChart.xs[hoverIndex]} y1={0}
                         x2={lineChart.xs[hoverIndex]} y2={H}
-                        stroke="white" strokeOpacity="0.12" strokeWidth="1"
+                        stroke="var(--text-muted)" strokeOpacity="0.3" strokeWidth="1"
                         vectorEffect="non-scaling-stroke" />
                       <circle
                         cx={lineChart.xs[hoverIndex]}
                         cy={lineChart.ys[hoverIndex]}
                         r="4"
                         fill={lineChart.points[hoverIndex].cumPnl >= 0 ? strokeColor : strokeColorNeg}
-                        stroke="#0d0d12" strokeWidth="2"
+                        stroke="var(--background)" strokeWidth="2"
                         vectorEffect="non-scaling-stroke" />
                     </>
                   )}
@@ -534,7 +535,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
               {chartMode === 'daily' && barChart && (
                 <>
                   <line x1={PX} y1={barChart.zeroY} x2={W - PR} y2={barChart.zeroY}
-                    stroke="white" strokeOpacity="0.08" strokeWidth="1"
+                    stroke="var(--text-muted)" strokeOpacity="0.2" strokeWidth="1"
                     vectorEffect="non-scaling-stroke" />
 
                   {barChart.bars.map((bar, i) => (
@@ -554,7 +555,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
                     <line
                       x1={barChart.bars[hoverIndex].centerX} y1={0}
                       x2={barChart.bars[hoverIndex].centerX} y2={H}
-                      stroke="white" strokeOpacity="0.08" strokeWidth="1"
+                      stroke="var(--text-muted)" strokeOpacity="0.2" strokeWidth="1"
                       vectorEffect="non-scaling-stroke" />
                   )}
                 </>
@@ -595,7 +596,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
 
       {/* Fullscreen overlay */}
       {isFullscreen && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[9999] flex flex-col bg-[#0d0d12]">
+        <div className="fixed inset-0 z-[9999] flex flex-col" style={{ background: 'var(--background)' }}>
           {/* Fullscreen header */}
           <div className="flex items-start justify-between px-6 pt-5 pb-2">
             <div className="min-h-[48px]">
@@ -693,7 +694,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
                       <>
                         {lineChart.min < 0 && lineChart.max > 0 && (
                           <line x1={PX} y1={lineChart.zeroY} x2={W - PR} y2={lineChart.zeroY}
-                            stroke="white" strokeOpacity="0.06" strokeDasharray="4,4" vectorEffect="non-scaling-stroke" />
+                            stroke="var(--text-muted)" strokeOpacity="0.15" strokeDasharray="4,4" vectorEffect="non-scaling-stroke" />
                         )}
                         <path d={lineChart.areaPath}
                           fill={lastCumPnl >= 0 ? 'url(#fsCumGradGreen)' : 'url(#fsCumGradRed)'} />
@@ -707,16 +708,16 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
                           return (
                             <circle key={i} cx={x} cy={lineChart.ys[i]} r="2.5"
                               fill={lineChart.points[i].cumPnl >= 0 ? strokeColor : strokeColorNeg}
-                              fillOpacity="0.6" stroke="#0d0d12" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                              fillOpacity="0.6" stroke="var(--background)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
                           )
                         })}
                         {hoverIndex !== null && lineChart.xs[hoverIndex] !== undefined && (
                           <>
                             <line x1={lineChart.xs[hoverIndex]} y1={0} x2={lineChart.xs[hoverIndex]} y2={H}
-                              stroke="white" strokeOpacity="0.12" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                              stroke="var(--text-muted)" strokeOpacity="0.3" strokeWidth="1" vectorEffect="non-scaling-stroke" />
                             <circle cx={lineChart.xs[hoverIndex]} cy={lineChart.ys[hoverIndex]} r="5"
                               fill={lineChart.points[hoverIndex].cumPnl >= 0 ? strokeColor : strokeColorNeg}
-                              stroke="#0d0d12" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+                              stroke="var(--background)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
                           </>
                         )}
                       </>
@@ -725,7 +726,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
                     {chartMode === 'daily' && barChart && (
                       <>
                         <line x1={PX} y1={barChart.zeroY} x2={W - PR} y2={barChart.zeroY}
-                          stroke="white" strokeOpacity="0.08" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                          stroke="var(--text-muted)" strokeOpacity="0.2" strokeWidth="1" vectorEffect="non-scaling-stroke" />
                         {barChart.bars.map((bar, i) => (
                           <rect key={i} x={bar.x} y={bar.y} width={bar.w} height={bar.h}
                             rx={Math.min(1.5, bar.w / 2)}
@@ -734,7 +735,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
                         ))}
                         {hoverIndex !== null && barChart.bars[hoverIndex] && (
                           <line x1={barChart.bars[hoverIndex].centerX} y1={0} x2={barChart.bars[hoverIndex].centerX} y2={H}
-                            stroke="white" strokeOpacity="0.08" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                            stroke="var(--text-muted)" strokeOpacity="0.2" strokeWidth="1" vectorEffect="non-scaling-stroke" />
                         )}
                       </>
                     )}
