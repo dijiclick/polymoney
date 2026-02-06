@@ -122,8 +122,11 @@ export interface TraderProfileResponse {
     weeklyProfitRate: number
     avgTradesPerDay: number
     medianProfitPct: number | null
+    suggestedStopLossPct: number | null
     edgeTrend: number
     calmarRatio: number
+    bestTradePct: number | null
+    pfTrend: number | null
   }
 
   // Metadata

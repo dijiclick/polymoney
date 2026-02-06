@@ -13,7 +13,6 @@ const dotColor: Record<string, string> = {
 export default function ServerStatusButton() {
   const [open, setOpen] = useState(false)
   const [isTogglingDiscovery, setIsTogglingDiscovery] = useState(false)
-  const [isResettingDatabase, setIsResettingDatabase] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const { health, isLoading, error, refetch, setPollInterval } = useServerHealth(60000)
 
@@ -38,36 +37,6 @@ export default function ServerStatusButton() {
       console.error('Failed to toggle wallet discovery:', err)
     } finally {
       setIsTogglingDiscovery(false)
-    }
-  }
-
-  const handleResetDatabase = async () => {
-    if (isResettingDatabase) return
-
-    const confirmed = window.confirm(
-      'This will permanently delete ALL wallets, trades, and analytics data. This cannot be undone.\n\nAre you sure?'
-    )
-    if (!confirmed) return
-
-    setIsResettingDatabase(true)
-    try {
-      const res = await fetch('/api/reset-database', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ table: 'wallets' })
-      })
-      if (res.ok) {
-        const data = await res.json()
-        console.log(`Deleted ${data.deleted_wallets} wallets`)
-        await refetch()
-      } else {
-        const data = await res.json()
-        console.error('Failed to reset database:', data.error)
-      }
-    } catch (err) {
-      console.error('Failed to reset database:', err)
-    } finally {
-      setIsResettingDatabase(false)
     }
   }
 
@@ -125,8 +94,6 @@ export default function ServerStatusButton() {
             onRefresh={refetch}
             onToggleWalletDiscovery={handleToggleWalletDiscovery}
             isTogglingDiscovery={isTogglingDiscovery}
-            onResetDatabase={handleResetDatabase}
-            isResettingDatabase={isResettingDatabase}
           />
         </div>
       )}

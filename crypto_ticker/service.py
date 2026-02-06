@@ -1,6 +1,8 @@
 """
 Crypto Ticker Service - Real-time bid/ask tick data from Polymarket crypto markets.
 
+Collects ticks for rotating up-or-down markets (15m, 1h, 4h) for BTC, ETH, SOL, XRP.
+
 Usage:
     python -m crypto_ticker.service
 """
@@ -32,14 +34,6 @@ SYMBOL_TO_RTDS = {
     "ETH": "ethusdt",
     "SOL": "solusdt",
     "XRP": "xrpusdt",
-    "DOGE": "dogeusdt",
-    "ADA": "adausdt",
-    "AVAX": "avaxusdt",
-    "LINK": "linkusdt",
-    "DOT": "dotusdt",
-    "MATIC": "maticusdt",
-    "SHIB": "shibusdt",
-    "LTC": "ltcusdt",
 }
 
 
@@ -47,7 +41,8 @@ class CryptoTickerService:
     """Main service for crypto tick data collection."""
 
     STATS_INTERVAL = 60
-    MARKET_REFRESH_INTERVAL = 300
+    # Refresh every 60s to catch new 15m markets quickly
+    MARKET_REFRESH_INTERVAL = 60
 
     def __init__(self, data_dir: str):
         self.data_dir = data_dir
@@ -60,7 +55,7 @@ class CryptoTickerService:
         self._start_time: datetime | None = None
         self._tick_count = 0
 
-        # Track latest bid/ask per market (condition_id -> {yes: {bid, ask}, no: {bid, ask}})
+        # Track latest bid/ask per market (condition_id -> {up: {bid, ask}, down: {bid, ask}})
         self._market_prices: dict[str, dict] = {}
 
     async def _handle_tick(self, tick: TickMessage) -> None:
@@ -69,35 +64,30 @@ class CryptoTickerService:
         if not market:
             return
 
-        # Determine if this is YES (up) or NO (down) token
-        is_yes = tick.asset_id == market.token_id_yes
+        # Determine if this is Up or Down token
+        is_up = tick.asset_id == market.token_id_up
 
         # Update market prices
         if market.condition_id not in self._market_prices:
             self._market_prices[market.condition_id] = {
-                "yes": {"bid": None, "ask": None},
-                "no": {"bid": None, "ask": None},
+                "up": {"bid": None, "ask": None},
+                "down": {"bid": None, "ask": None},
             }
 
         prices = self._market_prices[market.condition_id]
-        if is_yes:
-            if tick.best_bid is not None:
-                prices["yes"]["bid"] = tick.best_bid
-            if tick.best_ask is not None:
-                prices["yes"]["ask"] = tick.best_ask
-        else:
-            if tick.best_bid is not None:
-                prices["no"]["bid"] = tick.best_bid
-            if tick.best_ask is not None:
-                prices["no"]["ask"] = tick.best_ask
+        side = "up" if is_up else "down"
+        if tick.best_bid is not None:
+            prices[side]["bid"] = tick.best_bid
+        if tick.best_ask is not None:
+            prices[side]["ask"] = tick.best_ask
 
         # Check if we have all 4 prices
-        yes_bid = prices["yes"]["bid"]
-        yes_ask = prices["yes"]["ask"]
-        no_bid = prices["no"]["bid"]
-        no_ask = prices["no"]["ask"]
+        up_bid = prices["up"]["bid"]
+        up_ask = prices["up"]["ask"]
+        down_bid = prices["down"]["bid"]
+        down_ask = prices["down"]["ask"]
 
-        if None in (yes_bid, yes_ask, no_bid, no_ask):
+        if None in (up_bid, up_ask, down_bid, down_ask):
             return  # Wait until we have all prices
 
         # Get crypto spot price
@@ -116,10 +106,10 @@ class CryptoTickerService:
         tick_data = TickData(
             symbol=market.crypto_symbol,
             timeframe=market.timeframe,
-            best_bid_up=yes_bid,
-            best_bid_down=no_bid,
-            best_ask_up=yes_ask,
-            best_ask_down=no_ask,
+            best_bid_up=up_bid,
+            best_bid_down=down_bid,
+            best_ask_up=up_ask,
+            best_ask_down=down_ask,
             timestamp_ms=timestamp_ms,
             market_price=market_price,
         )
@@ -133,30 +123,24 @@ class CryptoTickerService:
         self._running = True
 
         logger.info("=" * 60)
-        logger.info("POLYMARKET CRYPTO TICKER SERVICE")
+        logger.info("POLYMARKET CRYPTO TICKER SERVICE (15m/1h/4h)")
         logger.info("=" * 60)
 
         # Initialize CSV writer
         await self.csv_writer.initialize()
 
-        # Discover crypto markets
+        # Discover current markets
         markets = await self.resolver.refresh_markets()
         if not markets:
-            logger.error("No crypto markets found!")
-            return
-
-        logger.info(f"Found {len(markets)} crypto markets")
-        for m in markets[:5]:
-            logger.info(f"  {m.crypto_symbol}_{m.timeframe}: {m.question[:60]}")
+            logger.warning("No markets found on first try, will retry...")
 
         # Get token IDs and symbols
         token_ids = self.resolver.get_all_token_ids()
-        symbols = self.resolver.get_unique_symbols()
-        rtds_symbols = [SYMBOL_TO_RTDS[s] for s in symbols if s in SYMBOL_TO_RTDS]
+        rtds_symbols = list(SYMBOL_TO_RTDS.values())
 
         logger.info(f"Subscribing to {len(token_ids)} tokens, {len(rtds_symbols)} price feeds")
 
-        # Create RTDS price client
+        # Create RTDS price client (all 4 symbols always)
         self.price_client = RtdsPriceClient(symbols=rtds_symbols)
 
         # Create CLOB client
@@ -211,10 +195,13 @@ class CryptoTickerService:
                 uptime = (datetime.now(timezone.utc) - self._start_time).total_seconds() if self._start_time else 0
                 uptime_str = f"{int(uptime // 3600)}h {int((uptime % 3600) // 60)}m"
 
+                active_markets = len(self.resolver.get_all_markets())
+
                 logger.info(
                     f"[STATS] "
-                    f"Ticks: {self._tick_count} written | "
-                    f"CLOB: {clob_stats.get('tick_count', 0)} received | "
+                    f"Ticks: {self._tick_count} | "
+                    f"CLOB: {clob_stats.get('tick_count', 0)} | "
+                    f"Markets: {active_markets} | "
                     f"Files: {csv_stats.get('open_files', 0)} | "
                     f"Uptime: {uptime_str}"
                 )
@@ -225,24 +212,35 @@ class CryptoTickerService:
                 logger.error(f"Stats error: {e}")
 
     async def _market_refresher(self) -> None:
-        """Refresh markets periodically to catch new ones."""
+        """Refresh markets every 60s to catch rotating markets."""
         while self._running:
             try:
                 await asyncio.sleep(self.MARKET_REFRESH_INTERVAL)
 
-                old_count = len(self.resolver.get_all_markets())
+                old_tokens = set(self.resolver.get_all_token_ids())
                 await self.resolver.refresh_markets()
-                new_count = len(self.resolver.get_all_markets())
+                new_tokens = set(self.resolver.get_all_token_ids())
 
-                if new_count != old_count:
-                    logger.info(f"Market refresh: {old_count} -> {new_count} markets")
+                # Subscribe to new tokens
+                added = new_tokens - old_tokens
+                if added and self.clob_client:
+                    for token_id in added:
+                        await self.clob_client.add_subscription(token_id)
+                    logger.info(f"Added {len(added)} new token subscriptions")
 
-                    # Update CLOB subscriptions
-                    if self.clob_client:
-                        new_tokens = self.resolver.get_all_token_ids()
-                        for token_id in new_tokens:
-                            if token_id not in self.clob_client.asset_ids:
-                                await self.clob_client.add_subscription(token_id)
+                # Clean up old market prices for removed markets
+                removed = old_tokens - new_tokens
+                if removed:
+                    # Find condition_ids that no longer have active tokens
+                    active_conditions = {
+                        m.condition_id for m in self.resolver.get_all_markets()
+                    }
+                    stale = [
+                        cid for cid in self._market_prices
+                        if cid not in active_conditions
+                    ]
+                    for cid in stale:
+                        del self._market_prices[cid]
 
             except asyncio.CancelledError:
                 break

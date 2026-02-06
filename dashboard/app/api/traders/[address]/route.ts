@@ -139,8 +139,11 @@ export async function GET(
         weeklyProfitRate: dbWallet.weekly_profit_rate || 0,
         avgTradesPerDay: dbWallet.avg_trades_per_day || 0,
         medianProfitPct: dbWallet.median_profit_pct ?? null,
+        suggestedStopLossPct: dbWallet.suggested_sl_pct ?? null,
         edgeTrend: 0,
         calmarRatio: 0,
+        bestTradePct: dbWallet.best_trade_pct ?? null,
+        pfTrend: dbWallet.pf_trend ?? null,
       },
       scores: undefined,
       isNewlyFetched: false,
@@ -249,6 +252,11 @@ export async function GET(
     const avgTradesPerDay = calculateAvgTradesPerDay(closedPositions)
     const medianProfitPct = calculateMedianProfitPct(closedPositions)
     const maxSingleLossPct = calculateMaxSingleLossPct(closedPositions)
+    const suggestedStopLossPct = calculateSuggestedStopLoss(closedPositions, metrics30d.winRate, avgTradesPerDay)
+
+    // Calculate new metrics for improved copy score
+    const bestTradePct = calculateBestTradePct(closedPositions)
+    const pfTrend = calculatePfTrend(profitFactor30d, profitFactorAll)
 
     // In lite mode (modal open), preserve existing DB score to avoid fluctuation.
     // Score is only recalculated during full sync (non-lite mode).
@@ -256,11 +264,15 @@ export async function GET(
       ? dbWallet.copy_score
       : calculateCopyScore({
           profitFactor30d,
+          profitFactorAll,
           drawdown30d: metrics30d.drawdown || 0,
+          diffWinRate30d,
           weeklyProfitRate,
           tradeCountAll: polymarketMetrics.tradeCount,
           medianProfitPct,
           avgTradesPerDay,
+          bestTradePct,
+          pfTrend,
         })
 
     const copyMetrics = {
@@ -272,6 +284,9 @@ export async function GET(
       copyScore,
       avgTradesPerDay,
       medianProfitPct,
+      suggestedStopLossPct,
+      bestTradePct,
+      pfTrend,
     }
 
     // 7. Save metrics to database (update existing or insert new wallet)
@@ -336,6 +351,7 @@ export async function GET(
           copy_score: copyScore,
           avg_trades_per_day: avgTradesPerDay,
           median_profit_pct: medianProfitPct,
+          suggested_sl_pct: suggestedStopLossPct,
           ...(avgHoldDurationHours != null && { avg_hold_duration_hours: avgHoldDurationHours }),
           metrics_updated_at: new Date().toISOString(),
         })
@@ -394,8 +410,11 @@ export async function GET(
         weeklyProfitRate,
         avgTradesPerDay,
         medianProfitPct,
+        suggestedStopLossPct,
         edgeTrend: 0,
         calmarRatio: 0,
+        bestTradePct,
+        pfTrend,
       },
       scores: undefined,
       isNewlyFetched: true,
@@ -467,8 +486,11 @@ export async function GET(
           weeklyProfitRate: dbWallet.weekly_profit_rate || 0,
           avgTradesPerDay: dbWallet.avg_trades_per_day || 0,
           medianProfitPct: dbWallet.median_profit_pct ?? null,
+          suggestedStopLossPct: dbWallet.suggested_sl_pct ?? null,
           edgeTrend: 0,
           calmarRatio: 0,
+          bestTradePct: dbWallet.best_trade_pct ?? null,
+          pfTrend: dbWallet.pf_trend ?? null,
         },
         scores: undefined,
         isNewlyFetched: false,
@@ -984,55 +1006,148 @@ function calculateMaxSingleLossPct(
 }
 
 /**
+ * Calculate suggested per-trade stop-loss percentage.
+ * Uses P75 of recent (30d) losing trades' loss percentages,
+ * adjusted for win rate and trade frequency.
+ */
+function calculateSuggestedStopLoss(
+  closedPositions: { size: number; avgPrice: number; realizedPnl: number; resolvedAt?: string; isWin: boolean }[],
+  winRate30d: number,
+  avgTradesPerDay: number
+): number | null {
+  const cutoffMs = Date.now() - 30 * 24 * 60 * 60 * 1000
+
+  // Get loss percentages from last 30 days
+  const lossPcts: number[] = []
+  for (const pos of closedPositions) {
+    if (!pos.resolvedAt || new Date(pos.resolvedAt).getTime() < cutoffMs) continue
+    const initialValue = pos.size * pos.avgPrice
+    if (initialValue <= 0 || pos.realizedPnl >= 0) continue
+    lossPcts.push(Math.abs(pos.realizedPnl / initialValue) * 100)
+  }
+
+  // Need at least 10 losing trades for statistical significance
+  if (lossPcts.length < 10) return null
+
+  // Sort ascending for percentile calculation
+  lossPcts.sort((a, b) => a - b)
+
+  // P75: 75th percentile of losses
+  const idx = lossPcts.length * 0.75
+  const lower = Math.floor(idx)
+  const upper = Math.min(lower + 1, lossPcts.length - 1)
+  const weight = idx - lower
+  let sl = lossPcts[lower] * (1 - weight) + lossPcts[upper] * weight
+
+  // Win rate adjustment: high win rate traders deserve more patience
+  if (winRate30d > 60) sl *= 1.10
+
+  // Trade frequency adjustment: high-freq traders need tighter SL
+  if (avgTradesPerDay > 25) sl *= 0.90
+
+  // Clamp between 5% and 50%
+  sl = Math.max(5, Math.min(50, sl))
+
+  return Math.round(sl * 10) / 10
+}
+
+/**
+ * Calculate what % of total positive PnL comes from the single best trade.
+ * High = one-hit wonder risk. Low = well-distributed profits.
+ */
+function calculateBestTradePct(
+  closedPositions: { conditionId: string; realizedPnl: number }[]
+): number | null {
+  const marketPnl = new Map<string, number>()
+  for (const pos of closedPositions) {
+    if (!pos.conditionId) continue
+    marketPnl.set(pos.conditionId, (marketPnl.get(pos.conditionId) || 0) + pos.realizedPnl)
+  }
+
+  const positivePnls = Array.from(marketPnl.values()).filter(v => v > 0)
+  if (positivePnls.length === 0) return null
+
+  const totalPositive = positivePnls.reduce((s, v) => s + v, 0)
+  if (totalPositive <= 0) return null
+
+  const maxSingle = Math.max(...positivePnls)
+  return Math.round((maxSingle / totalPositive) * 10000) / 100
+}
+
+/**
+ * Calculate PF trend = profit_factor_30d / profit_factor_all.
+ * > 1.0 = improving edge, < 1.0 = decaying edge.
+ */
+function calculatePfTrend(profitFactor30d: number, profitFactorAll: number): number | null {
+  if (!profitFactorAll || profitFactorAll <= 0) return null
+  if (profitFactor30d == null || profitFactor30d < 0) return null
+  return Math.round((profitFactor30d / profitFactorAll) * 100) / 100
+}
+
+/**
  * Calculate composite copy-trade score (0-100).
- * Optimized for copy trading with comprehensive risk management.
+ * 5-pillar formula matching the Python implementation.
  */
 function calculateCopyScore(params: {
   profitFactor30d: number
+  profitFactorAll: number
   drawdown30d: number
+  diffWinRate30d: number
   weeklyProfitRate: number
   tradeCountAll: number
   medianProfitPct: number | null
   avgTradesPerDay?: number
+  bestTradePct?: number | null
+  pfTrend?: number | null
 }): number {
-  const { profitFactor30d, drawdown30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay } = params
+  const { profitFactor30d, profitFactorAll, drawdown30d, diffWinRate30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay, bestTradePct, pfTrend } = params
 
   // ── Hard Filters ────────────────────────────────────────────────
-  // All must pass or score = 0. Optimized for copy trading with risk management
-  if (tradeCountAll < 30) return 0                                    // Statistical significance
-  if (profitFactor30d < 1.2) return 0                                 // Real edge exists
-  if (medianProfitPct == null || medianProfitPct < 5.0) return 0      // Per-trade quality
-  if (avgTradesPerDay != null && (avgTradesPerDay < 2 || avgTradesPerDay > 15)) return 0  // Active traders range
+  if (tradeCountAll < 40) return 0
+  if (profitFactor30d < 1.2) return 0
+  if (medianProfitPct == null || medianProfitPct < 5.0) return 0
+  if (avgTradesPerDay != null && (avgTradesPerDay < 0.5 || avgTradesPerDay > 25)) return 0
 
-  // ── Pillar 1: Edge (40%) ────────────────────────────────────────
-  // Profit Factor = gross wins / gross losses. THE fundamental measure
-  // of trading edge. PF 1.2 (min) → 0, PF 3.0+ → 1.0
-  const edgeScore = Math.min((profitFactor30d - 1.2) / (3.0 - 1.2), 1.0)
+  // ── Pillar 1: Edge (25%) — Blended PF (70% recent + 30% all-time) ──
+  const blendedPf = profitFactor30d * 0.7 + (profitFactorAll || profitFactor30d) * 0.3
+  const edgeScore = Math.min(Math.max((blendedPf - 1.2) / (3.0 - 1.2), 0), 1.0)
 
-  // ── Pillar 2: Consistency (35%) ─────────────────────────────────
-  // Weekly profit rate = % of active weeks that were profitable.
-  // Best predictor of future performance (Darwinex research).
-  // 40% → 0, 85%+ → 1.0
+  // ── Pillar 2: Skill (20%) — Difficulty-weighted win rate ──
+  const skillScore = Math.min(Math.max((diffWinRate30d - 45) / (75 - 45), 0), 1.0)
+
+  // ── Pillar 3: Consistency (20%) — Weekly profit rate ──
   const consistencyScore = Math.min(Math.max((weeklyProfitRate - 40) / (85 - 40), 0), 1.0)
 
-  // ── Pillar 3: Risk (25%) ────────────────────────────────────────
-  // Inverse of max drawdown. Lower drawdown = higher score.
-  // DD 5% → 1.0 (excellent), DD 25%+ → 0 (dangerous)
+  // ── Pillar 4: Risk (15%) — Inverse drawdown ──
   const riskScore = drawdown30d <= 0
-    ? 1.0  // No drawdown = perfect
+    ? 1.0
     : Math.min(Math.max((25 - drawdown30d) / (25 - 5), 0), 1.0)
+
+  // ── Pillar 5: Discipline (10%) — Penalizes one-hit wonders ──
+  let disciplineScore = 0.5
+  if (bestTradePct != null && bestTradePct > 0) {
+    disciplineScore = Math.min(Math.max((1 - bestTradePct / 100 - 0.15) / (0.85 - 0.15), 0), 1.0)
+  }
 
   // ── Weighted Sum ────────────────────────────────────────────────
   const rawScore = (
-    edgeScore * 0.40 +
-    consistencyScore * 0.35 +
-    riskScore * 0.25
+    edgeScore * 0.25 +
+    skillScore * 0.20 +
+    consistencyScore * 0.20 +
+    riskScore * 0.15 +
+    disciplineScore * 0.10
   ) * 100
 
-  // ── Confidence Multiplier ───────────────────────────────────────
-  // More trades = more statistical confidence in the score.
-  const confidence = Math.min(1.0, tradeCountAll / 50)
-  return Math.min(Math.round(rawScore * confidence), 100)
+  // ── Confidence Multiplier (stricter: 150 trades) ──
+  const confidence = Math.min(1.0, tradeCountAll / 150)
+
+  // ── Decay Multiplier — penalizes fading edge ──
+  let decay = 1.0
+  if (pfTrend != null && pfTrend > 0) {
+    decay = Math.max(0.5, Math.min(pfTrend, 1.0))
+  }
+
+  return Math.min(Math.round(rawScore * confidence * decay), 100)
 }
 
 async function updateWalletMetrics(
@@ -1065,6 +1180,9 @@ async function updateWalletMetrics(
     copyScore: number
     avgTradesPerDay: number
     medianProfitPct: number | null
+    suggestedStopLossPct: number | null
+    bestTradePct: number | null
+    pfTrend: number | null
   },
   currentBalance?: number,
   profile?: any,
@@ -1121,6 +1239,9 @@ async function updateWalletMetrics(
         copy_score: copyMetrics.copyScore,
         avg_trades_per_day: copyMetrics.avgTradesPerDay,
         median_profit_pct: copyMetrics.medianProfitPct,
+        suggested_sl_pct: copyMetrics.suggestedStopLossPct,
+        best_trade_pct: copyMetrics.bestTradePct,
+        pf_trend: copyMetrics.pfTrend,
       }),
       ...(avgHoldDurationHours != null && { avg_hold_duration_hours: avgHoldDurationHours }),
       metrics_updated_at: new Date().toISOString(),

@@ -153,6 +153,8 @@ export interface Wallet {
   copy_score: number          // composite copy-trade score (0-100)
   avg_trades_per_day: number  // average trades per active day
   median_profit_pct: number | null  // median profit % per trade (IQR outlier removal)
+  best_trade_pct: number | null     // % of total positive PnL from single best trade
+  pf_trend: number | null           // PF 30d / PF all-time (>1 = improving, <1 = decaying)
   sell_ratio: number | null         // % of orders that are sells (high = active trader/scalper)
   trades_per_market: number | null  // avg orders per unique market (high = frequent re-entry)
   avg_hold_duration_hours: number | null  // average time holding positions (hours)

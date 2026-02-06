@@ -384,19 +384,27 @@ class WalletDiscoveryProcessor:
                 all_event_slugs.append(slug)
         top_category = await self._fetch_top_category(all_event_slugs)
 
-        # Copy Score uses 30d metrics for recency
+        # New metrics for improved copy score
+        best_trade_pct = self._calculate_best_trade_pct(closed_positions)
+        pf_trend = self._calculate_pf_trend(
+            metrics_30d.get("profit_factor", 0),
+            metrics.get("profit_factor_all", 0),
+        )
+
+        # Copy Score uses 5-pillar formula
         copy_score = self._calculate_copy_score(
             profit_factor_30d=metrics_30d.get("profit_factor", 0),
-            roi_30d=metrics_30d["roi"],
+            profit_factor_all=metrics.get("profit_factor_all", 0),
             drawdown_30d=metrics_30d["drawdown"],
             diff_win_rate_30d=metrics_30d.get("diff_win_rate", 0),
             weekly_profit_rate=weekly_profit_rate,
-            roi_7d=metrics_7d["roi"],
             trade_count_all=metrics.get("trade_count", 0),
             median_profit_pct=median_profit_pct,
             avg_trades_per_day=avg_trades_per_day,
             overall_pnl=metrics.get("total_pnl", 0),
             overall_roi=metrics.get("roi_all", 0),
+            best_trade_pct=best_trade_pct,
+            pf_trend=pf_trend,
         )
 
         wallet_data = {
@@ -464,6 +472,8 @@ class WalletDiscoveryProcessor:
             "avg_trades_per_day": avg_trades_per_day,
             "top_category": top_category,
             "median_profit_pct": median_profit_pct,
+            "best_trade_pct": best_trade_pct,
+            "pf_trend": pf_trend,
             "sell_ratio": sell_ratio,
             "trades_per_market": trades_per_market,
             "metrics_updated_at": datetime.now(timezone.utc).isoformat(),
@@ -1156,33 +1166,87 @@ class WalletDiscoveryProcessor:
         return max(1, min(10, round(raw * 9 + 1)))
 
     @staticmethod
+    def _calculate_best_trade_pct(closed_positions: list[dict]) -> float | None:
+        """
+        Calculate what % of total positive PnL comes from the single best trade.
+
+        A high value (e.g. 80%) means the trader's profits depend on one lucky bet.
+        A low value (e.g. 10%) means profits are well-distributed across trades.
+
+        Returns None if no positive PnL trades.
+        """
+        # Group by conditionId to get per-market PnL
+        market_pnl: dict[str, float] = {}
+        for pos in closed_positions:
+            cid = pos.get("conditionId", "")
+            if not cid:
+                continue
+            pnl = float(pos.get("realizedPnl", 0))
+            market_pnl[cid] = market_pnl.get(cid, 0) + pnl
+
+        positive_pnls = [v for v in market_pnl.values() if v > 0]
+        if not positive_pnls:
+            return None
+
+        total_positive = sum(positive_pnls)
+        if total_positive <= 0:
+            return None
+
+        max_single = max(positive_pnls)
+        return round((max_single / total_positive) * 100, 2)
+
+    @staticmethod
+    def _calculate_pf_trend(profit_factor_30d: float, profit_factor_all: float) -> float | None:
+        """
+        Calculate PF trend = profit_factor_30d / profit_factor_all.
+
+        > 1.0 = improving edge (recent PF better than historical)
+        < 1.0 = decaying edge (recent PF worse than historical)
+        = 1.0 = stable
+
+        Returns None if either PF is 0 or unavailable.
+        """
+        if not profit_factor_all or profit_factor_all <= 0:
+            return None
+        if profit_factor_30d is None or profit_factor_30d < 0:
+            return None
+        return round(profit_factor_30d / profit_factor_all, 2)
+
+    @staticmethod
     def _calculate_copy_score(
         profit_factor_30d: float,
-        roi_30d: float,
+        profit_factor_all: float,
         drawdown_30d: float,
         diff_win_rate_30d: float,
         weekly_profit_rate: float,
-        roi_7d: float,
         trade_count_all: int,
         median_profit_pct: float | None = None,
         avg_trades_per_day: float | None = None,
         overall_pnl: float = 0,
         overall_roi: float = 0,
+        best_trade_pct: float | None = None,
+        pf_trend: float | None = None,
     ) -> int:
         """
         Calculate composite copy-trade score (0-100).
 
-        3-pillar formula matching the TypeScript implementation:
-        - Edge (40%): Profit Factor normalized 1.2-3.0
-        - Consistency (35%): Weekly Profit Rate normalized 40%-85%
-        - Risk (25%): Inverse drawdown, DD 5%-25%
+        5-pillar formula:
+        - Edge (25%): Blended Profit Factor (70% 30d + 30% all-time), normalized 1.2-3.0
+        - Skill (20%): Difficulty-weighted win rate, normalized 45%-75%
+        - Consistency (20%): Weekly Profit Rate, normalized 40%-85%
+        - Risk (15%): Inverse drawdown, DD 5%-25%
+        - Discipline (10%): Inverse best_trade_pct, penalizes one-hit wonders
+
+        Multiplied by:
+        - Confidence: min(1, trade_count_all / 150) — stricter than before
+        - Decay: pf_trend ratio clamped to [0.5, 1.0] — penalizes fading edge
         """
-        # Hard filters — all must pass or score = 0 (matching TypeScript)
+        # Hard filters — all must pass or score = 0
         if overall_pnl < 0:
             return 0
         if overall_roi < 0:
             return 0
-        if trade_count_all < 30:
+        if trade_count_all < 40:
             return 0
         if profit_factor_30d < 1.2:
             return 0
@@ -1191,28 +1255,48 @@ class WalletDiscoveryProcessor:
         if avg_trades_per_day is not None and (avg_trades_per_day < 0.5 or avg_trades_per_day > 25):
             return 0
 
-        # Pillar 1: Edge (40%) — Profit Factor 1.2 → 0, 3.0+ → 1.0
-        edge_score = min((profit_factor_30d - 1.2) / (3.0 - 1.2), 1.0)
+        # Pillar 1: Edge (25%) — Blended PF (70% recent + 30% all-time)
+        blended_pf = profit_factor_30d * 0.7 + (profit_factor_all or profit_factor_30d) * 0.3
+        edge_score = min(max((blended_pf - 1.2) / (3.0 - 1.2), 0), 1.0)
 
-        # Pillar 2: Consistency (35%) — Weekly profit rate 40% → 0, 85%+ → 1.0
+        # Pillar 2: Skill (20%) — Difficulty-weighted win rate 45% → 0, 75%+ → 1.0
+        skill_score = min(max((diff_win_rate_30d - 45) / (75 - 45), 0), 1.0)
+
+        # Pillar 3: Consistency (20%) — Weekly profit rate 40% → 0, 85%+ → 1.0
         consistency_score = min(max((weekly_profit_rate - 40) / (85 - 40), 0), 1.0)
 
-        # Pillar 3: Risk (25%) — Inverse drawdown: DD 5% → 1.0, DD 25%+ → 0
+        # Pillar 4: Risk (15%) — Inverse drawdown: DD 5% → 1.0, DD 25%+ → 0
         if drawdown_30d <= 0:
             risk_score = 1.0
         else:
             risk_score = min(max((25 - drawdown_30d) / (25 - 5), 0), 1.0)
 
+        # Pillar 5: Discipline (10%) — Penalizes one-hit wonders
+        # best_trade_pct = 15% → full score, 85%+ → zero
+        if best_trade_pct is not None and best_trade_pct > 0:
+            discipline_score = min(max((1 - best_trade_pct / 100 - 0.15) / (0.85 - 0.15), 0), 1.0)
+        else:
+            discipline_score = 0.5  # Unknown = neutral
+
         # Weighted sum
         raw_score = (
-            edge_score * 0.40 +
-            consistency_score * 0.35 +
-            risk_score * 0.25
+            edge_score * 0.25 +
+            skill_score * 0.20 +
+            consistency_score * 0.20 +
+            risk_score * 0.15 +
+            discipline_score * 0.10
         ) * 100
 
-        # Confidence multiplier
-        confidence = min(1.0, trade_count_all / 50)
-        return min(round(raw_score * confidence), 100)
+        # Confidence multiplier — stricter: 150 trades for full confidence
+        confidence = min(1.0, trade_count_all / 150)
+
+        # Decay multiplier — penalizes fading edge
+        if pf_trend is not None and pf_trend > 0:
+            decay = max(0.5, min(pf_trend, 1.0))
+        else:
+            decay = 1.0  # Unknown = no penalty
+
+        return min(round(raw_score * confidence * decay), 100)
 
     async def _fetch_trade_stats(self, address: str) -> tuple[float, float]:
         """

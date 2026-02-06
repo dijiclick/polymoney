@@ -1,7 +1,7 @@
 """
 Crypto Ticker Service - Real-time bid/ask tick data from Polymarket crypto markets.
 
-Collects per-tick data (15m, 1h, 4h, 1d markets) and stores to daily CSV files.
+Collects per-tick data (15m, 1h, 4h) for rotating up-or-down markets to daily CSV files.
 """
 
 from crypto_ticker.market_resolver import MarketResolver, CryptoMarket

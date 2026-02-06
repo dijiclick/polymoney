@@ -35,8 +35,11 @@ interface TraderData {
     weeklyProfitRate: number
     avgTradesPerDay: number
     medianProfitPct: number | null
+    suggestedStopLossPct: number | null
     edgeTrend: number
     calmarRatio: number
+    bestTradePct: number | null
+    pfTrend: number | null
   }
 }
 
@@ -51,6 +54,8 @@ interface WalletData {
   weekly_profit_rate?: number
   avg_trades_per_day?: number
   drawdown_30d?: number
+  best_trade_pct?: number | null
+  pf_trend?: number | null
   balance?: number
   overall_pnl?: number
   overall_win_rate?: number
@@ -100,8 +105,11 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
       weeklyProfitRate: walletData.weekly_profit_rate || 0,
       avgTradesPerDay: walletData.avg_trades_per_day || 0,
       medianProfitPct: walletData.median_profit_pct ?? null,
+      suggestedStopLossPct: walletData.suggested_sl_pct ?? null,
       edgeTrend: 0,
       calmarRatio: 0,
+      bestTradePct: walletData.best_trade_pct ?? null,
+      pfTrend: walletData.pf_trend ?? null,
     },
   } : null
 
@@ -329,6 +337,22 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                               <p className="text-[9px] text-gray-600 uppercase">Diff WR</p>
                               <p className="text-xs font-semibold text-gray-300 tabular-nums">{displayData.copyMetrics.diffWinRate30d.toFixed(1)}%</p>
                             </div>
+                            {displayData.copyMetrics.bestTradePct != null && (
+                              <div className="text-center">
+                                <p className="text-[9px] text-gray-600 uppercase">Best%</p>
+                                <p className={`text-xs font-semibold tabular-nums ${displayData.copyMetrics.bestTradePct > 60 ? 'text-red-400' : displayData.copyMetrics.bestTradePct > 35 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                  {Math.round(displayData.copyMetrics.bestTradePct)}%
+                                </p>
+                              </div>
+                            )}
+                            {displayData.copyMetrics.pfTrend != null && (
+                              <div className="text-center">
+                                <p className="text-[9px] text-gray-600 uppercase">PF↕</p>
+                                <p className={`text-xs font-semibold tabular-nums ${displayData.copyMetrics.pfTrend >= 1 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  {displayData.copyMetrics.pfTrend.toFixed(2)}x
+                                </p>
+                              </div>
+                            )}
                           </div>
                           <p className="text-[9px] text-gray-600">
                             {displayData.copyMetrics.avgTradesPerDay.toFixed(1)} trades/day
@@ -342,6 +366,20 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                         </div>
                       )}
                     </div>
+                    {/* Suggested Stop-Loss */}
+                    {displayData.copyMetrics?.suggestedStopLossPct != null && (
+                      <div className="mt-3 flex items-center gap-2">
+                        <span className="text-[9px] text-gray-500 uppercase tracking-wider">Suggested SL</span>
+                        <span className={`text-lg font-bold ${
+                          displayData.copyMetrics.suggestedStopLossPct < 15 ? 'text-emerald-400' :
+                          displayData.copyMetrics.suggestedStopLossPct <= 30 ? 'text-amber-400' :
+                          'text-red-400'
+                        }`}>
+                          {displayData.copyMetrics.suggestedStopLossPct.toFixed(1)}%
+                        </span>
+                        <span className="text-[9px] text-gray-600">per trade</span>
+                      </div>
+                    )}
                     {/* Hard filter warnings */}
                     {(() => {
                       const warnings: string[] = []

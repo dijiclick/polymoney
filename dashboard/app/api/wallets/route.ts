@@ -13,6 +13,8 @@ const VALID_SORT_COLUMNS = [
   'weekly_profit_rate',
   'avg_trades_per_day',
   'median_profit_pct',
+  'best_trade_pct',
+  'pf_trend',
   // Period metrics (7d/30d/all)
   'win_rate_7d',
   'win_rate_30d',

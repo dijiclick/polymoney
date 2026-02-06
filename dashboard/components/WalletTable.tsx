@@ -10,7 +10,7 @@ interface ColumnFilter {
   max?: number
 }
 
-export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'pnl' | 'active' | 'wl' | 'dd' | 'medianProfit' | 'avgTrades' | 'sellRatio' | 'tradesPerMarket' | 'bot' | 'holdDuration' | 'category' | 'joined'
+export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'pnl' | 'active' | 'wl' | 'dd' | 'medianProfit' | 'avgTrades' | 'sellRatio' | 'tradesPerMarket' | 'bot' | 'holdDuration' | 'category' | 'joined' | 'bestTrade' | 'pfTrend'
 
 export const COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'score', label: 'Score' },
@@ -25,16 +25,20 @@ export const COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'wl', label: 'W/L' },
   { key: 'value', label: 'Value' },
   { key: 'avgTrades', label: 'Trades' },
+  { key: 'bestTrade', label: 'Best %' },
+  { key: 'pfTrend', label: 'PF Trend' },
   { key: 'holdDuration', label: 'Hold Time' },
   { key: 'category', label: 'Category' },
   { key: 'joined', label: 'Joined' },
 ]
 
-export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'sellRatio', 'tradesPerMarket', 'winRate', 'pnl', 'dd', 'medianProfit', 'active', 'wl', 'value', 'avgTrades', 'holdDuration', 'category', 'joined']
+export const DEFAULT_VISIBLE: ColumnKey[] = ['score', 'chart', 'sellRatio', 'tradesPerMarket', 'winRate', 'pnl', 'dd', 'medianProfit', 'bestTrade', 'pfTrend', 'active', 'wl', 'value', 'avgTrades', 'holdDuration', 'category', 'joined']
 
 // Tooltip descriptions for all columns (shown on hover)
 const COLUMN_TOOLTIPS: Record<string, string> = {
-  copy_score: 'Copy Score = 40% Edge (profit factor) + 35% Consistency (weekly profit rate) + 25% Risk (inverse drawdown). Requires: 30+ trades, PF>1.2, median profit>5%.',
+  copy_score: 'Copy Score = 25% Edge (blended PF) + 20% Skill (difficulty WR) + 20% Consistency (weekly profit rate) + 15% Risk (inverse DD) + 10% Discipline (profit spread). Confidence: trades/150. Decay: PF trend penalty.',
+  best_trade_pct: '% of total positive PnL from single best trade. High = one-hit wonder risk. Low = well-distributed profits.',
+  pf_trend: 'PF 30d / PF all-time. >1.0 = improving edge, <1.0 = decaying edge. Used as score multiplier.',
   chart: 'Cumulative PnL curve. Groups positions by day, sums daily PnL, plots running total.',
   win_rate: 'Win Rate = (winning markets / total resolved markets) × 100. A market wins if its total PnL > 0.',
   pnl: 'Realized PnL = sum of all closed position profits/losses in the period.',
@@ -694,6 +698,8 @@ export default function WalletTable({
               {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" className="min-w-[62px]" />}
               {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" className="min-w-[52px]" />}
               {show('medianProfit') && <SortHeader column="median_profit_pct" label="Med %/T" filterType="percent" className="min-w-[60px]" />}
+              {show('bestTrade') && <SortHeader column="best_trade_pct" label="Best%" filterType="percent" className="min-w-[52px]" />}
+              {show('pfTrend') && <SortHeader column="pf_trend" label="PF↕" filterType="number" className="min-w-[48px]" />}
               {show('active') && <SortHeader column="active_positions" label="Active" align="center" filterType="number" className="min-w-[48px]" />}
               {show('wl') && <SortHeader column={getColumnName('wins')} label="W/L" align="center" filterType="number" className="min-w-[56px]" />}
               {show('value') && <SortHeader column="balance" label="Value" filterType="money" className="min-w-[62px]" />}
@@ -906,6 +912,36 @@ export default function WalletTable({
                           wallet.median_profit_pct > 0 ? 'bg-emerald-500/10' : wallet.median_profit_pct < 0 ? 'bg-red-500/10' : ''
                         } ${getPnlColor(wallet.median_profit_pct)}`}>
                           {wallet.median_profit_pct > 0 ? '+' : ''}{Math.round(wallet.median_profit_pct)}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
+                    </td>
+                  )}
+                  {show('bestTrade') && (
+                    <td className="px-1 py-2 text-right">
+                      {wallet.best_trade_pct != null ? (
+                        <span className={`text-xs font-semibold tabular-nums inline-block px-1 py-0.5 rounded ${
+                          wallet.best_trade_pct > 60 ? 'bg-red-500/10 text-red-400'
+                          : wallet.best_trade_pct > 35 ? 'bg-amber-500/10 text-amber-400'
+                          : 'bg-emerald-500/10 text-emerald-400'
+                        }`}>
+                          {Math.round(wallet.best_trade_pct)}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
+                    </td>
+                  )}
+                  {show('pfTrend') && (
+                    <td className="px-1 py-2 text-right">
+                      {wallet.pf_trend != null ? (
+                        <span className={`text-xs font-semibold tabular-nums inline-block px-1 py-0.5 rounded ${
+                          wallet.pf_trend >= 1.0 ? 'bg-emerald-500/10 text-emerald-400'
+                          : wallet.pf_trend >= 0.7 ? 'bg-amber-500/10 text-amber-400'
+                          : 'bg-red-500/10 text-red-400'
+                        }`}>
+                          {wallet.pf_trend.toFixed(2)}
                         </span>
                       ) : (
                         <span className="text-xs text-gray-600">-</span>
