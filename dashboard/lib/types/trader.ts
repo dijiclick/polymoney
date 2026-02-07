@@ -130,6 +130,9 @@ export interface TraderProfileResponse {
     pfTrend: number | null
   }
 
+  // Hold duration
+  avgHoldDurationHours?: number
+
   // Metadata
   isNewlyFetched: boolean
   lastUpdatedAt?: string

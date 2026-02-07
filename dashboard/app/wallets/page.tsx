@@ -205,6 +205,8 @@ function WalletsPage() {
         median_profit_pct: data.copyMetrics?.medianProfitPct ?? w.median_profit_pct,
         best_trade_pct: data.copyMetrics?.bestTradePct ?? w.best_trade_pct,
         pf_trend: data.copyMetrics?.pfTrend ?? w.pf_trend,
+        // Hold duration
+        avg_hold_duration_hours: data.avgHoldDurationHours ?? w.avg_hold_duration_hours,
         // Timestamp
         metrics_updated_at: data.lastUpdatedAt ?? w.metrics_updated_at,
         // Username update

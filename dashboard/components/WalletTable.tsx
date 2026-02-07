@@ -587,7 +587,7 @@ export default function WalletTable({
         </div>
         {tooltip && (
           <div
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded text-[10px] text-gray-300 font-normal normal-case tracking-normal whitespace-nowrap opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50"
+            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded text-[10px] text-gray-300 font-normal normal-case tracking-normal opacity-0 group-hover/hdr:opacity-100 transition-opacity pointer-events-none z-50 max-w-[280px] whitespace-normal text-left leading-relaxed"
             style={{ background: 'var(--popover-bg)', border: '1px solid var(--popover-border)' }}
           >
             {tooltip}
