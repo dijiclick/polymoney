@@ -69,7 +69,7 @@ export default function MobileNav() {
     },
     {
       href: '/live',
-      label: 'Live Feed',
+      label: 'Insiders',
       isLive: true,
       icon: (
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

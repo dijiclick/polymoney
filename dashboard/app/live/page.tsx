@@ -1,17 +1,16 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef, Suspense } from 'react'
+import { useState, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { TradeFilter } from '@/lib/supabase'
-import { useLiveTrades } from '@/hooks/useLiveTrades'
-import LiveFeedHeader from '@/components/live/LiveFeedHeader'
-import LiveFilterBar from '@/components/live/LiveFilterBar'
-import TradeTable from '@/components/live/TradeTable'
+import { InsiderFilter } from '@/lib/supabase'
+import { useInsiderAlerts } from '@/hooks/useInsiderAlerts'
+import InsiderFeedHeader from '@/components/live/InsiderFeedHeader'
+import InsiderFilterBar from '@/components/live/InsiderFilterBar'
+import InsiderAlertCard from '@/components/live/InsiderAlertCard'
 import TraderDetailPanel from '@/components/live/TraderDetailPanel'
-import TraderDetailEmpty from '@/components/live/TraderDetailEmpty'
 
-function LiveFeedContent() {
-  const [filter, setFilter] = useState<TradeFilter>({})
+function InsiderFeedContent() {
+  const [filter, setFilter] = useState<InsiderFilter>({ minScore: 50 })
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -28,108 +27,76 @@ function LiveFeedContent() {
   }, [searchParams, router])
 
   const {
-    trades,
+    alerts,
     isConnected,
-    isPaused,
-    tradeCount,
-    totalSeen,
-    setIsPaused,
-    clearTrades,
-  } = useLiveTrades({ filter, maxTrades: 200 })
+    alertCount,
+    clearAlerts,
+  } = useInsiderAlerts({ filter, maxAlerts: 100 })
 
-  // Auto-refresh stale wallets seen in the live feed (>1 day old metrics)
-  const checkedAddresses = useRef(new Set<string>())
-  const pendingAddresses = useRef(new Set<string>())
-  const refreshQueue = useRef<string[]>([])
-  const isProcessing = useRef(false)
+  // Track new alert IDs for animation
+  const seenIds = useRef(new Set<number>())
+  const newIds = new Set<number>()
 
-  // Collect new addresses from incoming trades
-  useEffect(() => {
-    for (const trade of trades) {
-      const addr = trade.trader_address
-      if (!checkedAddresses.current.has(addr)) {
-        checkedAddresses.current.add(addr)
-        pendingAddresses.current.add(addr)
-      }
+  for (const alert of alerts) {
+    if (!seenIds.current.has(alert.id)) {
+      newIds.add(alert.id)
     }
-  }, [trades])
+  }
 
-  // Batch check pending addresses every 5 seconds - DISABLED
-  // useEffect(() => {
-  //   const interval = setInterval(async () => {
-  //     if (pendingAddresses.current.size === 0) return
-
-  //     const batch = Array.from(pendingAddresses.current)
-  //     pendingAddresses.current.clear()
-
-  //     try {
-  //       const res = await fetch('/api/wallets/check-stale', {
-  //         method: 'POST',
-  //         headers: { 'Content-Type': 'application/json' },
-  //         body: JSON.stringify({ addresses: batch }),
-  //       })
-  //       if (!res.ok) return
-  //       const data = await res.json()
-  //       if (data.stale && data.stale.length > 0) {
-  //         refreshQueue.current.push(...data.stale)
-  //         processRefreshQueue()
-  //       }
-  //     } catch {
-  //       // Silently ignore
-  //     }
-  //   }, 5000)
-
-  //   return () => clearInterval(interval)
-  // }, [])
-
-  // Process refresh queue sequentially
-  const processRefreshQueue = useCallback(async () => {
-    if (isProcessing.current) return
-    isProcessing.current = true
-
-    while (refreshQueue.current.length > 0) {
-      const addr = refreshQueue.current.shift()!
-      try {
-        await fetch(`/api/admin/refresh-metrics?address=${addr}`, { method: 'POST' })
-      } catch {
-        // Continue with next
-      }
+  // Update seen IDs after render
+  setTimeout(() => {
+    for (const alert of alerts) {
+      seenIds.current.add(alert.id)
     }
-
-    isProcessing.current = false
-  }, [])
+  }, 1000)
 
   return (
-    <div className="h-[calc(100vh-120px)] flex flex-col">
-      {/* Minimal Header */}
-      <LiveFeedHeader
+    <div className="h-[calc(100dvh-120px)] flex flex-col">
+      {/* Header */}
+      <InsiderFeedHeader
         isConnected={isConnected}
-        tradeCount={tradeCount}
-        totalSeen={totalSeen}
-        isPaused={isPaused}
-        onTogglePause={() => setIsPaused(!isPaused)}
-        onClear={clearTrades}
+        alertCount={alertCount}
+        onClear={clearAlerts}
       />
 
       {/* Filter Bar */}
-      <LiveFilterBar filter={filter} onChange={setFilter} />
+      <InsiderFilterBar filter={filter} onChange={setFilter} />
 
       {/* Split Panel Layout */}
       <div className="flex-1 flex gap-3 min-h-0">
-        {/* Left: Trade Feed */}
+        {/* Left: Alert Feed */}
         <div className={`transition-all duration-200 ${
           selectedAddress
             ? 'hidden md:block md:w-[60%]'
             : 'w-full md:w-[60%] xl:w-[60%]'
         }`}>
-          <TradeTable
-            trades={trades}
-            selectedAddress={selectedAddress}
-            onSelectTrader={(addr) => setSelectedTrader(addr)}
-          />
+          <div className="h-full overflow-y-auto space-y-1.5 pr-1">
+            {alerts.length > 0 ? (
+              alerts.map((alert) => (
+                <InsiderAlertCard
+                  key={alert.id}
+                  alert={alert}
+                  isSelected={selectedAddress === alert.trader_address}
+                  isNew={newIds.has(alert.id)}
+                  onSelect={() => setSelectedTrader(alert.trader_address)}
+                />
+              ))
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <div className="w-12 h-12 rounded-xl bg-white/[0.03] flex items-center justify-center mb-3">
+                  <svg className="w-6 h-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                </div>
+                <p className="text-sm text-gray-500">Monitoring for insider activity</p>
+                <p className="text-xs text-gray-600 mt-1">Alerts appear when suspicious trade patterns are detected</p>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Right: Trader Detail or Empty State */}
+        {/* Right: Trader Detail Panel */}
         <div className={`transition-all duration-200 ${
           selectedAddress
             ? 'w-full md:w-[40%] min-w-0 md:min-w-[340px]'
@@ -138,11 +105,18 @@ function LiveFeedContent() {
           {selectedAddress ? (
             <TraderDetailPanel
               address={selectedAddress}
-              trades={trades}
+              trades={[]}
               onClose={() => setSelectedTrader(null)}
             />
           ) : (
-            <TraderDetailEmpty />
+            <div className="glass rounded-xl h-full flex flex-col items-center justify-center text-center p-6">
+              <div className="w-10 h-10 rounded-lg bg-white/[0.03] flex items-center justify-center mb-3">
+                <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+              </div>
+              <p className="text-xs text-gray-600">Click an alert to view trader details</p>
+            </div>
           )}
         </div>
       </div>
@@ -153,14 +127,14 @@ function LiveFeedContent() {
 export default function LiveTradePage() {
   return (
     <Suspense fallback={
-      <div className="h-[calc(100vh-120px)] flex items-center justify-center">
+      <div className="h-[calc(100dvh-120px)] flex items-center justify-center">
         <div className="relative w-8 h-8">
           <div className="absolute inset-0 rounded-full border border-white/10"></div>
           <div className="absolute inset-0 rounded-full border border-transparent border-t-white/40 animate-spin"></div>
         </div>
       </div>
     }>
-      <LiveFeedContent />
+      <InsiderFeedContent />
     </Suspense>
   )
 }

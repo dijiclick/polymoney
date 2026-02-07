@@ -90,10 +90,17 @@ export default function TraderDetailPanel({ address, trades, onClose }: TraderDe
     setLoading(true)
     setError(null)
     try {
-      // Use cached data to match table score (no recalculation)
+      // Try cached data first (fast), fall back to live fetch for unknown wallets
       const res = await fetch(`/api/traders/${address}?refresh=false&lite=true`)
-      if (!res.ok) throw new Error('Failed to fetch')
-      const result = await res.json()
+      if (res.ok) {
+        const result = await res.json()
+        setData(result)
+        return
+      }
+      // Cache miss (e.g. fresh wallet from insider feed) — fetch live
+      const liveRes = await fetch(`/api/traders/${address}?lite=true`)
+      if (!liveRes.ok) throw new Error('Failed to fetch')
+      const result = await liveRes.json()
       setData(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')

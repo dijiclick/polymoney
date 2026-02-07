@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 from src.realtime.rtds_client import RTDSClient, RTDSMessage
 from src.realtime.trade_processor import TradeProcessor
+from src.realtime.insider_scorer import InsiderScorer
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +70,13 @@ class TradeMonitorService:
             filter_events=filter_events,
         )
 
+        # Insider scorer (independent pipeline)
+        self.insider_scorer = InsiderScorer(supabase_url, supabase_key)
+
         self._start_time: datetime | None = None
         self._running = False
         self._stats_task: asyncio.Task | None = None
+        self._insider_task: asyncio.Task | None = None
 
     async def _handle_trade(self, trade: RTDSMessage) -> None:
         """Handle incoming trade from RTDS."""
@@ -101,6 +106,10 @@ class TradeMonitorService:
         await self.processor.start_background_tasks()
         self._stats_task = asyncio.create_task(self._stats_reporter())
 
+        # Start insider scorer (independent pipeline)
+        self._insider_task = asyncio.create_task(self.insider_scorer.run())
+        logger.info("Insider scorer started")
+
         logger.info("Trade monitor service started")
         logger.info(f"Whale threshold: ${self.processor.WHALE_THRESHOLD_USD:,}")
         logger.info(f"Wallet discovery: $50+ trades, {self.processor._discovery_processor.NUM_WORKERS} workers")
@@ -126,6 +135,15 @@ class TradeMonitorService:
             self._stats_task.cancel()
             try:
                 await self._stats_task
+            except asyncio.CancelledError:
+                pass
+
+        # Stop insider scorer
+        if self._insider_task:
+            await self.insider_scorer.stop()
+            self._insider_task.cancel()
+            try:
+                await self._insider_task
             except asyncio.CancelledError:
                 pass
 
@@ -160,11 +178,14 @@ class TradeMonitorService:
         discovered = discovery.get("wallets_discovered", 0)
         analyzed = discovery.get("wallets_processed", 0)
 
+        insider_stats = self.insider_scorer.stats
+
         logger.info(
             f"[STATS] "
             f"Trades: {processor_stats['trades_processed']:,} seen, "
             f"{processor_stats['trades_stored']:,} saved (>=$50) | "
             f"Wallets: {discovered:,} discovered, {analyzed:,} analyzed | "
+            f"Insider: {insider_stats['trades_scored']:,} scored, {insider_stats['alerts_written']:,} alerts | "
             f"Errors: {processor_stats['errors']} | "
             f"Uptime: {uptime_str}"
         )

@@ -83,6 +83,55 @@ export interface TradeStats {
 }
 
 // ============================================
+// Insider Alert Types
+// ============================================
+
+export interface InsiderAlert {
+  id: number
+  trade_id: string
+  trader_address: string
+  trader_username?: string
+  market_slug?: string
+  event_slug?: string
+  condition_id?: string
+  side: 'BUY' | 'SELL'
+  outcome?: string
+  price: number
+  usd_value: number
+  executed_at: string
+  // Scores
+  score_total: number
+  score_wallet_age: number
+  score_size_vs_liquidity: number
+  score_market_niche: number
+  score_extreme_odds: number
+  score_conviction: number
+  score_category_winrate: number
+  // Context
+  wallet_age_days?: number
+  wallet_nonce?: number
+  market_daily_volume?: number
+  signals: string[]
+  // Profitability (from wallets table)
+  copy_score?: number
+  profit_factor_30d?: number
+  pnl_all?: number
+  win_rate_all?: number
+  trade_count_all?: number
+  profitability_status: 'pending' | 'copyable' | 'profitable' | 'unprofitable' | 'unknown'
+  // Timestamps
+  scored_at: string
+  created_at: string
+}
+
+export interface InsiderFilter {
+  minScore?: number
+  freshWalletsOnly?: boolean
+  extremeOddsOnly?: boolean
+  copyableOnly?: boolean
+}
+
+// ============================================
 // Wallet Analytics Types
 // ============================================
 
