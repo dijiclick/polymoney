@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import PnlChart, { ClosedPosition } from '@/components/live/PnlChart'
 
@@ -81,7 +81,9 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<TraderData | null>(null)
   const [activeTab, setActiveTab] = useState<'open' | 'closed'>('closed')
+  const [filterDate, setFilterDate] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
+  const closedListRef = useRef<HTMLDivElement>(null)
 
   // Build instant data from wallet table row (available immediately)
   const instantData: TraderData | null = walletData ? {
@@ -124,6 +126,7 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
   useEffect(() => {
     if (isOpen && address) {
       setData(null)
+      setFilterDate(null)
       fetchTraderData()
     }
   }, [isOpen, address])
@@ -174,6 +177,16 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleIntervalClick = (date: Date) => {
+    const dateStr = date.toISOString().slice(0, 10) // YYYY-MM-DD
+    setFilterDate(prev => prev === dateStr ? null : dateStr) // toggle
+    setActiveTab('closed')
+    // Scroll to the positions list after state updates
+    setTimeout(() => {
+      closedListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 50)
   }
 
   if (!isOpen) return null
@@ -410,7 +423,7 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
 
               {/* PnL Chart — shows loading spinner while positions load */}
               {displayData.closedPositions && displayData.closedPositions.length > 0 ? (
-                <PnlChart closedPositions={displayData.closedPositions} />
+                <PnlChart closedPositions={displayData.closedPositions} onIntervalClick={handleIntervalClick} />
               ) : loading ? (
                 <div className="flex flex-col items-center justify-center py-8">
                   <div className="relative w-6 h-6">
@@ -513,9 +526,27 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                 )}
 
                 {activeTab === 'closed' && (
-                  <div className="space-y-2">
+                  <div className="space-y-2" ref={closedListRef}>
+                    {filterDate && (
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[10px] text-gray-400">
+                          Showing trades from <span className="text-white font-medium">{new Date(filterDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        </span>
+                        <button
+                          onClick={() => setFilterDate(null)}
+                          className="text-[10px] text-gray-500 hover:text-white px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 transition-colors"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
                     {displayData.closedPositions && displayData.closedPositions.length > 0 ? (
-                      displayData.closedPositions.map((position, index) => {
+                      displayData.closedPositions
+                      .filter(p => {
+                        if (!filterDate || !p.resolvedAt) return !filterDate
+                        return new Date(p.resolvedAt).toISOString().slice(0, 10) === filterDate
+                      })
+                      .map((position, index) => {
                         const marketUrl = (position as any).marketSlug
                           ? `https://polymarket.com/event/${(position as any).marketSlug}`
                           : undefined
@@ -582,7 +613,7 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                       })
                     ) : (
                       <div className="text-center py-8 text-gray-600 text-xs">
-                        No closed positions
+                        {filterDate ? 'No trades on this date' : 'No closed positions'}
                       </div>
                     )}
                   </div>

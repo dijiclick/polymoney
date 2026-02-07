@@ -82,7 +82,7 @@ function formatChartMoney(v: number) {
   return `${sign}$${abs.toFixed(0)}`
 }
 
-export default function PnlChart({ closedPositions }: { closedPositions: ClosedPosition[] }) {
+export default function PnlChart({ closedPositions, onIntervalClick }: { closedPositions: ClosedPosition[], onIntervalClick?: (date: Date) => void }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('30d')
   const [chartMode, setChartMode] = useState<ChartMode>('cumulative')
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
@@ -353,6 +353,34 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
     setHoverIndex(null)
   }, [])
 
+  const handleChartClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    if (!onIntervalClick || !svgRef.current) return
+    const rect = svgRef.current.getBoundingClientRect()
+    const mouseX = (e.clientX - rect.left) / rect.width * W
+
+    let xs: number[] = []
+    let dates: Date[] = []
+    if (chartMode === 'cumulative' && lineChart) {
+      xs = lineChart.xs
+      dates = lineChart.points.map(p => p.date)
+    } else if (chartMode === 'daily' && barChart) {
+      xs = barChart.bars.map(b => b.centerX)
+      dates = intervalData.map(d => d.date)
+    }
+    if (xs.length === 0) return
+
+    let nearest = 0
+    let nearestDist = Infinity
+    for (let i = 0; i < xs.length; i++) {
+      const dist = Math.abs(xs[i] - mouseX)
+      if (dist < nearestDist) {
+        nearestDist = dist
+        nearest = i
+      }
+    }
+    if (dates[nearest]) onIntervalClick(dates[nearest])
+  }, [onIntervalClick, chartMode, lineChart, barChart, intervalData, W])
+
   const lastCumPnl = intervalData.length > 0 ? intervalData[intervalData.length - 1].cumPnl : 0
 
   // Get the appropriate label for the current timeframe
@@ -500,12 +528,13 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
               ref={svgRef}
               viewBox={`0 0 ${W} ${H}`}
               className="w-full"
-              style={{ height: 220, touchAction: 'pan-x' }}
+              style={{ height: 220, touchAction: 'pan-x', cursor: onIntervalClick ? 'pointer' : undefined }}
               preserveAspectRatio="none"
               onMouseMove={handleMouseMove}
               onMouseLeave={handleMouseLeave}
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
+              onClick={handleChartClick}
             >
               <defs>
                 <linearGradient id="panelCumGradGreen" x1="0" y1="0" x2="0" y2="1">
@@ -713,12 +742,13 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
                     ref={svgRef}
                     viewBox={`0 0 ${W} ${H}`}
                     className="w-full h-full"
-                    style={{ touchAction: 'pan-x' }}
+                    style={{ touchAction: 'pan-x', cursor: onIntervalClick ? 'pointer' : undefined }}
                     preserveAspectRatio="none"
                     onMouseMove={handleMouseMove}
                     onMouseLeave={handleMouseLeave}
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
+                    onClick={handleChartClick}
                   >
                     <defs>
                       <linearGradient id="fsCumGradGreen" x1="0" y1="0" x2="0" y2="1">

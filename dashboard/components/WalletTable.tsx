@@ -694,11 +694,8 @@ export default function WalletTable({
                   className="bg-white/[0.02] rounded-lg p-3 active:bg-white/[0.06] transition-colors"
                   onClick={() => setSelectedTrader(wallet)}
                 >
-                  {/* Top row: rank, bookmark, name, score */}
+                  {/* Top row: bookmark, name, score */}
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-gray-600 tabular-nums w-5 text-right flex-shrink-0">
-                      {index + 1}
-                    </span>
                     {onToggleTrack && (
                       <button
                         onClick={(e) => { e.stopPropagation(); onToggleTrack(wallet.address) }}
@@ -727,7 +724,7 @@ export default function WalletTable({
                   </div>
 
                   {/* Bottom row: key metrics */}
-                  <div className="flex items-center gap-3 mt-2.5 pl-7">
+                  <div className="flex items-center gap-3 mt-2.5">
                     <div>
                       <p className="text-[9px] text-gray-600 uppercase">PnL</p>
                       <p className={`text-xs font-semibold tabular-nums ${getPnlColor(pnl)}`}>
@@ -904,13 +901,6 @@ export default function WalletTable({
                   )}
                   <td className="px-1 py-2 overflow-hidden">
                     <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => setSelectedTrader(wallet)}
-                        className="w-4 h-4 rounded bg-white/[0.03] hover:bg-white/[0.08] flex-shrink-0 flex items-center justify-center text-[8px] font-medium text-gray-500 hover:text-white transition-all cursor-pointer"
-                        title="View details"
-                      >
-                        {index + 1}
-                      </button>
                       {onToggleTrack && (
                         <button
                           onClick={(e) => { e.stopPropagation(); onToggleTrack(wallet.address) }}
@@ -927,17 +917,12 @@ export default function WalletTable({
                         </button>
                       )}
                       <div className="flex flex-col min-w-0">
-                          <a
-                            href={`https://polymarket.com/profile/${wallet.address}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[11px] font-medium text-gray-200 hover:text-white transition-colors flex items-center gap-1 truncate"
+                          <button
+                            onClick={() => setSelectedTrader(wallet)}
+                            className="text-[11px] font-medium text-gray-200 hover:text-white transition-colors flex items-center gap-1 truncate text-left"
                           >
                             <span className="truncate">{getDisplayName(wallet)}</span>
-                            <svg className="w-2.5 h-2.5 flex-shrink-0 opacity-0 group-hover:opacity-50 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                            </svg>
-                          </a>
+                          </button>
                         {wallet.metrics_updated_at && (
                           <span className="text-[9px] text-gray-600 leading-tight">{formatRelativeTime(wallet.metrics_updated_at)}</span>
                         )}
