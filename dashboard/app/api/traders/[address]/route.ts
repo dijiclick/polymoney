@@ -187,6 +187,7 @@ export async function GET(
         conditionId: p.conditionId,
         title: p.title,
         outcome: p.outcome,
+        marketSlug: p.marketSlug,
         size: p.size,
         avgPrice: p.avgPrice,
         initialValue: p.size * p.avgPrice,

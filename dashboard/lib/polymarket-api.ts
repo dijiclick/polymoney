@@ -408,6 +408,7 @@ export function parseClosedPositions(rawPositions: RawPolymarketClosedPosition[]
       conditionId: pos.conditionId,
       title: pos.title,
       outcome: pos.outcome,
+      marketSlug: pos.slug || pos.eventSlug || undefined,
       size: Math.round(size * 100) / 100,
       avgPrice: Math.round(avgPrice * 10000) / 10000,
       initialValue: Math.round(initialValue * 100) / 100,

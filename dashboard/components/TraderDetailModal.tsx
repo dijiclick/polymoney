@@ -80,7 +80,7 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<TraderData | null>(null)
-  const [activeTab, setActiveTab] = useState<'open' | 'closed'>('open')
+  const [activeTab, setActiveTab] = useState<'open' | 'closed'>('closed')
   const [mounted, setMounted] = useState(false)
 
   // Build instant data from wallet table row (available immediately)
@@ -220,7 +220,7 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
       />
 
       {/* Modal — nearly full size */}
-      <div className="relative border border-white/10 rounded-t-xl md:rounded-xl shadow-2xl w-full max-w-5xl max-h-[100vh] md:max-h-[95vh] overflow-hidden" style={{ background: 'var(--popover-bg)' }}>
+      <div className="relative border border-white/10 rounded-t-xl md:rounded-xl shadow-2xl w-full max-w-5xl max-h-[100dvh] md:max-h-[95dvh] overflow-hidden" style={{ background: 'var(--popover-bg)' }}>
         {/* Header */}
         <div className="flex items-center justify-between px-4 md:px-6 py-3.5 border-b border-white/5">
           <div className="flex items-center gap-3">
@@ -255,7 +255,7 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
         </div>
 
         {/* Content */}
-        <div className="overflow-y-auto max-h-[calc(100vh-56px)] md:max-h-[calc(95vh-56px)]">
+        <div className="overflow-y-auto max-h-[calc(100dvh-56px)] md:max-h-[calc(95dvh-56px)]">
           {!displayData && loading ? (
             <div className="flex flex-col items-center justify-center py-16">
               <div className="relative w-8 h-8">
@@ -461,40 +461,49 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                     {loading && !data ? (
                       <div className="text-center py-8 text-gray-600 text-xs">Loading positions...</div>
                     ) : displayData.positions && displayData.positions.length > 0 ? (
-                      displayData.positions.map((position, index) => (
-                        <div
-                          key={`${position.conditionId}-${position.outcome}-${index}`}
-                          className="bg-white/[0.02] rounded-lg p-3 hover:bg-white/[0.04] transition-colors"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <h4 className="text-xs font-medium text-gray-300 truncate">
-                                {position.title || 'Unknown Market'}
-                              </h4>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                                  position.outcome === 'Yes'
-                                    ? 'bg-emerald-500/10 text-emerald-400'
-                                    : 'bg-red-500/10 text-red-400'
-                                }`}>
-                                  {position.outcome}
-                                </span>
-                                <span className="text-[10px] text-gray-600">
-                                  {position.size?.toFixed(2)} @ {(position.avgPrice * 100)?.toFixed(1)}¢
-                                </span>
+                      displayData.positions.map((position, index) => {
+                        const marketUrl = position.marketSlug
+                          ? `https://polymarket.com/event/${position.marketSlug}`
+                          : undefined
+                        return (
+                          <a
+                            key={`${position.conditionId}-${position.outcome}-${index}`}
+                            href={marketUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`block bg-white/[0.02] rounded-lg p-3 transition-colors ${marketUrl ? 'hover:bg-white/[0.06] cursor-pointer' : 'hover:bg-white/[0.04]'}`}
+                            onClick={marketUrl ? undefined : (e) => e.preventDefault()}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-xs font-medium text-gray-300 truncate">
+                                  {position.title || 'Unknown Market'}
+                                </h4>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                    position.outcome === 'Yes'
+                                      ? 'bg-emerald-500/10 text-emerald-400'
+                                      : 'bg-red-500/10 text-red-400'
+                                  }`}>
+                                    {position.outcome}
+                                  </span>
+                                  <span className="text-[10px] text-gray-600">
+                                    {position.size?.toFixed(2)} @ {(position.avgPrice * 100)?.toFixed(1)}¢
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs text-gray-300">
+                                  {formatMoney(position.currentValue || 0)}
+                                </p>
+                                <p className={`text-[10px] ${getPnlColor(position.cashPnl || 0)}`}>
+                                  {formatMoney(position.cashPnl || 0)} ({formatPercent(position.percentPnl || 0)})
+                                </p>
                               </div>
                             </div>
-                            <div className="text-right">
-                              <p className="text-xs text-gray-300">
-                                {formatMoney(position.currentValue || 0)}
-                              </p>
-                              <p className={`text-[10px] ${getPnlColor(position.cashPnl || 0)}`}>
-                                {formatMoney(position.cashPnl || 0)} ({formatPercent(position.percentPnl || 0)})
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      ))
+                          </a>
+                        )
+                      })
                     ) : (
                       <div className="text-center py-8 text-gray-600 text-xs">
                         No open positions
@@ -506,58 +515,71 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                 {activeTab === 'closed' && (
                   <div className="space-y-2">
                     {displayData.closedPositions && displayData.closedPositions.length > 0 ? (
-                      displayData.closedPositions.map((position, index) => (
-                        <div
-                          key={`${position.conditionId}-${index}`}
-                          className="bg-white/[0.02] rounded-lg p-3"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <h4 className="text-xs font-medium text-gray-300 truncate">
-                                {position.title || 'Unknown Market'}
-                              </h4>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                                  position.isWin
-                                    ? 'bg-emerald-500/10 text-emerald-400'
-                                    : 'bg-red-500/10 text-red-400'
-                                }`}>
-                                  {position.isWin ? 'WIN' : 'LOSS'}
-                                </span>
-                                <span className="text-[10px] text-gray-600">
-                                  {position.outcome} @ {(position.avgPrice * 100)?.toFixed(1)}¢
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex-shrink-0 text-center">
-                              <p className="text-xs text-gray-400">
-                                {formatMoney(position.size * position.avgPrice)}
-                              </p>
-                              <p className="text-[10px] text-gray-600 mt-1">invested</p>
-                            </div>
-                            <div className="flex-shrink-0 text-right">
-                              <p className={`text-xs ${getPnlColor(position.realizedPnl || 0)}`}>
-                                {position.size > 0 && position.avgPrice > 0 && (
-                                  <span className={`text-[10px] ${getPnlColor(position.realizedPnl || 0)} mr-1`}>
-                                    ({(position.realizedPnl || 0) >= 0 ? '+' : ''}{((position.realizedPnl / (position.size * position.avgPrice)) * 100).toFixed(1)}%)
+                      displayData.closedPositions.map((position, index) => {
+                        const marketUrl = (position as any).marketSlug
+                          ? `https://polymarket.com/event/${(position as any).marketSlug}`
+                          : undefined
+                        return (
+                          <a
+                            key={`${position.conditionId}-${index}`}
+                            href={marketUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`block bg-white/[0.02] rounded-lg p-3 transition-colors ${marketUrl ? 'hover:bg-white/[0.06] cursor-pointer' : ''}`}
+                            onClick={marketUrl ? undefined : (e) => e.preventDefault()}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-xs font-medium text-gray-300 truncate">
+                                  {position.title || 'Unknown Market'}
+                                </h4>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                    position.isWin
+                                      ? 'bg-emerald-500/10 text-emerald-400'
+                                      : 'bg-red-500/10 text-red-400'
+                                  }`}>
+                                    {position.isWin ? 'WIN' : 'LOSS'}
                                   </span>
-                                )}
-                                {formatMoney(position.realizedPnl || 0)}
-                              </p>
-                              {(position.resolvedAt || (position as any).holdDurationMs) && (
-                                <p className="text-[10px] text-gray-500 mt-1">
-                                  {position.resolvedAt && new Date(position.resolvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                  {(position as any).holdDurationMs && (
-                                    <span className="ml-1 text-gray-600">
-                                      · {formatDuration((position as any).holdDurationMs)}
+                                  <span className="text-[10px] text-gray-600">
+                                    {position.outcome} @ {(position.avgPrice * 100)?.toFixed(1)}¢
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex-shrink-0 text-center">
+                                <p className="text-xs text-gray-400">
+                                  {formatMoney(position.size * position.avgPrice)}
+                                </p>
+                                <p className="text-[10px] text-gray-600 mt-1">invested</p>
+                              </div>
+                              <div className="flex-shrink-0 text-right">
+                                <p className={`text-xs ${getPnlColor(position.realizedPnl || 0)}`}>
+                                  {position.size > 0 && position.avgPrice > 0 && (
+                                    <span className={`text-[10px] ${getPnlColor(position.realizedPnl || 0)} mr-1`}>
+                                      ({(position.realizedPnl || 0) >= 0 ? '+' : ''}{((position.realizedPnl / (position.size * position.avgPrice)) * 100).toFixed(1)}%)
                                     </span>
                                   )}
+                                  {formatMoney(position.realizedPnl || 0)}
                                 </p>
-                              )}
+                                {(position.resolvedAt || (position as any).holdDurationMs) && (
+                                  <p className="text-[10px] text-gray-500 mt-1">
+                                    {position.resolvedAt && (
+                                      <span title={new Date(position.resolvedAt).toISOString().replace('T', ' ').replace('Z', ' UTC')}>
+                                        {new Date(position.resolvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                      </span>
+                                    )}
+                                    {(position as any).holdDurationMs && (
+                                      <span className="ml-1 text-gray-600">
+                                        · {formatDuration((position as any).holdDurationMs)}
+                                      </span>
+                                    )}
+                                  </p>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      ))
+                          </a>
+                        )
+                      })
                     ) : (
                       <div className="text-center py-8 text-gray-600 text-xs">
                         No closed positions

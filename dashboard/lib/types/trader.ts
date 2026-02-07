@@ -22,6 +22,7 @@ export interface PolymarketClosedPosition {
   conditionId: string
   title?: string
   outcome?: string
+  marketSlug?: string
   size: number
   avgPrice: number
   initialValue: number
@@ -166,6 +167,8 @@ export interface RawPolymarketClosedPosition {
   conditionId: string
   title?: string
   outcome?: string
+  slug?: string
+  eventSlug?: string
   // API can return either size OR totalBought
   size?: string
   totalBought?: number | string

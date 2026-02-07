@@ -202,6 +202,11 @@ function WalletsPage() {
         diff_win_rate_all: data.copyMetrics?.diffWinRateAll ?? w.diff_win_rate_all,
         weekly_profit_rate: data.copyMetrics?.weeklyProfitRate ?? w.weekly_profit_rate,
         avg_trades_per_day: data.copyMetrics?.avgTradesPerDay ?? w.avg_trades_per_day,
+        median_profit_pct: data.copyMetrics?.medianProfitPct ?? w.median_profit_pct,
+        best_trade_pct: data.copyMetrics?.bestTradePct ?? w.best_trade_pct,
+        pf_trend: data.copyMetrics?.pfTrend ?? w.pf_trend,
+        // Timestamp
+        metrics_updated_at: data.lastUpdatedAt ?? w.metrics_updated_at,
         // Username update
         ...(data.username && { username: data.username }),
       } as Wallet
@@ -806,8 +811,8 @@ function WalletsPage() {
             </button>
           )}
 
-          {/* Column Settings */}
-          <div className="relative" ref={columnSettingsRef}>
+          {/* Column Settings (hidden on mobile — card view has no columns) */}
+          <div className="hidden md:block relative" ref={columnSettingsRef}>
             <button
               onClick={() => setShowColumnSettings(!showColumnSettings)}
               className={`px-2 py-1.5 bg-white/[0.02] border rounded-lg text-[10px] transition-all flex items-center gap-1.5 ${
@@ -853,11 +858,11 @@ function WalletsPage() {
             )}
           </div>
 
-          {/* Refresh All */}
+          {/* Refresh All (hidden on mobile) */}
           <button
             onClick={startRefreshAll}
             disabled={!!refreshProgress && !refreshDone}
-            className={`px-2.5 py-1.5 bg-white/[0.02] border rounded-lg text-[10px] transition-all flex items-center gap-1.5 ${
+            className={`hidden md:flex px-2.5 py-1.5 bg-white/[0.02] border rounded-lg text-[10px] transition-all items-center gap-1.5 ${
               refreshProgress && !refreshDone
                 ? 'border-blue-500/20 text-blue-400 opacity-50 cursor-not-allowed'
                 : 'border-white/5 text-gray-500 hover:text-blue-400 hover:border-blue-500/20 hover:bg-blue-500/5'

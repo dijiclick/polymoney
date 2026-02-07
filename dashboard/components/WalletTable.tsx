@@ -378,6 +378,15 @@ export default function WalletTable({
   const show = (key: ColumnKey) => visibleColumns.includes(key)
   const [openFilter, setOpenFilter] = useState<string | null>(null)
   const [selectedTrader, setSelectedTrader] = useState<Wallet | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const mql = window.matchMedia('(max-width: 767px)')
+    setIsMobile(mql.matches)
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mql.addEventListener('change', handler)
+    return () => mql.removeEventListener('change', handler)
+  }, [])
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
@@ -647,15 +656,139 @@ export default function WalletTable({
   const virtualRows = virtualizer.getVirtualItems()
   const totalSize = virtualizer.getTotalSize()
 
+  // ── Mobile Card View ────────────────────────────────────────────
+  if (isMobile) {
+    return (
+      <div className="glass rounded-xl overflow-hidden">
+        <div
+          ref={scrollContainerRef}
+          className="overflow-y-auto"
+          data-scroll-container
+          style={{ maxHeight: 'calc(100dvh - 160px)' }}
+        >
+          <div className="p-2 space-y-2">
+            {wallets.map((wallet, index) => {
+              const pnl = getMetric(wallet, 'pnl')
+              const winRate = getMetric(wallet, 'win_rate')
+              const drawdown = getMetric(wallet, 'drawdown')
+              const score = Math.round(wallet.copy_score || 0)
+
+              let scoreBg: string, scoreText: string
+              if (score >= 80) {
+                scoreBg = 'bg-amber-500/20 border-amber-500/30'
+                scoreText = 'text-amber-300'
+              } else if (score >= 60) {
+                scoreBg = 'bg-emerald-500/15 border-emerald-500/25'
+                scoreText = 'text-emerald-400'
+              } else if (score >= 40) {
+                scoreBg = 'bg-blue-500/10 border-blue-500/20'
+                scoreText = 'text-blue-400'
+              } else {
+                scoreBg = 'bg-white/[0.04] border-white/[0.06]'
+                scoreText = 'text-gray-500'
+              }
+
+              return (
+                <div
+                  key={wallet.address}
+                  className="bg-white/[0.02] rounded-lg p-3 active:bg-white/[0.06] transition-colors"
+                  onClick={() => setSelectedTrader(wallet)}
+                >
+                  {/* Top row: rank, bookmark, name, score */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-gray-600 tabular-nums w-5 text-right flex-shrink-0">
+                      {index + 1}
+                    </span>
+                    {onToggleTrack && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onToggleTrack(wallet.address) }}
+                        className={`flex-shrink-0 p-1 rounded transition-all ${
+                          trackedAddresses?.has(wallet.address)
+                            ? 'text-amber-400'
+                            : 'text-gray-600'
+                        }`}
+                      >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill={trackedAddresses?.has(wallet.address) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+                        </svg>
+                      </button>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-gray-200 truncate">
+                        {getDisplayName(wallet)}
+                      </p>
+                      {wallet.metrics_updated_at && (
+                        <p className="text-[9px] text-gray-600 leading-tight">{formatRelativeTime(wallet.metrics_updated_at)}</p>
+                      )}
+                    </div>
+                    <span className={`text-sm font-extrabold tabular-nums px-2 py-0.5 rounded-md border ${scoreBg} ${scoreText} flex-shrink-0`}>
+                      {score}
+                    </span>
+                  </div>
+
+                  {/* Bottom row: key metrics */}
+                  <div className="flex items-center gap-3 mt-2.5 pl-7">
+                    <div>
+                      <p className="text-[9px] text-gray-600 uppercase">PnL</p>
+                      <p className={`text-xs font-semibold tabular-nums ${getPnlColor(pnl)}`}>
+                        {formatMoney(pnl)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-gray-600 uppercase">WR</p>
+                      <p className={`text-xs font-semibold tabular-nums ${getWinRateColor(winRate)}`}>
+                        {formatPercentPlain(winRate)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-gray-600 uppercase">DD</p>
+                      <p className={`text-xs font-semibold tabular-nums ${getDrawdownColor(drawdown)}`}>
+                        {drawdown > 0 ? formatPercentPlain(drawdown) : '-'}
+                      </p>
+                    </div>
+                    {(wallet.active_positions || 0) > 0 && (
+                      <div>
+                        <p className="text-[9px] text-gray-600 uppercase">Open</p>
+                        <p className="text-xs font-medium tabular-nums text-gray-300">
+                          {wallet.active_positions}
+                        </p>
+                      </div>
+                    )}
+                    {(wallet as any).top_category && (
+                      <div className="ml-auto">
+                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${getCategoryStyle((wallet as any).top_category)}`}>
+                          {getShortCategory((wallet as any).top_category)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+            {/* Loading indicator for infinite scroll */}
+            {isFetchingMore && (
+              <div className="flex items-center justify-center gap-2 py-4">
+                <div className="w-4 h-4 rounded-full border border-white/10 border-t-white/40 animate-spin" />
+                <span className="text-xs text-gray-500">Loading more...</span>
+              </div>
+            )}
+          </div>
+        </div>
+        {modal}
+      </div>
+    )
+  }
+
+  // ── Desktop Table View ──────────────────────────────────────────
   return (
     <div className="glass rounded-xl overflow-hidden">
       <div
         ref={scrollContainerRef}
-        className="overflow-y-auto overflow-x-hidden"
+        className="overflow-y-auto overflow-x-auto"
         data-scroll-container
-        style={{ maxHeight: 'calc(100vh - 160px)' }}
+        style={{ maxHeight: 'calc(100dvh - 160px)' }}
       >
-        <table className="w-full">
+        <table className="w-full" style={{ minWidth: 900 }}>
           <thead className="sticky top-0 z-20" style={{ background: 'var(--background)' }}>
             <tr className="border-b border-white/5">
               {onToggleSelect && (

@@ -7,6 +7,7 @@ export interface ClosedPosition {
   conditionId: string
   title?: string
   outcome?: string
+  marketSlug?: string
   size: number
   avgPrice: number
   finalPrice: number
@@ -317,6 +318,41 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
     setHoverIndex(null)
   }, [])
 
+  // Touch support for mobile chart interaction
+  const handleTouchMove = useCallback((e: React.TouchEvent<SVGSVGElement>) => {
+    if (!svgRef.current || e.touches.length === 0) return
+    const rect = svgRef.current.getBoundingClientRect()
+    const touchX = (e.touches[0].clientX - rect.left) / rect.width * W
+
+    let data: { xs: number[] } | null = null
+    if (chartMode === 'cumulative' && lineChart) {
+      data = { xs: lineChart.xs }
+    } else if (chartMode === 'daily' && barChart) {
+      data = { xs: barChart.bars.map(b => b.centerX) }
+    }
+    if (!data || data.xs.length === 0) return
+
+    let nearest = 0
+    let nearestDist = Infinity
+    for (let i = 0; i < data.xs.length; i++) {
+      const dist = Math.abs(data.xs[i] - touchX)
+      if (dist < nearestDist) {
+        nearestDist = dist
+        nearest = i
+      }
+    }
+
+    if (hoverIndexRef.current !== nearest) {
+      hoverIndexRef.current = nearest
+      setHoverIndex(nearest)
+    }
+  }, [chartMode, lineChart, barChart, W])
+
+  const handleTouchEnd = useCallback(() => {
+    hoverIndexRef.current = null
+    setHoverIndex(null)
+  }, [])
+
   const lastCumPnl = intervalData.length > 0 ? intervalData[intervalData.length - 1].cumPnl : 0
 
   // Get the appropriate label for the current timeframe
@@ -384,7 +420,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
 
   return (
     <div className="px-4 pt-4 pb-3">
-      <div className="flex items-start justify-between mb-3">
+      <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
         <div className="min-h-[48px]">
           <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">{displayInfo.label}</p>
           <p className={`text-lg font-semibold tabular-nums ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -397,7 +433,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <div className="flex gap-0.5 bg-white/[0.03] rounded-md p-0.5">
             <button
               onClick={() => setChartMode('cumulative')}
@@ -456,18 +492,20 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
         <div
           ref={scrollRef}
           className={isScrollable ? 'overflow-x-auto' : ''}
-          style={isScrollable ? { scrollbarWidth: 'thin', scrollbarColor: 'var(--scrollbar-thumb) transparent' } : undefined}
+          style={isScrollable ? { scrollbarWidth: 'thin', scrollbarColor: 'var(--scrollbar-thumb) transparent', WebkitOverflowScrolling: 'touch' as any } : undefined}
         >
           <div style={isScrollable ? { minWidth: W } : undefined}>
             <div className="relative">
             <svg
               ref={svgRef}
               viewBox={`0 0 ${W} ${H}`}
-              className="w-full cursor-crosshair"
-              style={{ height: 220 }}
+              className="w-full"
+              style={{ height: 220, touchAction: 'pan-x' }}
               preserveAspectRatio="none"
               onMouseMove={handleMouseMove}
               onMouseLeave={handleMouseLeave}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
             >
               <defs>
                 <linearGradient id="panelCumGradGreen" x1="0" y1="0" x2="0" y2="1">
@@ -598,10 +636,10 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
       {isFullscreen && typeof document !== 'undefined' && createPortal(
         <div className="fixed inset-0 z-[9999] flex flex-col" style={{ background: 'var(--background)' }}>
           {/* Fullscreen header */}
-          <div className="flex items-start justify-between px-6 pt-5 pb-2">
+          <div className="flex flex-wrap items-start justify-between gap-2 px-4 md:px-6 pt-4 md:pt-5 pb-2">
             <div className="min-h-[48px]">
               <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-0.5">{displayInfo.label}</p>
-              <p className={`text-2xl font-semibold tabular-nums ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+              <p className={`text-xl md:text-2xl font-semibold tabular-nums ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                 {formatChartMoney(displayInfo.value)}
               </p>
               <p className="text-[11px] text-gray-500 tabular-nums mt-0.5 h-[16px]">
@@ -611,7 +649,7 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <div className="flex gap-0.5 bg-white/[0.03] rounded-md p-0.5">
                 <button
                   onClick={() => setChartMode('cumulative')}
@@ -667,17 +705,20 @@ export default function PnlChart({ closedPositions }: { closedPositions: ClosedP
           </div>
 
           {/* Fullscreen chart */}
-          <div className="flex-1 px-6 pb-6 min-h-0">
+          <div className="flex-1 px-3 md:px-6 pb-4 md:pb-6 min-h-0">
             {intervalData.length > 0 ? (
               <div className="h-full flex flex-col">
                 <div className="flex-1 min-h-0 relative">
                   <svg
                     ref={svgRef}
                     viewBox={`0 0 ${W} ${H}`}
-                    className="w-full h-full cursor-crosshair"
+                    className="w-full h-full"
+                    style={{ touchAction: 'pan-x' }}
                     preserveAspectRatio="none"
                     onMouseMove={handleMouseMove}
                     onMouseLeave={handleMouseLeave}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
                   >
                     <defs>
                       <linearGradient id="fsCumGradGreen" x1="0" y1="0" x2="0" y2="1">

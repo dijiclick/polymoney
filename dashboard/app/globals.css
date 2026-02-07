@@ -332,6 +332,12 @@ html:not(.dark) .hover\:bg-white\/10:hover {
 html:not(.dark) .hover\:bg-white\/15:hover {
   background: rgba(0, 0, 0, 0.08);
 }
+html:not(.dark) .hover\:bg-white\/\[0\.06\]:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+html:not(.dark) .active\:bg-white\/\[0\.06\]:active {
+  background: rgba(0, 0, 0, 0.04);
+}
 
 /* Semantic backgrounds - increase opacity for light mode */
 html:not(.dark) .bg-emerald-500\/10 {
@@ -549,4 +555,33 @@ html:not(.dark) .border-t-white\/40 {
 /* Ring/outline colors */
 html:not(.dark) .ring-white\/10 {
   --tw-ring-color: rgba(0, 0, 0, 0.08);
+}
+
+/* ============================================
+   MOBILE OPTIMIZATIONS
+   ============================================ */
+
+/* Ensure touch scrolling works smoothly everywhere */
+@media (max-width: 768px) {
+  /* Better scroll containers on mobile */
+  [data-scroll-container] {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+
+  /* Make sticky headers respect mobile viewport */
+  .sticky {
+    position: -webkit-sticky;
+    position: sticky;
+  }
+
+  /* Prevent text selection during scroll on mobile */
+  table {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  table a, table button {
+    -webkit-user-select: auto;
+    user-select: auto;
+  }
 }
