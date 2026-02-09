@@ -1,0 +1,87 @@
+{
+  "manchester": {
+    "onexbet:manchester united": true,
+    "onexbet:man united": true,
+    "polymarket:Manchester United": true,
+    "polymarket:Man Utd": true
+  },
+  "liverpool": {
+    "onexbet:liverpool": true,
+    "polymarket:Liverpool": true,
+    "polymarket:Liverpool FC": true
+  },
+  "arsenal": {
+    "onexbet:arsenal": true,
+    "polymarket:Arsenal": true,
+    "polymarket:Arsenal FC": true
+  },
+  "chelsea": {
+    "onexbet:chelsea": true,
+    "polymarket:Chelsea": true,
+    "polymarket:Chelsea FC": true
+  },
+  "manchester_city": {
+    "onexbet:manchester city": true,
+    "polymarket:Manchester City": true,
+    "polymarket:Man City": true
+  },
+  "tottenham": {
+    "onexbet:tottenham hotspur": true,
+    "onexbet:tottenham": true,
+    "polymarket:Tottenham Hotspur": true,
+    "polymarket:Tottenham": true,
+    "polymarket:Spurs": true
+  },
+  "real_madrid": {
+    "onexbet:real madrid": true,
+    "polymarket:Real Madrid": true
+  },
+  "barcelona": {
+    "onexbet:barcelona": true,
+    "onexbet:fc barcelona": true,
+    "polymarket:Barcelona": true,
+    "polymarket:FC Barcelona": true
+  },
+  "bayern_munich": {
+    "onexbet:bayern munich": true,
+    "onexbet:fc bayern munich": true,
+    "polymarket:Bayern Munich": true,
+    "polymarket:Bayern": true
+  },
+  "psg": {
+    "onexbet:paris saint-germain": true,
+    "onexbet:paris saint germain": true,
+    "onexbet:psg": true,
+    "polymarket:Paris Saint-Germain": true,
+    "polymarket:PSG": true
+  },
+  "juventus": {
+    "onexbet:juventus": true,
+    "polymarket:Juventus": true
+  },
+  "inter_milan": {
+    "onexbet:inter milan": true,
+    "onexbet:internazionale": true,
+    "polymarket:Inter Milan": true,
+    "polymarket:Inter": true
+  },
+  "ac_milan": {
+    "onexbet:ac milan": true,
+    "onexbet:milan": true,
+    "polymarket:AC Milan": true,
+    "polymarket:Milan": true
+  },
+  "lakers": {
+    "onexbet:los angeles lakers": true,
+    "onexbet:la lakers": true,
+    "polymarket:Los Angeles Lakers": true,
+    "polymarket:Lakers": true,
+    "polymarket:LAL": true
+  },
+  "celtics": {
+    "onexbet:boston celtics": true,
+    "polymarket:Boston Celtics": true,
+    "polymarket:Celtics": true,
+    "polymarket:BOS": true
+  }
+}

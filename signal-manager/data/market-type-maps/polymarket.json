@@ -1,0 +1,4 @@
+{
+  "_comment": "Polymarket market classification is done by parsing market question text in discovery.ts, not by type codes.",
+  "_note": "This file is reserved for future structured market type mappings if Polymarket adds them."
+}

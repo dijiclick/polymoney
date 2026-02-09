@@ -1,0 +1,14 @@
+{
+  "_comment": "1xbet T-code to canonical market key mapping. Discovered from reverse-engineering.",
+  "_note": "Many T-codes are unknown. Run the system, check logs for 'Unknown T-code', and add mappings here.",
+  "1": "ml_home",
+  "2": "draw",
+  "3": "ml_away",
+  "4": "dc_1x",
+  "5": "dc_12",
+  "6": "dc_x2",
+  "7": "handicap_home",
+  "8": "handicap_away",
+  "9": "o",
+  "10": "u"
+}
