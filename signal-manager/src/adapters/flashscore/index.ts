@@ -1,8 +1,8 @@
 import type { IAdapter, AdapterStatus, UpdateCallback } from '../adapter.interface.js';
 import type { FlashScoreAdapterConfig } from '../../types/config.js';
-import { scrapeLeague, closeBrowser } from './scraper.js';
-import { normalizeMatch } from './normalizer.js';
+import { fetchAllFootball, fetchLiveUpdates, type FSMatch } from './http-client.js';
 import { createLogger } from '../../util/logger.js';
+import type { AdapterEventUpdate, AdapterMarketUpdate } from '../../types/adapter-update.js';
 
 const log = createLogger('fs-adapter');
 
@@ -12,7 +12,9 @@ export class FlashScoreAdapter implements IAdapter {
   private callback: UpdateCallback | null = null;
   private status: AdapterStatus = 'idle';
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private leagueIndex = 0;
+  private fullPollTimer: ReturnType<typeof setInterval> | null = null;
+  private matchCache: Map<string, FSMatch> = new Map();
+  private lastLiveCount = 0;
 
   constructor(config: FlashScoreAdapterConfig) {
     this.config = config;
@@ -30,26 +32,28 @@ export class FlashScoreAdapter implements IAdapter {
     }
 
     this.status = 'connecting';
-    log.info(`FlashScore adapter starting with ${this.config.leagues.length} leagues`);
+    log.info('FlashScore HTTP adapter starting (no Playwright)');
 
-    // Initial scrape of all leagues
-    await this.scrapeAllLeagues();
+    // Full fetch on start
+    await this.fullFetch();
     this.status = 'connected';
 
-    // Rotate through leagues on each poll interval
+    // Live updates every 2s (fast, small payload ~1KB)
     this.pollTimer = setInterval(async () => {
-      await this.scrapeNextLeague();
-    }, this.config.pollIntervalMs);
+      await this.livePoll();
+    }, 2000);
 
-    log.info('FlashScore adapter started');
+    // Full refresh every 60s (bigger payload ~400KB, gets new matches)
+    this.fullPollTimer = setInterval(async () => {
+      await this.fullFetch();
+    }, 60000);
+
+    log.info(`FlashScore adapter started — ${this.matchCache.size} matches cached, ${this.lastLiveCount} live`);
   }
 
   async stop(): Promise<void> {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
-    await closeBrowser();
+    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    if (this.fullPollTimer) { clearInterval(this.fullPollTimer); this.fullPollTimer = null; }
     this.status = 'stopped';
     log.info('FlashScore adapter stopped');
   }
@@ -58,37 +62,83 @@ export class FlashScoreAdapter implements IAdapter {
     return this.status;
   }
 
-  private async scrapeAllLeagues(): Promise<void> {
-    for (const league of this.config.leagues) {
-      try {
-        const matches = await scrapeLeague(league.fsPath);
-        log.info(`${league.name}: ${matches.length} matches`);
-        this.emitMatches(matches, league.sport, league.name);
-      } catch (err) {
-        log.warn(`Failed to scrape ${league.name}`, err);
-      }
-    }
-  }
-
-  private async scrapeNextLeague(): Promise<void> {
-    if (this.config.leagues.length === 0) return;
-    
-    const league = this.config.leagues[this.leagueIndex % this.config.leagues.length];
-    this.leagueIndex++;
-
+  private async fullFetch(): Promise<void> {
     try {
-      const matches = await scrapeLeague(league.fsPath);
-      this.emitMatches(matches, league.sport, league.name);
-    } catch (err) {
-      log.warn(`Poll failed for ${league.name}`, err);
+      const matches = await fetchAllFootball();
+      let liveCount = 0;
+
+      for (const m of matches) {
+        this.matchCache.set(m.id, m);
+        if (m.status === 'live') {
+          liveCount++;
+          this.emitMatch(m);
+        }
+      }
+
+      this.lastLiveCount = liveCount;
+      log.info(`FlashScore full: ${matches.length} total, ${liveCount} live`);
+    } catch (err: any) {
+      log.warn(`FlashScore full fetch failed: ${err.message}`);
     }
   }
 
-  private emitMatches(matches: any[], sport: string, leagueName: string): void {
-    if (!this.callback) return;
-    for (const match of matches) {
-      const update = normalizeMatch(match, sport, leagueName);
-      this.callback(update);
+  private async livePoll(): Promise<void> {
+    try {
+      const updates = await fetchLiveUpdates();
+      for (const u of updates) {
+        const cached = this.matchCache.get(u.id);
+        
+        // Merge with cached data (delta updates may be partial)
+        if (cached) {
+          const merged: FSMatch = {
+            ...cached,
+            homeScore: u.homeScore ?? cached.homeScore,
+            awayScore: u.awayScore ?? cached.awayScore,
+            minute: u.minute || cached.minute,
+            status: u.status !== 'unknown' ? u.status : cached.status,
+          };
+          
+          // Detect score change
+          if (merged.homeScore !== cached.homeScore || merged.awayScore !== cached.awayScore) {
+            log.info(`⚽ GOAL! ${merged.home} ${merged.homeScore}:${merged.awayScore} ${merged.away} (${merged.minute}')`);
+          }
+          
+          this.matchCache.set(u.id, merged);
+          this.emitMatch(merged);
+        }
+      }
+    } catch (err: any) {
+      // Silent on transient errors
     }
+  }
+
+  private emitMatch(m: FSMatch): void {
+    if (!this.callback || !m.home || !m.away) return;
+
+    const markets: AdapterMarketUpdate[] = [];
+
+    // Emit score as a special market key
+    if (m.homeScore !== null && m.awayScore !== null) {
+      markets.push({ key: '__score', value: m.homeScore * 100 + m.awayScore });
+    }
+
+    const update: AdapterEventUpdate = {
+      sourceId: 'flashscore',
+      sourceEventId: m.id,
+      sport: 'football',
+      league: m.league || '',
+      startTime: m.startTime || 0,
+      homeTeam: m.home,
+      awayTeam: m.away,
+      status: m.status === 'live' ? 'live' : (m.status === 'finished' ? 'ended' : 'scheduled'),
+      stats: {
+        score: m.homeScore !== null ? { home: m.homeScore, away: m.awayScore || 0 } : undefined,
+        elapsed: m.minute || undefined,
+      },
+      markets,
+      timestamp: Date.now(),
+    };
+
+    this.callback(update);
   }
 }
