@@ -44,7 +44,13 @@ export class StateStore {
       // Merge stats in-place
       if (update.stats) {
         const s = update.stats;
-        if (s.score) event.stats.score = s.score;
+        if (s.score) {
+          const prev = event.stats.score;
+          if (!prev || prev.home !== s.score.home || prev.away !== s.score.away) {
+            changedKeys.push('__score');
+          }
+          event.stats.score = s.score;
+        }
         if (s.period !== undefined) event.stats.period = s.period;
         if (s.elapsed !== undefined) event.stats.elapsed = s.elapsed;
         // Copy any other sport-specific stats

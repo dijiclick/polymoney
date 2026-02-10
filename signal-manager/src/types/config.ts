@@ -14,6 +14,17 @@ export interface OnexbetAdapterConfig {
   sportIds: number[];
 }
 
+export interface FlashScoreAdapterConfig {
+  enabled: boolean;
+  pollIntervalMs: number;
+  leagues: { sport: string; fsPath: string; name: string }[];
+}
+
+export interface DashboardConfig {
+  enabled: boolean;
+  port: number;
+}
+
 export interface MatcherConfig {
   fuzzyThreshold: number;
   kickoffToleranceMs: number;
@@ -24,7 +35,9 @@ export interface Config {
   adapters: {
     polymarket: PolymarketAdapterConfig;
     onexbet: OnexbetAdapterConfig;
+    flashscore: FlashScoreAdapterConfig;
   };
+  dashboard: DashboardConfig;
   matcher: MatcherConfig;
   cleanupIntervalMs: number;
   logLevel: 'debug' | 'info' | 'warn' | 'error';

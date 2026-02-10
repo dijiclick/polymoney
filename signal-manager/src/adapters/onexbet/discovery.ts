@@ -42,7 +42,6 @@ export class OnexbetDiscovery {
       }
     }
 
-    // Update tracked games
     for (const game of allGames) {
       this.trackedGames.set(game.I, game);
     }
@@ -51,7 +50,7 @@ export class OnexbetDiscovery {
   }
 
   private async fetchLiveGames(sportId: number): Promise<OnexbetGameSummary[]> {
-    const url = `${this.config.liveFeedBaseUrl}/LiveFeed/Get1x2_VZip?sports=${sportId}&count=500&lng=en&mode=4&getEmpty=false`;
+    const url = `${this.config.liveFeedBaseUrl}/service-api/LiveFeed/GetTopGamesStatZip?lng=en&antisports=66&partner=7&country=190&sports=${sportId}`;
 
     const resp = await fetch(url, {
       headers: {
@@ -61,13 +60,13 @@ export class OnexbetDiscovery {
     });
 
     if (!resp.ok) {
-      throw new Error(`GET Get1x2_VZip sport=${sportId} failed: ${resp.status}`);
+      throw new Error(`GET GetTopGamesStatZip sport=${sportId} failed: ${resp.status}`);
     }
 
     const data = await resp.json() as any;
     const games: OnexbetGameSummary[] = [];
 
-    // Response is { Value: [...] }
+    // Response: { Value: [...] }
     const items = data.Value || data || [];
     for (const item of (Array.isArray(items) ? items : [])) {
       if (item.I && item.O1 && item.O2) {

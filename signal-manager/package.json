@@ -5,17 +5,18 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node --max-old-space-size=4096 --max-semi-space-size=64 dist/index.js",
+    "start": "node --max-old-space-size=4096 --max-semi-space-size=64 dist/src/index.js",
     "dev": "tsc --watch",
     "start:trace-gc": "node --max-old-space-size=4096 --max-semi-space-size=64 --trace-gc dist/index.js"
   },
   "dependencies": {
-    "ws": "^8.18.0",
-    "fast-fuzzy": "^1.12.0"
+    "fast-fuzzy": "^1.12.0",
+    "playwright": "^1.58.2",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.13",
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.13",
     "typescript": "^5.7.0"
   }
 }

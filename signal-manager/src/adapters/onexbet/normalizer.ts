@@ -9,43 +9,62 @@ export function normalizeGameData(
   game: OnexbetGameData,
   summary: OnexbetGameSummary | undefined
 ): AdapterEventUpdate | null {
-  const sportId = game.S || summary?.S || 1;
+  // GetGameZip wraps data in .Value
+  const val = game.Value || game as any;
+  
+  const sportId = val.S || summary?.S || 1;
   const sport = sportIdToSlug(sportId);
-  const league = game.L || summary?.L || '';
-  const startTime = (summary?.T || 0) * 1000; // Convert seconds to ms
+  const league = val.L || summary?.L || '';
+  const startTime = (summary?.T || 0) * 1000;
+  const homeTeam = val.O1 || summary?.O1 || '';
+  const awayTeam = val.O2 || summary?.O2 || '';
 
-  // Parse markets
+  if (!homeTeam || !awayTeam) return null;
+
+  // Parse markets from GE (Grouped Events) structure
   const markets: AdapterEventUpdate['markets'] = [];
-  if (game.E) {
-    for (let i = 0; i < game.E.length; i++) {
-      const e = game.E[i];
-      if (!e.C || e.C <= 1) continue; // Invalid odds
-
-      const threshold = e.P !== undefined && e.P !== 0 ? e.P : undefined;
-      const periodLabel = e.G || '';
-      const marketKey = mapMarket(e.T, threshold, periodLabel);
-
-      if (marketKey) {
-        markets.push({
-          key: marketKey,
-          value: Math.round(e.C * 1000) / 1000, // Already decimal, round to 3 places
-        });
+  
+  if (val.GE && Array.isArray(val.GE)) {
+    for (const group of val.GE) {
+      const groupId = group.G;
+      if (!group.E || !Array.isArray(group.E)) continue;
+      
+      for (const marketArr of group.E) {
+        if (!Array.isArray(marketArr) || marketArr.length === 0) continue;
+        const m = marketArr[0]; // First element contains the data
+        
+        if (!m.C || m.C <= 1) continue;
+        
+        const threshold = m.P !== undefined && m.P !== 0 ? m.P : undefined;
+        // Build market key from group + type
+        const marketKey = mapMarketFromGroup(groupId, m.T, threshold);
+        
+        if (marketKey) {
+          markets.push({
+            key: marketKey,
+            value: Math.round(m.C * 1000) / 1000,
+          });
+        }
       }
     }
   }
 
   if (markets.length === 0) return null;
 
-  // Parse score
+  // Parse score from SC structure
   let score: { home: number; away: number } | undefined;
-  if (game.SC?.PS && game.SC.PS.length > 0) {
-    let totalHome = 0;
-    let totalAway = 0;
-    for (const period of game.SC.PS) {
-      totalHome += period.S1 || 0;
-      totalAway += period.S2 || 0;
+  if (val.SC) {
+    if (val.SC.FS) {
+      score = { home: val.SC.FS.S1 || 0, away: val.SC.FS.S2 || 0 };
+    } else if (val.SC.PS && Array.isArray(val.SC.PS)) {
+      let totalHome = 0, totalAway = 0;
+      for (const period of val.SC.PS) {
+        const v = period.Value || period;
+        totalHome += v.S1 || 0;
+        totalAway += v.S2 || 0;
+      }
+      score = { home: totalHome, away: totalAway };
     }
-    score = { home: totalHome, away: totalAway };
   }
 
   return {
@@ -54,11 +73,62 @@ export function normalizeGameData(
     sport,
     league,
     startTime,
-    homeTeam: game.O1 || summary?.O1 || '',
-    awayTeam: game.O2 || summary?.O2 || '',
-    status: 'live', // If we're polling from LiveFeed, it's live
-    stats: score ? { score } : undefined,
+    homeTeam,
+    awayTeam,
+    status: score ? 'live' : 'scheduled',
+    stats: score ? { score } : {},
     markets,
     timestamp: Date.now(),
   };
+}
+
+// Map group + type to canonical market key
+function mapMarketFromGroup(groupId: number, typeCode: number, threshold?: number): string | null {
+  // Group 1 = 1X2 (Match Result)
+  if (groupId === 1) {
+    switch (typeCode) {
+      case 1: return 'ml_home_ft';
+      case 2: return 'draw_ft';
+      case 3: return 'ml_away_ft';
+    }
+  }
+  
+  // Group 2 = Double Chance
+  if (groupId === 2) {
+    switch (typeCode) {
+      case 1: return 'dc_1x_ft';
+      case 2: return 'dc_12_ft';
+      case 3: return 'dc_x2_ft';
+    }
+  }
+  
+  // Group 17 = Total (Over/Under)
+  if (groupId === 17 && threshold !== undefined) {
+    const t = String(threshold).replace('.', '_');
+    switch (typeCode) {
+      case 9: return `o_${t}_ft`;
+      case 10: return `u_${t}_ft`;
+    }
+  }
+  
+  // Group 18 = Handicap
+  if (groupId === 18 && threshold !== undefined) {
+    const prefix = threshold < 0 ? 'm' : '';
+    const t = String(Math.abs(threshold)).replace('.', '_');
+    switch (typeCode) {
+      case 7: return `handicap_home_${prefix}${t}_ft`;
+      case 8: return `handicap_away_${prefix}${t}_ft`;
+    }
+  }
+  
+  // Group 19 = Both Teams to Score
+  if (groupId === 19) {
+    switch (typeCode) {
+      case 1: return 'btts_yes_ft';
+      case 2: return 'btts_no_ft';
+    }
+  }
+
+  // Use the existing mapMarket for flat T-codes as fallback
+  return mapMarket(typeCode, threshold, '');
 }

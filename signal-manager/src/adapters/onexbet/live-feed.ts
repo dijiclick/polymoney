@@ -11,26 +11,37 @@ const HEADERS: Record<string, string> = {
   'Sec-Fetch-Site': 'same-origin',
 };
 
-// Raw 1xbet game data from GetGameZip
+// Raw 1xbet game data from GetGameZip (real structure)
 export interface OnexbetGameData {
-  I: number;           // Game ID
-  O1: string;          // Home team
-  O2: string;          // Away team
-  L: string;           // League
-  SC?: {               // Score container
-    PS?: Array<{       // Period scores
-      S1: number;
-      S2: number;
+  I: number;
+  Value?: {
+    O1?: string;
+    O2?: string;
+    L?: string;
+    S?: number;
+    SC?: {
+      FS?: { S1?: number; S2?: number };  // Full score
+      PS?: Array<{ Key: string; Value: { S1: number; S2: number } }>;  // Period scores
+    };
+    GE?: Array<{       // Grouped events
+      G: number;       // Group ID (1=1X2, etc.)
+      GS?: number;
+      E: Array<Array<{ // Nested arrays: E[marketIdx][0]
+        C: number;     // Coefficient (decimal odds)
+        CV?: number;
+        G: number;     // Group
+        GS?: number;
+        T: number;     // Market type within group
+        P?: number;    // Threshold
+      }>>;
     }>;
+    TI?: any;
   };
-  E?: Array<{          // Events (markets)
-    T: number;         // Market type code
-    C: number;         // Coefficient (decimal odds)
-    P?: number;        // Point/threshold (e.g. 2.5 for over/under)
-    G?: string;        // Group label (period/timespan info)
-  }>;
-  TI?: any;            // Timer info
-  S?: number;          // Sport ID
+  // Flat fallback fields
+  O1?: string;
+  O2?: string;
+  L?: string;
+  S?: number;
 }
 
 export type GameDataCallback = (gameData: OnexbetGameData) => void;
@@ -40,8 +51,7 @@ export class OnexbetLiveFeed {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private onGameData: GameDataCallback | null = null;
   private consecutiveFailures = 0;
-  private maxConsecutiveFailures = 5;
-  // Diff detection: store previous odds hash per game
+  private maxConsecutiveFailures = 10;
   private prevOddsHash: Map<number, string> = new Map();
 
   constructor(config: OnexbetAdapterConfig) {
@@ -59,12 +69,10 @@ export class OnexbetLiveFeed {
       await this.pollGames(gameIds);
     }, this.config.pollIntervalMs);
 
-    // Immediate first poll
     this.pollGames(gameIds);
   }
 
   async updateGameList(gameIds: number[]): Promise<void> {
-    // Clean up hash cache for games no longer tracked
     for (const id of this.prevOddsHash.keys()) {
       if (!gameIds.includes(id)) {
         this.prevOddsHash.delete(id);
@@ -89,10 +97,9 @@ export class OnexbetLiveFeed {
         const gameData = await this.fetchGameDetail(gameId);
         if (!gameData) continue;
 
-        // Diff detection: only emit if odds changed
         const hash = this.computeOddsHash(gameData);
         const prevHash = this.prevOddsHash.get(gameId);
-        if (hash === prevHash) continue; // No change
+        if (hash === prevHash) continue;
         this.prevOddsHash.set(gameId, hash);
 
         if (this.onGameData) {
@@ -103,14 +110,14 @@ export class OnexbetLiveFeed {
       } catch (err) {
         this.consecutiveFailures++;
         if (this.consecutiveFailures <= this.maxConsecutiveFailures) {
-          log.warn(`Poll failed for game ${gameId} (${this.consecutiveFailures} consecutive)`, err);
+          log.warn(`Poll failed for game ${gameId} (${this.consecutiveFailures}x)`, err);
         }
       }
     }
   }
 
   private async fetchGameDetail(gameId: number): Promise<OnexbetGameData | null> {
-    const url = `${this.config.liveFeedBaseUrl}/LiveFeed/GetGameZip?id=${gameId}&isSubGames=true&GroupEvents=true&countevents=250&lng=en`;
+    const url = `${this.config.liveFeedBaseUrl}/service-api/LiveFeed/GetGameZip?id=${gameId}&lng=en&isSubGames=true&GroupEvents=true&countevents=250&grMode=4&partner=7&country=190&marketType=1`;
 
     const resp = await fetch(url, {
       headers: {
@@ -120,23 +127,27 @@ export class OnexbetLiveFeed {
     });
 
     if (!resp.ok) {
-      if (resp.status === 404) return null; // Game ended
+      if (resp.status === 404) return null;
       throw new Error(`GetGameZip ${gameId} failed: ${resp.status}`);
     }
 
     const data = await resp.json() as any;
-    // Response may be the game object directly or wrapped in Value
-    return (data.Value || data) as OnexbetGameData;
+    return data as OnexbetGameData;
   }
 
-  // Fast hash of odds values for diff detection
-  // Uses FNV-1a-like approach: just concatenate T:C pairs
   private computeOddsHash(game: OnexbetGameData): string {
-    if (!game.E || game.E.length === 0) return '';
+    const val = game.Value || game;
+    const ge = (val as any).GE;
+    if (!ge || !Array.isArray(ge)) return '';
+    
     let hash = '';
-    for (let i = 0; i < game.E.length; i++) {
-      const e = game.E[i];
-      hash += `${e.T}:${e.C};`;
+    for (const group of ge) {
+      if (!group.E) continue;
+      for (const market of group.E) {
+        if (!Array.isArray(market) || market.length === 0) continue;
+        const m = market[0];
+        hash += `${group.G}:${m.T}:${m.C};`;
+      }
     }
     return hash;
   }
