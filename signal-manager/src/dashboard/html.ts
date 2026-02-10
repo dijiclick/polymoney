@@ -239,7 +239,7 @@ function renderEvents(){
       oddsHtml+='<div class="odds-row"><div class="odds-label">'+fmtKey(k)+'</div>'+fmtOdds(pm,'pm')+fmtOdds(xb,'xbet')+fmtOdds(fs,'fs')+'</div>';
     }
     
-    return '<div class="ev'+(isLive?' live':'')+(isOpen?' open':'')+'" data-id="'+ev.id+'"><div class="ev-top" onclick="toggleEv(\''+ev.id+'\')"><div><span class="ev-teams">'+ev.home+' vs '+ev.away+'</span>'+(isLive?' <span class="ev-live-badge">● LIVE</span>':'')+'<br><span class="ev-league">'+ev.league+' · '+Object.keys(ev.markets).length+' markets · '+Object.keys(Object.values(ev.markets)[0]||{}).length+' sources</span></div><div>'+(sc?'<span class="ev-score">'+sc+'</span>':'')+'</div></div><div class="ev-odds">'+oddsHtml+'</div></div>';
+    return '<div class="ev'+(isLive?' live':'')+(isOpen?' open':'')+'" data-id="'+ev.id+'"><div class="ev-top" onclick="toggleEv(&quot;'+ev.id+'&quot;)"><div><span class="ev-teams">'+ev.home+' vs '+ev.away+'</span>'+(isLive?' <span class="ev-live-badge">● LIVE</span>':'')+'<br><span class="ev-league">'+ev.league+' · '+Object.keys(ev.markets).length+' markets · '+Object.keys(Object.values(ev.markets)[0]||{}).length+' sources</span></div><div>'+(sc?'<span class="ev-score">'+sc+'</span>':'')+'</div></div><div class="ev-odds">'+oddsHtml+'</div></div>';
   }).join('');
 }
 
