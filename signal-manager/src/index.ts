@@ -6,6 +6,9 @@ import { Dashboard } from './dashboard/server.js';
 import { DEFAULT_CONFIG } from '../config/default.js';
 import { setLogLevel, createLogger } from './util/logger.js';
 import { oddsDivergenceSignal, scoreChangeSignal, staleOddsSignal } from './signals/index.js';
+import { tradingSignal, scoreTradeSignal } from './signals/trading.js';
+import { TradingBot } from './trading/bot.js';
+import { TradingController } from './trading/controller.js';
 import type { SignalFunction } from './core/signal-dispatcher.js';
 
 const log = createLogger('main');
@@ -44,6 +47,8 @@ async function main() {
   engine.registerSignal(oddsDivergenceSignal);
   engine.registerSignal(scoreChangeSignal);
   engine.registerSignal(staleOddsSignal);
+  engine.registerSignal(tradingSignal);
+  engine.registerSignal(scoreTradeSignal);
 
   // Register adapters
   if (config.adapters.polymarket.enabled) {
@@ -56,10 +61,31 @@ async function main() {
     engine.registerAdapter(new FlashScoreAdapter(config.adapters.flashscore));
   }
 
+  // Initialize trading bot (disabled by default — needs credentials in env)
+  const tradingBot = new TradingBot({
+    privateKey: process.env.POLY_PRIVATE_KEY || '',
+    funderAddress: process.env.POLY_FUNDER_ADDRESS || '',
+    signatureType: parseInt(process.env.POLY_SIGNATURE_TYPE || '0') as 0 | 1 | 2,
+    armed: false, // Always start disarmed
+    minTradeSize: 1.0,
+    maxTradeSize: 5.0,
+  });
+
+  const tradingController = new TradingController(tradingBot, engine);
+
+  if (process.env.POLY_PRIVATE_KEY) {
+    const ok = await tradingBot.initialize();
+    if (ok) log.info('Trading bot initialized (DISARMED)');
+    else log.warn('Trading bot failed to initialize');
+  } else {
+    log.info('Trading bot: no POLY_PRIVATE_KEY set — trading disabled');
+  }
+
   // Start dashboard
   let dashboard: Dashboard | null = null;
   if (config.dashboard.enabled) {
     dashboard = new Dashboard(engine, config.dashboard);
+    dashboard.setTradingController(tradingController);
     await dashboard.start();
   }
 

@@ -10,6 +10,9 @@
     "start:trace-gc": "node --max-old-space-size=4096 --max-semi-space-size=64 --trace-gc dist/index.js"
   },
   "dependencies": {
+    "@ethersproject/providers": "^5.8.0",
+    "@ethersproject/wallet": "^5.8.0",
+    "@polymarket/clob-client": "^5.2.1",
     "fast-fuzzy": "^1.12.0",
     "playwright": "^1.58.2",
     "ws": "^8.18.0"
