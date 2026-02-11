@@ -207,6 +207,18 @@ export interface Wallet {
   sell_ratio: number | null         // % of orders that are sells (high = active trader/scalper)
   trades_per_market: number | null  // avg orders per unique market (high = frequent re-entry)
   avg_hold_duration_hours: number | null  // average time holding positions (hours)
+  // ===== CAPITAL FLOW METRICS (from Etherscan) =====
+  total_deposited: number | null   // total USDC deposited into wallet
+  total_withdrawn: number | null   // total USDC withdrawn from wallet
+  deposit_count: number | null
+  withdrawal_count: number | null
+  true_roi: number | null          // true ROI % based on actual deposits
+  true_roi_dollar: number | null   // dollar PnL = balance + withdrawn - deposited
+  true_drawdown: number | null     // true max drawdown % (capital-adjusted)
+  true_drawdown_amount: number | null
+  capital_flows_json: string | null
+  capital_flows_cached_at: string | null
+  first_deposit_at: string | null
   metrics_updated_at?: string
   created_at: string
   updated_at: string

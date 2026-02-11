@@ -204,14 +204,19 @@ class ClobWebSocketClient:
         await self._ws.send(json.dumps(subscription))
         logger.info(f"Subscribed to {len(self.asset_ids)} token IDs")
 
-    async def add_subscription(self, asset_id: str) -> None:
-        """Dynamically add a new asset to subscription."""
-        if self._ws and asset_id not in self.asset_ids:
-            self.asset_ids.append(asset_id)
-            # Polymarket uses operation: subscribe for dynamic adds
-            msg = {"assets_ids": [asset_id], "type": "market"}
-            await self._ws.send(json.dumps(msg))
-            logger.debug(f"Added subscription for {asset_id}")
+    async def update_subscriptions(self, new_asset_ids: list[str]) -> None:
+        """Update subscriptions by reconnecting with new token list."""
+        added = set(new_asset_ids) - set(self.asset_ids)
+        if not added:
+            return
+        self.asset_ids = list(set(self.asset_ids) | set(new_asset_ids))
+        # Force reconnect to pick up new subscriptions
+        if self._ws:
+            logger.info(f"Reconnecting CLOB WS for {len(added)} new tokens")
+            try:
+                await self._ws.close(code=4001, reason="Subscription update")
+            except Exception:
+                pass
 
     async def _receive_loop(self) -> None:
         """Main message receive loop."""
@@ -245,35 +250,33 @@ class ClobWebSocketClient:
         if not isinstance(data, dict):
             return
 
-        # Handle different message types
+        # Handle price_changes format: {"market": "0x...", "price_changes": [{...}]}
+        # This is the primary real-time update format from CLOB WS
+        if "price_changes" in data:
+            for change in data["price_changes"]:
+                tick = self._parse_price_change_message(change)
+                if tick:
+                    self._tick_count += 1
+                    await self._safe_callback(self.on_tick, tick)
+            return
+
+        # Handle explicit event_type messages
         event_type = data.get("event_type") or data.get("type")
 
-        if event_type == "book":
-            tick = self._parse_book_message(data)
-            if tick:
-                self._tick_count += 1
-                await self._safe_callback(self.on_tick, tick)
-
-        elif event_type == "price_change":
+        if event_type == "price_change":
             tick = self._parse_price_change_message(data)
             if tick:
                 self._tick_count += 1
                 await self._safe_callback(self.on_tick, tick)
 
-        elif event_type in ("subscribed", "connected"):
-            logger.debug(f"Subscription confirmed: {data}")
+        elif event_type in ("book", "subscribed", "connected"):
+            # Skip book snapshots — thin markets have 0.01/0.99 limit orders
+            # that don't reflect real prices. Only price_changes have real data.
+            logger.debug(f"Skipping {event_type} event")
 
         elif event_type == "error":
             logger.error(f"CLOB error message: {data}")
             self._error_count += 1
-
-        else:
-            # May be raw tick data without explicit event_type
-            if "asset_id" in data and ("bids" in data or "asks" in data or "best_bid" in data):
-                tick = self._parse_generic_tick(data)
-                if tick:
-                    self._tick_count += 1
-                    await self._safe_callback(self.on_tick, tick)
 
     def _parse_book_message(self, data: dict) -> Optional[TickMessage]:
         """Parse 'book' event into TickMessage."""

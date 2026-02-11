@@ -1,7 +1,8 @@
 """
 Crypto Ticker Service - Real-time bid/ask tick data from Polymarket crypto markets.
 
-Collects ticks for rotating up-or-down markets (15m, 1h, 4h) for BTC, ETH, SOL, XRP.
+Uses CLOB WebSocket for real-time bid/ask on rotating up-or-down markets
+(15m, 1h, 4h) for BTC, ETH, SOL, XRP. Uses RTDS WebSocket for crypto spot prices.
 
 Usage:
     python -m crypto_ticker.service
@@ -41,7 +42,6 @@ class CryptoTickerService:
     """Main service for crypto tick data collection."""
 
     STATS_INTERVAL = 60
-    # Refresh every 60s to catch new 15m markets quickly
     MARKET_REFRESH_INTERVAL = 60
 
     def __init__(self, data_dir: str):
@@ -57,6 +57,9 @@ class CryptoTickerService:
 
         # Track latest bid/ask per market (condition_id -> {up: {bid, ask}, down: {bid, ask}})
         self._market_prices: dict[str, dict] = {}
+        # Track last written values per market to deduplicate
+        self._last_written: dict[str, tuple] = {}  # condition_id -> (up_bid, up_ask, down_bid, down_ask)
+        self._last_written_ts: dict[str, int] = {}  # condition_id -> timestamp_ms
 
     async def _handle_tick(self, tick: TickMessage) -> None:
         """Handle bid/ask tick from CLOB WebSocket."""
@@ -90,6 +93,15 @@ class CryptoTickerService:
         if None in (up_bid, up_ask, down_bid, down_ask):
             return  # Wait until we have all prices
 
+        # Deduplicate: only write when bid/ask values change or max 1 per ms
+        timestamp_ms = int(tick.timestamp.timestamp() * 1000)
+        current = (up_bid, up_ask, down_bid, down_ask)
+        if (self._last_written.get(market.condition_id) == current
+                or self._last_written_ts.get(market.condition_id) == timestamp_ms):
+            return
+        self._last_written[market.condition_id] = current
+        self._last_written_ts[market.condition_id] = timestamp_ms
+
         # Get crypto spot price
         rtds_symbol = SYMBOL_TO_RTDS.get(market.crypto_symbol)
         if not rtds_symbol:
@@ -100,7 +112,6 @@ class CryptoTickerService:
             return  # No price yet
 
         market_price, _ = price_data
-        timestamp_ms = int(tick.timestamp.timestamp() * 1000)
 
         # Write tick to CSV
         tick_data = TickData(
@@ -134,16 +145,16 @@ class CryptoTickerService:
         if not markets:
             logger.warning("No markets found on first try, will retry...")
 
-        # Get token IDs and symbols
+        # Get token IDs
         token_ids = self.resolver.get_all_token_ids()
         rtds_symbols = list(SYMBOL_TO_RTDS.values())
 
         logger.info(f"Subscribing to {len(token_ids)} tokens, {len(rtds_symbols)} price feeds")
 
-        # Create RTDS price client (all 4 symbols always)
+        # Create RTDS price client for crypto spot prices
         self.price_client = RtdsPriceClient(symbols=rtds_symbols)
 
-        # Create CLOB client
+        # Create CLOB client for real-time bid/ask
         self.clob_client = ClobWebSocketClient(
             on_tick=self._handle_tick,
             asset_ids=token_ids,
@@ -159,10 +170,9 @@ class CryptoTickerService:
 
         logger.info("=" * 60)
         logger.info(f"Data directory: {self.data_dir}")
-        logger.info("Service started - writing ticks to CSV")
+        logger.info("Service started - streaming ticks via CLOB WS")
         logger.info("=" * 60)
 
-        # Wait for both to complete (they won't unless stopped)
         try:
             await asyncio.gather(price_task, clob_task)
         except asyncio.CancelledError:
@@ -191,10 +201,8 @@ class CryptoTickerService:
 
                 clob_stats = self.clob_client.stats if self.clob_client else {}
                 csv_stats = self.csv_writer.stats
-
                 uptime = (datetime.now(timezone.utc) - self._start_time).total_seconds() if self._start_time else 0
                 uptime_str = f"{int(uptime // 3600)}h {int((uptime % 3600) // 60)}m"
-
                 active_markets = len(self.resolver.get_all_markets())
 
                 logger.info(
@@ -221,17 +229,15 @@ class CryptoTickerService:
                 await self.resolver.refresh_markets()
                 new_tokens = set(self.resolver.get_all_token_ids())
 
-                # Subscribe to new tokens
+                # Subscribe to new tokens by reconnecting
                 added = new_tokens - old_tokens
                 if added and self.clob_client:
-                    for token_id in added:
-                        await self.clob_client.add_subscription(token_id)
-                    logger.info(f"Added {len(added)} new token subscriptions")
+                    await self.clob_client.update_subscriptions(list(new_tokens))
+                    logger.info(f"Reconnecting for {len(added)} new token subscriptions")
 
-                # Clean up old market prices for removed markets
+                # Clean up old market prices
                 removed = old_tokens - new_tokens
                 if removed:
-                    # Find condition_ids that no longer have active tokens
                     active_conditions = {
                         m.condition_id for m in self.resolver.get_all_markets()
                     }

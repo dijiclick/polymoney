@@ -82,11 +82,19 @@ function formatChartMoney(v: number) {
   return `${sign}$${abs.toFixed(0)}`
 }
 
-export default function PnlChart({ closedPositions, onIntervalClick }: { closedPositions: ClosedPosition[], onIntervalClick?: (date: Date) => void }) {
+export interface CapitalEventMarker {
+  timestamp: number
+  type: 'deposit' | 'withdrawal'
+  amount: number
+  hash: string
+}
+
+export default function PnlChart({ closedPositions, onIntervalClick, capitalEvents }: { closedPositions: ClosedPosition[], onIntervalClick?: (date: Date) => void, capitalEvents?: CapitalEventMarker[] }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('30d')
   const [chartMode, setChartMode] = useState<ChartMode>('cumulative')
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [showCapitalEvents, setShowCapitalEvents] = useState(true)
   const svgRef = useRef<SVGSVGElement>(null)
   const hoverIndexRef = useRef<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -513,6 +521,20 @@ export default function PnlChart({ closedPositions, onIntervalClick }: { closedP
               <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />
             </svg>
           </button>
+
+          {capitalEvents && capitalEvents.length > 0 && (
+            <button
+              onClick={() => setShowCapitalEvents(!showCapitalEvents)}
+              className={`p-1.5 rounded-md bg-white/[0.03] transition-colors ${
+                showCapitalEvents ? 'text-blue-400 hover:text-blue-300' : 'text-gray-500 hover:text-white'
+              }`}
+              title={showCapitalEvents ? 'Hide deposits/withdrawals' : 'Show deposits/withdrawals'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v20M2 12h20" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
@@ -627,6 +649,54 @@ export default function PnlChart({ closedPositions, onIntervalClick }: { closedP
                   )}
                 </>
               )}
+
+              {/* Capital event markers (deposits/withdrawals) — aggregated by day */}
+              {showCapitalEvents && capitalEvents && capitalEvents.length > 0 && intervalData.length > 0 && (() => {
+                const cutoff = getCutoffMs(timeframe)
+                const tMin = intervalData[0].date.getTime()
+                const tMax = intervalData[intervalData.length - 1].date.getTime()
+                const tRange = tMax - tMin || 1
+
+                // Aggregate by day
+                const dayBuckets = new Map<string, { deposits: number; withdrawals: number; midTs: number }>()
+                for (const e of capitalEvents) {
+                  const ms = e.timestamp * 1000
+                  if ((cutoff !== 0 && ms < cutoff) || ms < tMin || ms > tMax) continue
+                  const day = new Date(ms).toISOString().slice(0, 10)
+                  const bucket = dayBuckets.get(day) || { deposits: 0, withdrawals: 0, midTs: ms }
+                  if (e.type === 'deposit') bucket.deposits += e.amount
+                  else bucket.withdrawals += e.amount
+                  dayBuckets.set(day, bucket)
+                }
+
+                return Array.from(dayBuckets.entries()).map(([day, bucket]) => {
+                  const x = PX + ((bucket.midTs - tMin) / tRange) * (W - PX - PR)
+                  const markers: React.ReactNode[] = []
+
+                  if (bucket.deposits > 0) {
+                    const label = bucket.deposits >= 1000 ? `$${(bucket.deposits / 1000).toFixed(0)}K` : `$${bucket.deposits.toFixed(0)}`
+                    markers.push(
+                      <g key={`ced-${day}`}>
+                        <line x1={x} y1={16} x2={x} y2={H} stroke="#34d399" strokeOpacity="0.3" strokeWidth="1" strokeDasharray="3,3" vectorEffect="non-scaling-stroke" />
+                        <polygon points={`${x-4},${14} ${x+4},${14} ${x},${8}`} fill="#34d399" fillOpacity="0.8" />
+                        <text x={x} y={6} textAnchor="middle" fill="#34d399" fontSize="8" fontFamily="monospace">{label}</text>
+                      </g>
+                    )
+                  }
+                  if (bucket.withdrawals > 0) {
+                    const label = bucket.withdrawals >= 1000 ? `$${(bucket.withdrawals / 1000).toFixed(0)}K` : `$${bucket.withdrawals.toFixed(0)}`
+                    const yOff = bucket.deposits > 0 ? 10 : 0
+                    markers.push(
+                      <g key={`cew-${day}`}>
+                        {bucket.deposits === 0 && <line x1={x} y1={16 + yOff} x2={x} y2={H} stroke="#f87171" strokeOpacity="0.3" strokeWidth="1" strokeDasharray="3,3" vectorEffect="non-scaling-stroke" />}
+                        <polygon points={`${x-4},${8 + yOff} ${x+4},${8 + yOff} ${x},${14 + yOff}`} fill="#f87171" fillOpacity="0.8" />
+                        <text x={x} y={6 + yOff} textAnchor="middle" fill="#f87171" fontSize="8" fontFamily="monospace">{label}</text>
+                      </g>
+                    )
+                  }
+                  return markers
+                })
+              })()}
 
             </svg>
             {yAxisTicks.map((tick, i) => (
@@ -810,6 +880,53 @@ export default function PnlChart({ closedPositions, onIntervalClick }: { closedP
                         )}
                       </>
                     )}
+
+                    {/* Capital event markers (fullscreen) — aggregated by day */}
+                    {showCapitalEvents && capitalEvents && capitalEvents.length > 0 && intervalData.length > 0 && (() => {
+                      const cutoff = getCutoffMs(timeframe)
+                      const tMin = intervalData[0].date.getTime()
+                      const tMax = intervalData[intervalData.length - 1].date.getTime()
+                      const tRange = tMax - tMin || 1
+
+                      const dayBuckets = new Map<string, { deposits: number; withdrawals: number; midTs: number }>()
+                      for (const e of capitalEvents) {
+                        const ms = e.timestamp * 1000
+                        if ((cutoff !== 0 && ms < cutoff) || ms < tMin || ms > tMax) continue
+                        const day = new Date(ms).toISOString().slice(0, 10)
+                        const bucket = dayBuckets.get(day) || { deposits: 0, withdrawals: 0, midTs: ms }
+                        if (e.type === 'deposit') bucket.deposits += e.amount
+                        else bucket.withdrawals += e.amount
+                        dayBuckets.set(day, bucket)
+                      }
+
+                      return Array.from(dayBuckets.entries()).map(([day, bucket]) => {
+                        const x = PX + ((bucket.midTs - tMin) / tRange) * (W - PX - PR)
+                        const markers: React.ReactNode[] = []
+
+                        if (bucket.deposits > 0) {
+                          const label = bucket.deposits >= 1000 ? `$${(bucket.deposits / 1000).toFixed(0)}K` : `$${bucket.deposits.toFixed(0)}`
+                          markers.push(
+                            <g key={`fsced-${day}`}>
+                              <line x1={x} y1={18} x2={x} y2={H} stroke="#34d399" strokeOpacity="0.3" strokeWidth="1" strokeDasharray="3,3" vectorEffect="non-scaling-stroke" />
+                              <polygon points={`${x-5},${16} ${x+5},${16} ${x},${9}`} fill="#34d399" fillOpacity="0.8" />
+                              <text x={x} y={7} textAnchor="middle" fill="#34d399" fontSize="9" fontFamily="monospace">{label}</text>
+                            </g>
+                          )
+                        }
+                        if (bucket.withdrawals > 0) {
+                          const label = bucket.withdrawals >= 1000 ? `$${(bucket.withdrawals / 1000).toFixed(0)}K` : `$${bucket.withdrawals.toFixed(0)}`
+                          const yOff = bucket.deposits > 0 ? 12 : 0
+                          markers.push(
+                            <g key={`fscew-${day}`}>
+                              {bucket.deposits === 0 && <line x1={x} y1={18 + yOff} x2={x} y2={H} stroke="#f87171" strokeOpacity="0.3" strokeWidth="1" strokeDasharray="3,3" vectorEffect="non-scaling-stroke" />}
+                              <polygon points={`${x-5},${9 + yOff} ${x+5},${9 + yOff} ${x},${16 + yOff}`} fill="#f87171" fillOpacity="0.8" />
+                              <text x={x} y={7 + yOff} textAnchor="middle" fill="#f87171" fontSize="9" fontFamily="monospace">{label}</text>
+                            </g>
+                          )
+                        }
+                        return markers
+                      })
+                    })()}
 
                   </svg>
                   {yAxisTicks.map((tick, i) => (

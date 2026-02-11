@@ -133,6 +133,25 @@ export interface TraderProfileResponse {
   // Hold duration
   avgHoldDurationHours?: number
 
+  // Capital flow data (from Etherscan)
+  capitalFlows?: {
+    totalDeposited: number
+    totalWithdrawn: number
+    netDeposited: number
+    depositCount: number
+    withdrawalCount: number
+    trueRoi: number | null
+    trueRoiDollar: number | null
+    trueDrawdown: number | null
+    trueDrawdownAmount: number | null
+    events: Array<{
+      timestamp: number
+      type: 'deposit' | 'withdrawal'
+      amount: number
+      hash: string
+    }>
+  }
+
   // Metadata
   isNewlyFetched: boolean
   lastUpdatedAt?: string

@@ -372,13 +372,13 @@ function WalletsPage() {
       const res = await fetch(`/api/traders/${finalAddr}?${params}`)
       if (!res.ok) throw new Error('Failed to analyze wallet')
       const data = await res.json()
-      // Skip wallets with fewer than 15 total trades
-      if ((data.metrics?.tradeCountAllTime || 0) < 15) {
-        alert(`Wallet skipped: only ${data.metrics?.tradeCountAllTime || 0} trades (minimum 15 required)`)
-        return
-      }
-      // Refresh wallet list to show the new/updated entry
+      // Refresh wallet list to show basic data immediately
       await fetchWallets(null)
+      // Fetch capital flows from Etherscan in background, then refresh again
+      const balance = data.metrics?.portfolioValue || 0
+      fetch(`/api/etherscan/${finalAddr}?balance=${balance}`)
+        .then(() => fetchWallets(null))
+        .catch(() => {})
     } catch (error) {
       console.error('Error analyzing wallet:', error)
       alert('Failed to analyze wallet')

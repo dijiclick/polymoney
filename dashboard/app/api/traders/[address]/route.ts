@@ -146,6 +146,18 @@ export async function GET(
         pfTrend: dbWallet.pf_trend ?? null,
       },
       avgHoldDurationHours: dbWallet.avg_hold_duration_hours ?? undefined,
+      capitalFlows: dbWallet.capital_flows_cached_at ? {
+        totalDeposited: dbWallet.total_deposited || 0,
+        totalWithdrawn: dbWallet.total_withdrawn || 0,
+        netDeposited: (dbWallet.total_deposited || 0) - (dbWallet.total_withdrawn || 0),
+        depositCount: dbWallet.deposit_count || 0,
+        withdrawalCount: dbWallet.withdrawal_count || 0,
+        trueRoi: dbWallet.true_roi ?? null,
+        trueRoiDollar: dbWallet.true_roi_dollar ?? null,
+        trueDrawdown: dbWallet.true_drawdown ?? null,
+        trueDrawdownAmount: dbWallet.true_drawdown_amount ?? null,
+        events: (() => { try { return dbWallet.capital_flows_json ? JSON.parse(dbWallet.capital_flows_json) : [] } catch { return [] } })(),
+      } : undefined,
       scores: undefined,
       isNewlyFetched: false,
       lastUpdatedAt: dbWallet.metrics_updated_at,
@@ -354,6 +366,8 @@ export async function GET(
           avg_trades_per_day: avgTradesPerDay,
           median_profit_pct: medianProfitPct,
           suggested_sl_pct: suggestedStopLossPct,
+          best_trade_pct: bestTradePct,
+          pf_trend: pfTrend,
           ...(avgHoldDurationHours != null && { avg_hold_duration_hours: avgHoldDurationHours }),
           metrics_updated_at: new Date().toISOString(),
         })
@@ -419,6 +433,18 @@ export async function GET(
         pfTrend,
       },
       avgHoldDurationHours: avgHoldDurationHours ?? undefined,
+      capitalFlows: dbWallet?.capital_flows_cached_at ? {
+        totalDeposited: dbWallet.total_deposited || 0,
+        totalWithdrawn: dbWallet.total_withdrawn || 0,
+        netDeposited: (dbWallet.total_deposited || 0) - (dbWallet.total_withdrawn || 0),
+        depositCount: dbWallet.deposit_count || 0,
+        withdrawalCount: dbWallet.withdrawal_count || 0,
+        trueRoi: dbWallet.true_roi ?? null,
+        trueRoiDollar: dbWallet.true_roi_dollar ?? null,
+        trueDrawdown: dbWallet.true_drawdown ?? null,
+        trueDrawdownAmount: dbWallet.true_drawdown_amount ?? null,
+        events: (() => { try { return dbWallet.capital_flows_json ? JSON.parse(dbWallet.capital_flows_json) : [] } catch { return [] } })(),
+      } : undefined,
       scores: undefined,
       isNewlyFetched: true,
       lastUpdatedAt: new Date().toISOString(),
@@ -1107,7 +1133,6 @@ function calculateCopyScore(params: {
   const { profitFactor30d, profitFactorAll, drawdown30d, diffWinRate30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay, bestTradePct, pfTrend } = params
 
   // ── Hard Filters ────────────────────────────────────────────────
-  if (tradeCountAll < 40) return 0
   if (profitFactor30d < 1.2) return 0
   if (medianProfitPct == null || medianProfitPct < 5.0) return 0
   if (avgTradesPerDay != null && (avgTradesPerDay < 0.5 || avgTradesPerDay > 25)) return 0

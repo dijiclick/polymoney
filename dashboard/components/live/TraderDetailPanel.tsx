@@ -94,11 +94,25 @@ export default function TraderDetailPanel({ address, trades, onClose }: TraderDe
       const res = await fetch(`/api/traders/${address}?refresh=false&lite=true`)
       if (res.ok) {
         const result = await res.json()
+        // If cached data has no positions but claims a count, fetch live to get them
+        const hasPositionData = (result.closedPositions?.length > 0) || (result.positions?.length > 0)
+        const expectsPositions = (result.closedPositionsCount > 0) || (result.metrics?.activePositions > 0)
+        if (!hasPositionData && expectsPositions) {
+          setData(result) // Show metrics immediately
+          setLoading(false)
+          // Background fetch for full position data + recalculate copy score
+          const liveRes = await fetch(`/api/traders/${address}`)
+          if (liveRes.ok) {
+            const liveResult = await liveRes.json()
+            setData(liveResult)
+          }
+          return
+        }
         setData(result)
         return
       }
-      // Cache miss (e.g. fresh wallet from insider feed) — fetch live
-      const liveRes = await fetch(`/api/traders/${address}?lite=true`)
+      // Cache miss (e.g. fresh wallet from insider feed) — fetch live with full metrics
+      const liveRes = await fetch(`/api/traders/${address}`)
       if (!liveRes.ok) throw new Error('Failed to fetch')
       const result = await liveRes.json()
       setData(result)

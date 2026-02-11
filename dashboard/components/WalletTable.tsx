@@ -10,7 +10,7 @@ interface ColumnFilter {
   max?: number
 }
 
-export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'pnl' | 'active' | 'wl' | 'dd' | 'medianProfit' | 'avgTrades' | 'sellRatio' | 'tradesPerMarket' | 'bot' | 'holdDuration' | 'category' | 'joined' | 'bestTrade' | 'pfTrend'
+export type ColumnKey = 'score' | 'chart' | 'value' | 'winRate' | 'pnl' | 'active' | 'wl' | 'dd' | 'medianProfit' | 'avgTrades' | 'sellRatio' | 'tradesPerMarket' | 'bot' | 'holdDuration' | 'category' | 'joined' | 'bestTrade' | 'pfTrend' | 'trueRoi' | 'trueDd'
 
 export const COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'score', label: 'Score' },
@@ -20,6 +20,8 @@ export const COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'winRate', label: 'Win Rate' },
   { key: 'pnl', label: 'PnL' },
   { key: 'dd', label: 'Drawdown' },
+  { key: 'trueRoi', label: 'True ROI' },
+  { key: 'trueDd', label: 'True DD' },
   { key: 'medianProfit', label: 'Med %/Trade' },
   { key: 'active', label: 'Active' },
   { key: 'wl', label: 'W/L' },
@@ -53,6 +55,8 @@ const COLUMN_TOOLTIPS: Record<string, string> = {
   avg_hold_duration_hours: 'Average time from first buy to market resolution. Calculated from activity timestamps.',
   category: 'Most frequently traded market category.',
   account_created_at: 'Account creation date on Polymarket.',
+  true_roi: 'True ROI = (Balance + Withdrawn - Deposited) / Deposited × 100. Based on actual USDC deposits/withdrawals from Etherscan.',
+  true_drawdown: 'True Drawdown = Max peak-to-trough on capital-adjusted equity curve. Deposits/withdrawals don\'t distort the measurement.',
 }
 
 // Module-level cache for raw positions data (not filtered by timeframe)
@@ -827,6 +831,8 @@ export default function WalletTable({
               {show('winRate') && <SortHeader column={getColumnName('win_rate')} label="Win Rate" filterType="percent" className="min-w-[68px]" />}
               {show('pnl') && <SortHeader column={getColumnName('pnl')} label="PnL" filterType="money" className="min-w-[62px]" />}
               {show('dd') && <SortHeader column={getColumnName('drawdown')} label="DD" filterType="percent" className="min-w-[52px]" />}
+              {show('trueRoi') && <SortHeader column="true_roi" label="T.ROI" filterType="percent" className="min-w-[60px]" />}
+              {show('trueDd') && <SortHeader column="true_drawdown" label="T.DD" filterType="percent" className="min-w-[52px]" />}
               {show('medianProfit') && <SortHeader column="median_profit_pct" label="Med %/T" filterType="percent" className="min-w-[60px]" />}
               {show('bestTrade') && <SortHeader column="best_trade_pct" label="Best%" filterType="percent" className="min-w-[52px]" />}
               {show('pfTrend') && <SortHeader column="pf_trend" label="PF↕" filterType="number" className="min-w-[48px]" />}
@@ -1017,6 +1023,37 @@ export default function WalletTable({
                           title={`Max drawdown: ${formatMoney(wallet.drawdown_amount_all)}`}
                         >
                           {formatPercentPlain(drawdown)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
+                    </td>
+                  )}
+                  {show('trueRoi') && (
+                    <td className="px-1 py-2 text-right">
+                      {wallet.true_roi != null ? (
+                        <span className={`text-xs font-semibold tabular-nums inline-block px-1 py-0.5 rounded ${
+                          wallet.true_roi > 0 ? 'bg-emerald-500/10' : wallet.true_roi < 0 ? 'bg-red-500/10' : ''
+                        } ${getPnlColor(wallet.true_roi)}`}
+                        title={wallet.true_roi_dollar != null ? `True P&L: ${formatMoney(wallet.true_roi_dollar)}` : undefined}
+                        >
+                          {wallet.true_roi > 0 ? '+' : ''}{wallet.true_roi.toFixed(1)}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">-</span>
+                      )}
+                    </td>
+                  )}
+                  {show('trueDd') && (
+                    <td className="px-1 py-2 text-right">
+                      {wallet.true_drawdown != null && wallet.true_drawdown > 0 ? (
+                        <span
+                          className={`text-xs font-semibold tabular-nums inline-block px-1 py-0.5 rounded cursor-default ${
+                            wallet.true_drawdown <= 10 ? 'bg-emerald-500/10' : wallet.true_drawdown <= 25 ? 'bg-amber-500/10' : 'bg-red-500/10'
+                          } ${getDrawdownColor(wallet.true_drawdown)}`}
+                          title={wallet.true_drawdown_amount != null ? `True drawdown: ${formatMoney(wallet.true_drawdown_amount)}` : undefined}
+                        >
+                          {formatPercentPlain(wallet.true_drawdown)}
                         </span>
                       ) : (
                         <span className="text-xs text-gray-600">-</span>

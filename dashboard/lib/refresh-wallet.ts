@@ -389,41 +389,86 @@ function calculateMedianProfitPct(
  * Calculate composite copy-trade score (0-100).
  * 3-pillar formula: Edge (40%), Consistency (35%), Risk (25%).
  */
+function calculateBestTradePct(
+  closedPositions: { conditionId: string; realizedPnl: number }[]
+): number | null {
+  const marketPnl = new Map<string, number>()
+  for (const pos of closedPositions) {
+    if (!pos.conditionId) continue
+    marketPnl.set(pos.conditionId, (marketPnl.get(pos.conditionId) || 0) + pos.realizedPnl)
+  }
+  const positivePnls = Array.from(marketPnl.values()).filter(v => v > 0)
+  if (positivePnls.length === 0) return null
+  const totalPositive = positivePnls.reduce((s, v) => s + v, 0)
+  if (totalPositive <= 0) return null
+  const maxSingle = Math.max(...positivePnls)
+  return Math.round((maxSingle / totalPositive) * 10000) / 100
+}
+
+function calculatePfTrend(profitFactor30d: number, profitFactorAll: number): number | null {
+  if (!profitFactorAll || profitFactorAll <= 0) return null
+  if (profitFactor30d == null || profitFactor30d < 0) return null
+  return Math.round((profitFactor30d / profitFactorAll) * 100) / 100
+}
+
 function calculateCopyScore(params: {
   profitFactor30d: number
+  profitFactorAll: number
   drawdown30d: number
+  diffWinRate30d: number
   weeklyProfitRate: number
   tradeCountAll: number
   medianProfitPct: number | null
   avgTradesPerDay?: number
+  bestTradePct?: number | null
+  pfTrend?: number | null
 }): number {
-  const { profitFactor30d, drawdown30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay } = params
+  const { profitFactor30d, profitFactorAll, drawdown30d, diffWinRate30d, weeklyProfitRate, tradeCountAll, medianProfitPct, avgTradesPerDay, bestTradePct, pfTrend } = params
 
   // Hard filters
-  if (tradeCountAll < 30) return 0
   if (profitFactor30d < 1.2) return 0
   if (medianProfitPct == null || medianProfitPct < 5.0) return 0
-  if (avgTradesPerDay != null && (avgTradesPerDay < 2 || avgTradesPerDay > 15)) return 0
+  if (avgTradesPerDay != null && (avgTradesPerDay < 0.5 || avgTradesPerDay > 25)) return 0
 
-  // Pillar 1: Edge (40%) — Profit Factor 1.2 → 0, 3.0+ → 1.0
-  const edgeScore = Math.min((profitFactor30d - 1.2) / (3.0 - 1.2), 1.0)
+  // Pillar 1: Edge (25%) — Blended PF (70% recent + 30% all-time)
+  const blendedPf = profitFactor30d * 0.7 + (profitFactorAll || profitFactor30d) * 0.3
+  const edgeScore = Math.min(Math.max((blendedPf - 1.2) / (3.0 - 1.2), 0), 1.0)
 
-  // Pillar 2: Consistency (35%) — Weekly profit rate 40% → 0, 85%+ → 1.0
+  // Pillar 2: Skill (20%) — Difficulty-weighted win rate
+  const skillScore = Math.min(Math.max((diffWinRate30d - 45) / (75 - 45), 0), 1.0)
+
+  // Pillar 3: Consistency (20%) — Weekly profit rate
   const consistencyScore = Math.min(Math.max((weeklyProfitRate - 40) / (85 - 40), 0), 1.0)
 
-  // Pillar 3: Risk (25%) — Inverse drawdown: DD 5% → 1.0, DD 25%+ → 0
+  // Pillar 4: Risk (15%) — Inverse drawdown
   const riskScore = drawdown30d <= 0
     ? 1.0
     : Math.min(Math.max((25 - drawdown30d) / (25 - 5), 0), 1.0)
 
+  // Pillar 5: Discipline (10%) — Penalizes one-hit wonders
+  let disciplineScore = 0.5
+  if (bestTradePct != null && bestTradePct > 0) {
+    disciplineScore = Math.min(Math.max((1 - bestTradePct / 100 - 0.15) / (0.85 - 0.15), 0), 1.0)
+  }
+
   const rawScore = (
-    edgeScore * 0.40 +
-    consistencyScore * 0.35 +
-    riskScore * 0.25
+    edgeScore * 0.25 +
+    skillScore * 0.20 +
+    consistencyScore * 0.20 +
+    riskScore * 0.15 +
+    disciplineScore * 0.10
   ) * 100
 
-  const confidence = Math.min(1.0, tradeCountAll / 50)
-  return Math.min(Math.round(rawScore * confidence), 100)
+  // Confidence multiplier — 150 trades for full confidence
+  const confidence = Math.min(1.0, tradeCountAll / 150)
+
+  // Decay multiplier — penalizes fading edge
+  let decay = 1.0
+  if (pfTrend != null && pfTrend > 0) {
+    decay = Math.max(0.5, Math.min(pfTrend, 1.0))
+  }
+
+  return Math.min(Math.round(rawScore * confidence * decay), 100)
 }
 
 async function fetchTradeStats(address: string): Promise<{ sellRatio: number; tradesPerMarket: number }> {
@@ -547,13 +592,19 @@ export async function refreshOneWallet(
     const weeklyProfitRate = calculateWeeklyProfitRate(closedPositions)
     const avgTradesPerDay = calculateAvgTradesPerDay(closedPositions)
     const medianProfitPct = calculateMedianProfitPct(closedPositions)
+    const bestTradePct = calculateBestTradePct(closedPositions)
+    const pfTrend = calculatePfTrend(profitFactor30d, profitFactorAll)
     const copyScore = calculateCopyScore({
       profitFactor30d,
+      profitFactorAll,
       drawdown30d: metrics30d.drawdown || 0,
+      diffWinRate30d,
       weeklyProfitRate,
       tradeCountAll: polymetrics.tradeCount,
       medianProfitPct,
       avgTradesPerDay,
+      bestTradePct,
+      pfTrend,
     })
 
     const { error: updateError } = await supabase.from('wallets').update({
@@ -602,6 +653,8 @@ export async function refreshOneWallet(
       copy_score: copyScore,
       avg_trades_per_day: avgTradesPerDay,
       median_profit_pct: medianProfitPct,
+      best_trade_pct: bestTradePct,
+      pf_trend: pfTrend,
       sell_ratio: tradeStats.sellRatio,
       trades_per_market: tradeStats.tradesPerMarket,
       ...(avgHoldDurationHours != null && { avg_hold_duration_hours: avgHoldDurationHours }),

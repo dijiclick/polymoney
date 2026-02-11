@@ -83,6 +83,8 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
   const [activeTab, setActiveTab] = useState<'open' | 'closed'>('closed')
   const [filterDate, setFilterDate] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
+  const [capitalFlows, setCapitalFlows] = useState<any>(null)
+  const [capitalFlowsLoading, setCapitalFlowsLoading] = useState(false)
   const closedListRef = useRef<HTMLDivElement>(null)
 
   // Build instant data from wallet table row (available immediately)
@@ -127,6 +129,7 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
     if (isOpen && address) {
       setData(null)
       setFilterDate(null)
+      setCapitalFlows(null)
       fetchTraderData()
     }
   }, [isOpen, address])
@@ -172,6 +175,13 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
       const freshResult = await freshRes.json()
       setData(freshResult)
       onDataUpdate?.(address, freshResult)
+      // Trigger capital flows fetch (non-blocking)
+      if (freshResult.capitalFlows) {
+        setCapitalFlows(freshResult.capitalFlows)
+      } else {
+        const balance = freshResult.metrics?.portfolioValue || 0
+        fetchCapitalFlows(balance)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -179,8 +189,37 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
     }
   }
 
+  // Fetch capital flows from Etherscan (on-demand, 24h cache)
+  const fetchCapitalFlows = async (balance: number) => {
+    setCapitalFlowsLoading(true)
+    try {
+      const res = await fetch(`/api/etherscan/${address}?balance=${balance}`)
+      if (res.ok) {
+        const result = await res.json()
+        if (result.summary) {
+          setCapitalFlows({
+            totalDeposited: result.summary.totalDeposited,
+            totalWithdrawn: result.summary.totalWithdrawn,
+            depositCount: result.summary.depositCount,
+            withdrawalCount: result.summary.withdrawalCount,
+            trueRoi: result.metrics?.trueRoi ?? null,
+            trueRoiDollar: result.metrics?.trueRoiDollar ?? null,
+            trueDrawdown: result.metrics?.trueDrawdown ?? null,
+            trueDrawdownAmount: result.metrics?.trueDrawdownAmount ?? null,
+            events: result.summary.events || [],
+          })
+        }
+      }
+    } catch { /* silently fail — capital flows are optional */ }
+    finally { setCapitalFlowsLoading(false) }
+  }
+
   const handleIntervalClick = (date: Date) => {
-    const dateStr = date.toISOString().slice(0, 10) // YYYY-MM-DD
+    // Use local date to match chart grouping (getIntervalKey uses local time)
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    const dateStr = `${y}-${m}-${d}`
     setFilterDate(prev => prev === dateStr ? null : dateStr) // toggle
     setActiveTab('closed')
     // Scroll to the positions list after state updates
@@ -421,9 +460,50 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                 )
               })()}
 
+              {/* Capital Flows Summary */}
+              {capitalFlows && capitalFlows.totalDeposited > 0 && (
+                <div className="mx-3 md:mx-5 mb-2 px-4 md:px-5 py-3 rounded-lg bg-white/[0.02] border border-white/5">
+                  <p className="text-[9px] text-gray-500 uppercase tracking-wider mb-2">Capital Flows <span className="text-gray-600">(Etherscan)</span></p>
+                  <div className="flex items-center gap-4 md:gap-6 flex-wrap">
+                    <div>
+                      <p className="text-[9px] text-gray-600">Deposited</p>
+                      <p className="text-xs font-semibold text-gray-300 tabular-nums">{formatMoney(capitalFlows.totalDeposited)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-gray-600">Withdrawn</p>
+                      <p className="text-xs font-semibold text-gray-300 tabular-nums">{formatMoney(capitalFlows.totalWithdrawn)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-gray-600">True ROI</p>
+                      <p className={`text-xs font-semibold tabular-nums ${capitalFlows.trueRoi != null ? (capitalFlows.trueRoi > 0 ? 'text-emerald-400' : capitalFlows.trueRoi < 0 ? 'text-red-400' : 'text-gray-400') : 'text-gray-600'}`}>
+                        {capitalFlows.trueRoi != null ? formatPercent(capitalFlows.trueRoi) : '-'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-gray-600">True P&L</p>
+                      <p className={`text-xs font-semibold tabular-nums ${capitalFlows.trueRoiDollar != null ? getPnlColor(capitalFlows.trueRoiDollar) : 'text-gray-600'}`}>
+                        {capitalFlows.trueRoiDollar != null ? formatMoney(capitalFlows.trueRoiDollar) : '-'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-gray-600">True DD</p>
+                      <p className={`text-xs font-semibold tabular-nums ${capitalFlows.trueDrawdown != null && capitalFlows.trueDrawdown > 0 ? (capitalFlows.trueDrawdown <= 10 ? 'text-emerald-400' : capitalFlows.trueDrawdown <= 25 ? 'text-amber-400' : 'text-red-400') : 'text-gray-600'}`}>
+                        {capitalFlows.trueDrawdown != null ? `${capitalFlows.trueDrawdown.toFixed(1)}%` : '-'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {capitalFlowsLoading && !capitalFlows && (
+                <div className="mx-3 md:mx-5 mb-2 px-4 py-2 text-[10px] text-gray-600 flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full border border-white/10 border-t-white/30 animate-spin" />
+                  Loading capital flows...
+                </div>
+              )}
+
               {/* PnL Chart — shows loading spinner while positions load */}
               {displayData.closedPositions && displayData.closedPositions.length > 0 ? (
-                <PnlChart closedPositions={displayData.closedPositions} onIntervalClick={handleIntervalClick} />
+                <PnlChart closedPositions={displayData.closedPositions} onIntervalClick={handleIntervalClick} capitalEvents={capitalFlows?.events} />
               ) : loading ? (
                 <div className="flex flex-col items-center justify-center py-8">
                   <div className="relative w-6 h-6">
@@ -544,7 +624,10 @@ export default function TraderDetailModal({ address, username, walletData, isOpe
                       displayData.closedPositions
                       .filter(p => {
                         if (!filterDate || !p.resolvedAt) return !filterDate
-                        return new Date(p.resolvedAt).toISOString().slice(0, 10) === filterDate
+                        // Use local date to match chart grouping (getIntervalKey uses local time)
+                        const rd = new Date(p.resolvedAt)
+                        const localDate = `${rd.getFullYear()}-${String(rd.getMonth() + 1).padStart(2, '0')}-${String(rd.getDate()).padStart(2, '0')}`
+                        return localDate === filterDate
                       })
                       .map((position, index) => {
                         const marketUrl = (position as any).marketSlug

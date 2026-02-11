@@ -1,7 +1,7 @@
 """
 Wallet discovery processor for live trade monitoring.
 
-Discovers new wallets from live trades >= $100 and fetches their trade history.
+Discovers new wallets from live trades >= $50 and fetches their trade history.
 Uses Polymarket Data API for all metrics calculation.
 """
 
@@ -21,7 +21,7 @@ class WalletDiscoveryProcessor:
     """
     Async processor that discovers new wallets from live trades.
 
-    When a trade >= $100 comes in from an unknown wallet:
+    When a trade >= $50 comes in from an unknown wallet:
     1. Queue the wallet for processing
     2. Fetch portfolio value and positions from Polymarket API
     3. Calculate 7d and 30d metrics (PnL, ROI, win rate, etc.)
@@ -402,7 +402,6 @@ class WalletDiscoveryProcessor:
             median_profit_pct=median_profit_pct,
             avg_trades_per_day=avg_trades_per_day,
             overall_pnl=metrics.get("total_pnl", 0),
-            overall_roi=metrics.get("roi_all", 0),
             best_trade_pct=best_trade_pct,
             pf_trend=pf_trend,
         )
@@ -1223,7 +1222,6 @@ class WalletDiscoveryProcessor:
         median_profit_pct: float | None = None,
         avg_trades_per_day: float | None = None,
         overall_pnl: float = 0,
-        overall_roi: float = 0,
         best_trade_pct: float | None = None,
         pf_trend: float | None = None,
     ) -> int:
@@ -1243,8 +1241,6 @@ class WalletDiscoveryProcessor:
         """
         # Hard filters — all must pass or score = 0
         if overall_pnl < 0:
-            return 0
-        if overall_roi < 0:
             return 0
         if trade_count_all < 40:
             return 0
