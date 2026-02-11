@@ -1,21 +1,24 @@
 import type { AdapterEventUpdate } from '../../types/adapter-update.js';
 import type { OnexbetGameData } from './live-feed.js';
 import type { OnexbetGameSummary } from './discovery.js';
+import type { TargetEvent } from '../../types/target-event.js';
 import { mapMarket, sportIdToSlug } from './market-map.js';
 
 const SOURCE_ID = 'onexbet';
 
 export function normalizeGameData(
   game: OnexbetGameData,
-  summary: OnexbetGameSummary | undefined
+  summary: OnexbetGameSummary | undefined,
+  target?: TargetEvent
 ): AdapterEventUpdate | null {
   // GetGameZip wraps data in .Value
   const val = game.Value || game as any;
-  
+
   const sportId = val.S || summary?.S || 1;
-  const sport = sportIdToSlug(sportId);
-  const league = val.L || summary?.L || '';
-  const startTime = (summary?.T || 0) * 1000;
+  // Use Polymarket target metadata when available for consistent event matching
+  const sport = target?.sport || sportIdToSlug(sportId);
+  const league = target?.league || val.L || summary?.L || '';
+  const startTime = target?.startTime || (summary?.T || 0) * 1000;
   const homeTeam = val.O1 || summary?.O1 || '';
   const awayTeam = val.O2 || summary?.O2 || '';
 

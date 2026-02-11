@@ -142,31 +142,46 @@ export class Dashboard {
       timestamp: Date.now(),
       eventCount: events.length,
       adapters,
-      events: events.map(e => ({
-        id: e.id,
-        sport: e.sport,
-        league: e.league,
-        status: e.status,
-        home: e.home.name || Object.values(e.home.aliases)[0] || '?',
-        away: e.away.name || Object.values(e.away.aliases)[0] || '?',
-        homeAliases: e.home.aliases,
-        awayAliases: e.away.aliases,
-        score: e.stats.score || null,
-        elapsed: e.stats.elapsed || null,
-        period: e.stats.period || null,
-        markets: Object.fromEntries(
-          Object.entries(e.markets).map(([key, sources]) => [
-            key,
-            Object.fromEntries(
-              Object.entries(sources).map(([src, odds]) => [
-                src,
-                { value: odds.value, ts: odds.timestamp }
-              ])
-            )
-          ])
-        ),
-        lastUpdate: e._lastUpdate,
-      })),
+      events: events.map(e => {
+        // Collect unique sources across ALL markets
+        const sourceSet = new Set<string>();
+        for (const sources of Object.values(e.markets)) {
+          for (const src of Object.keys(sources)) {
+            sourceSet.add(src);
+          }
+        }
+
+        // Prefer Polymarket name → then any alias → then '?'
+        const homeName = e.home.aliases['polymarket'] || e.home.name || Object.values(e.home.aliases)[0] || '?';
+        const awayName = e.away.aliases['polymarket'] || e.away.name || Object.values(e.away.aliases)[0] || '?';
+
+        return {
+          id: e.id,
+          sport: e.sport,
+          league: e.league,
+          status: e.status,
+          home: homeName,
+          away: awayName,
+          homeAliases: e.home.aliases,
+          awayAliases: e.away.aliases,
+          sources: Array.from(sourceSet),
+          score: e.stats.score || null,
+          elapsed: e.stats.elapsed || null,
+          period: e.stats.period || null,
+          markets: Object.fromEntries(
+            Object.entries(e.markets).map(([key, sources]) => [
+              key,
+              Object.fromEntries(
+                Object.entries(sources).map(([src, odds]) => [
+                  src,
+                  { value: odds.value, ts: odds.timestamp }
+                ])
+              )
+            ])
+          ),
+          lastUpdate: e._lastUpdate,
+        };
+      }),
       alerts: getAlerts().slice(0, 50),
       tradeSignals: getTradeSignals().slice(0, 100),
       trading: this.tradingController?.getState() || null,

@@ -40,6 +40,7 @@ export const DEFAULT_CONFIG: Config = {
   },
   matcher: {
     fuzzyThreshold: 0.75,
+    crossSourceThreshold: 0.88,
     kickoffToleranceMs: 30 * 60 * 1000,
     teamMappingsPath: resolve(__dirname, '..', '..', 'data', 'team-mappings.json'),
   },

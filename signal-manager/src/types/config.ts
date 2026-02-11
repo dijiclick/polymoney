@@ -27,6 +27,7 @@ export interface DashboardConfig {
 
 export interface MatcherConfig {
   fuzzyThreshold: number;
+  crossSourceThreshold: number;  // Higher threshold for global cross-source matching (avoids false positives)
   kickoffToleranceMs: number;
   teamMappingsPath: string;
 }

@@ -1,13 +1,15 @@
-import type { IAdapter, AdapterStatus, UpdateCallback } from '../adapter.interface.js';
+import type { IFilterableAdapter, AdapterStatus, UpdateCallback } from '../adapter.interface.js';
 import type { FlashScoreAdapterConfig } from '../../types/config.js';
+import type { TargetEvent } from '../../types/target-event.js';
 import { FlashScoreWS, type FSLiveUpdate } from './ws-client.js';
 import { fetchAllFootball, type FSMatch } from './http-client.js';
+import { TargetEventFilter } from '../../matching/target-filter.js';
 import { createLogger } from '../../util/logger.js';
 import type { AdapterEventUpdate, AdapterMarketUpdate } from '../../types/adapter-update.js';
 
 const log = createLogger('fs-adapter');
 
-export class FlashScoreAdapter implements IAdapter {
+export class FlashScoreAdapter implements IFilterableAdapter {
   readonly sourceId = 'flashscore';
   private config: FlashScoreAdapterConfig;
   private callback: UpdateCallback | null = null;
@@ -16,10 +18,19 @@ export class FlashScoreAdapter implements IAdapter {
   private matchCache: Map<string, FSMatch> = new Map();
   private fullPollTimer: ReturnType<typeof setInterval> | null = null;
   private wsUpdateCount = 0;
+  private targetFilter: TargetEventFilter;
+  private allowedMatchIds: Set<string> = new Set();
+  private matchedTargets: Map<string, TargetEvent> = new Map();
 
   constructor(config: FlashScoreAdapterConfig) {
     this.config = config;
     this.ws = new FlashScoreWS();
+    this.targetFilter = new TargetEventFilter(0.75);
+  }
+
+  setTargetFilter(targets: TargetEvent[]): void {
+    this.targetFilter.setTargets(targets);
+    this.rebuildAllowedSet();
   }
 
   onUpdate(callback: UpdateCallback): void {
@@ -39,6 +50,9 @@ export class FlashScoreAdapter implements IAdapter {
     // HTTP full fetch first to populate match cache (names, leagues, etc.)
     await this.fullFetch();
 
+    // Rebuild allowed set now that match cache is populated
+    this.rebuildAllowedSet();
+
     // Set up WebSocket for real-time push updates
     this.ws.onUpdate((updates) => this.handleWsUpdates(updates));
     this.ws.onConnect((connected) => {
@@ -56,7 +70,7 @@ export class FlashScoreAdapter implements IAdapter {
     // HTTP full refresh every 120s as fallback (catch new matches, WS might miss discovery)
     this.fullPollTimer = setInterval(() => this.fullFetch(), 120000);
 
-    log.info(`FlashScore adapter started — ${this.matchCache.size} matches cached`);
+    log.info(`FlashScore adapter started — ${this.matchCache.size} matches cached, ${this.allowedMatchIds.size} match Polymarket targets`);
   }
 
   async stop(): Promise<void> {
@@ -136,8 +150,44 @@ export class FlashScoreAdapter implements IAdapter {
     }
   }
 
+  private rebuildAllowedSet(): void {
+    this.allowedMatchIds.clear();
+    this.matchedTargets.clear();
+    if (this.targetFilter.targetCount === 0) return; // empty = allow all
+
+    for (const [id, m] of this.matchCache) {
+      if (m.home && m.away) {
+        const result = this.targetFilter.check(m.home, m.away);
+        if (result.matched) {
+          this.allowedMatchIds.add(id);
+          if (result.targetEvent) {
+            this.matchedTargets.set(id, result.targetEvent);
+          }
+        }
+      }
+    }
+    log.info(`Rebuilt allowed set: ${this.allowedMatchIds.size}/${this.matchCache.size} matches pass filter`);
+  }
+
+  private isAllowed(matchId: string, home: string, away: string): boolean {
+    if (this.targetFilter.targetCount === 0) return true; // no filter = allow all
+    if (this.allowedMatchIds.has(matchId)) return true;
+
+    // New match not in cache yet — check dynamically
+    const result = this.targetFilter.check(home, away);
+    if (result.matched) {
+      this.allowedMatchIds.add(matchId);
+      if (result.targetEvent) {
+        this.matchedTargets.set(matchId, result.targetEvent);
+      }
+      return true;
+    }
+    return false;
+  }
+
   private emitMatch(m: FSMatch): void {
     if (!this.callback || !m.home || !m.away) return;
+    if (!this.isAllowed(m.id, m.home, m.away)) return;
 
     const markets: AdapterMarketUpdate[] = [];
 
@@ -145,12 +195,15 @@ export class FlashScoreAdapter implements IAdapter {
       markets.push({ key: '__score', value: m.homeScore * 100 + m.awayScore });
     }
 
+    // Use Polymarket target metadata when available for consistent event matching
+    const target = this.matchedTargets.get(m.id);
+
     const update: AdapterEventUpdate = {
       sourceId: 'flashscore',
       sourceEventId: m.id,
-      sport: 'football',
-      league: m.league || '',
-      startTime: m.startTime || 0,
+      sport: target?.sport || 'football',
+      league: target?.league || m.league || '',
+      startTime: target?.startTime || m.startTime || 0,
       homeTeam: m.home,
       awayTeam: m.away,
       status: m.status === 'live' ? 'live' : (m.status === 'finished' ? 'ended' : 'scheduled'),

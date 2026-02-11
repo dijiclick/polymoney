@@ -52,6 +52,28 @@ export class AdapterRegistry {
     return statuses;
   }
 
+  async startAllExcept(excludeSourceId: string): Promise<void> {
+    const startPromises: Promise<void>[] = [];
+    for (const [id, adapter] of this.adapters) {
+      if (id === excludeSourceId) continue;
+      log.info(`Starting adapter: ${id}`);
+      startPromises.push(
+        adapter.start().catch((err) => {
+          log.error(`Failed to start adapter "${id}"`, err);
+        })
+      );
+    }
+    await Promise.all(startPromises);
+  }
+
+  getAll(): IAdapter[] {
+    return Array.from(this.adapters.values());
+  }
+
+  get(sourceId: string): IAdapter | undefined {
+    return this.adapters.get(sourceId);
+  }
+
   get size(): number {
     return this.adapters.size;
   }

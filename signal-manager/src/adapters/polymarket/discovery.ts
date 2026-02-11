@@ -1,5 +1,7 @@
 import { createLogger } from '../../util/logger.js';
 import type { PolymarketAdapterConfig } from '../../types/config.js';
+import type { TargetEvent } from '../../types/target-event.js';
+import { normalizeTeamName } from '../../matching/normalizer.js';
 
 const log = createLogger('pm-discovery');
 
@@ -95,7 +97,33 @@ export class PolymarketDiscovery {
     }
   }
 
-  startPeriodicRefresh(onNewTokens: (tokens: string[]) => void): void {
+  getTargetEvents(): TargetEvent[] {
+    const seen = new Set<string>();
+    const targets: TargetEvent[] = [];
+
+    for (const mapping of this.tokenMap.values()) {
+      if (seen.has(mapping.eventId)) continue;
+      seen.add(mapping.eventId);
+
+      targets.push({
+        eventId: mapping.eventId,
+        homeTeam: mapping.homeTeam,
+        awayTeam: mapping.awayTeam,
+        homeNormalized: normalizeTeamName(mapping.homeTeam),
+        awayNormalized: normalizeTeamName(mapping.awayTeam),
+        sport: mapping.sport,
+        league: mapping.league,
+        startTime: mapping.startTime,
+      });
+    }
+
+    return targets;
+  }
+
+  startPeriodicRefresh(
+    onNewTokens: (tokens: string[]) => void,
+    onTargetsUpdated?: (targets: TargetEvent[]) => void,
+  ): void {
     this.refreshTimer = setInterval(async () => {
       const oldTokens = new Set(this.tokenMap.keys());
       this.fetchedTags.clear(); // Re-fetch all tags
@@ -111,6 +139,10 @@ export class PolymarketDiscovery {
       if (newTokenIds.length > 0) {
         log.info(`Discovered ${newTokenIds.length} new tokens`);
         onNewTokens(newTokenIds);
+      }
+
+      if (onTargetsUpdated) {
+        onTargetsUpdated(this.getTargetEvents());
       }
     }, this.config.discoveryIntervalMs);
   }
@@ -228,8 +260,11 @@ export class PolymarketDiscovery {
   }
 
   private parseTeamsFromTitle(title: string): { home: string; away: string } {
+    // Strip Polymarket suffixes like "- More Markets", "- Team Totals", "- Handicaps"
+    const cleanTitle = title.replace(/\s*-\s*(More Markets|Team Totals|Handicaps|Player Props|Specials)$/i, '');
+
     // Patterns: "Team A vs. Team B", "Team A vs Team B", "Team A v Team B"
-    const vsMatch = title.match(/^(.+?)\s+(?:vs\.?|v\.?)\s+(.+?)$/i);
+    const vsMatch = cleanTitle.match(/^(.+?)\s+(?:vs\.?|v\.?)\s+(.+?)$/i);
     if (vsMatch) {
       return { home: vsMatch[1].trim(), away: vsMatch[2].trim() };
     }

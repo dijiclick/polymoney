@@ -1,5 +1,6 @@
 import type { IAdapter, AdapterStatus, UpdateCallback } from '../adapter.interface.js';
 import type { PolymarketAdapterConfig } from '../../types/config.js';
+import type { TargetEvent } from '../../types/target-event.js';
 import { PolymarketDiscovery } from './discovery.js';
 import { ClobWebSocket } from './clob-ws.js';
 import { ScoresWebSocket } from './scores-ws.js';
@@ -16,6 +17,7 @@ export class PolymarketAdapter implements IAdapter {
   private scoresWs: ScoresWebSocket;
   private callback: UpdateCallback | null = null;
   private status: AdapterStatus = 'idle';
+  private onTargetsUpdatedFn: ((targets: TargetEvent[]) => void) | null = null;
 
   constructor(config: PolymarketAdapterConfig) {
     this.config = config;
@@ -85,9 +87,22 @@ export class PolymarketAdapter implements IAdapter {
     }
 
     // 5. Periodic discovery refresh for new markets
-    this.discovery.startPeriodicRefresh((newTokens) => {
-      this.clobWs.subscribe(newTokens);
-    });
+    this.discovery.startPeriodicRefresh(
+      (newTokens) => {
+        this.clobWs.subscribe(newTokens);
+      },
+      (targets) => {
+        this.onTargetsUpdatedFn?.(targets);
+      },
+    );
+  }
+
+  getTargetEvents(): TargetEvent[] {
+    return this.discovery.getTargetEvents();
+  }
+
+  onTargetsUpdated(fn: (targets: TargetEvent[]) => void): void {
+    this.onTargetsUpdatedFn = fn;
   }
 
   async stop(): Promise<void> {

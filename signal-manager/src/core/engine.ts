@@ -1,6 +1,8 @@
 import type { Config } from '../types/config.js';
 import type { UnifiedEvent } from '../types/unified-event.js';
 import type { IAdapter } from '../adapters/adapter.interface.js';
+import { isFilterableAdapter } from '../adapters/adapter.interface.js';
+import type { PolymarketAdapter } from '../adapters/polymarket/index.js';
 import { AdapterRegistry } from '../adapters/adapter-registry.js';
 import { EventMatcher } from '../matching/event-matcher.js';
 import { StateStore } from './state-store.js';
@@ -16,6 +18,7 @@ export class Engine {
   private signals: SignalDispatcher;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private config: Config;
+  private polymarketAdapter: PolymarketAdapter | null = null;
 
   constructor(config: Config) {
     this.config = config;
@@ -31,20 +34,25 @@ export class Engine {
       const eventId = this.matcher.match(update);
       const { event, changedKeys } = this.store.update(eventId, update);
 
-      // Set canonical team names from matcher resolution
-      if (!event.home.name && event.home.aliases[update.sourceId]) {
-        const parts = eventId.split(':');
-        const teams = parts[parts.length - 1].split('_vs_');
-        if (teams.length === 2) {
-          event.home.name = teams[0];
-          event.away.name = teams[1];
-        }
+      // Set canonical team names — prefer Polymarket names as source of truth
+      if (!event.home.name) {
+        event.home.name = update.homeTeam;
+        event.away.name = update.awayTeam;
+      } else if (update.sourceId === 'polymarket') {
+        // Polymarket is authoritative — override display names
+        event.home.name = update.homeTeam;
+        event.away.name = update.awayTeam;
       }
 
       if (changedKeys.length > 0) {
         this.signals.emit(event, changedKeys, update.sourceId);
       }
     });
+
+    if (adapter.sourceId === 'polymarket') {
+      this.polymarketAdapter = adapter as PolymarketAdapter;
+    }
+
     this.registry.register(adapter);
   }
 
@@ -59,8 +67,46 @@ export class Engine {
   async start(): Promise<void> {
     log.info('Starting engine...');
     this.cleanupTimer = setInterval(() => this.store.sweep(), this.config.cleanupIntervalMs);
-    await this.registry.startAll();
-    log.info('Engine started');
+
+    if (!this.polymarketAdapter) {
+      // No Polymarket adapter — start all normally (fallback)
+      log.info('No Polymarket adapter registered, starting all adapters without filtering');
+      await this.registry.startAll();
+      log.info('Engine started');
+      return;
+    }
+
+    // Phase 1: Start Polymarket first (discovers sports markets)
+    log.info('Phase 1: Starting Polymarket adapter (discovery)...');
+    await this.polymarketAdapter.start();
+
+    // Phase 2: Extract target events and distribute to filterable adapters
+    const targets = this.polymarketAdapter.getTargetEvents();
+    log.info(`Phase 2: Distributing ${targets.length} target events to secondary adapters`);
+
+    for (const adapter of this.registry.getAll()) {
+      if (adapter.sourceId === 'polymarket') continue;
+      if (isFilterableAdapter(adapter)) {
+        adapter.setTargetFilter(targets);
+      }
+    }
+
+    // Phase 3: Wire periodic refresh — when PM rediscovers, propagate new targets
+    this.polymarketAdapter.onTargetsUpdated((updatedTargets) => {
+      log.info(`Target refresh: ${updatedTargets.length} Polymarket events, propagating to adapters`);
+      for (const adapter of this.registry.getAll()) {
+        if (adapter.sourceId === 'polymarket') continue;
+        if (isFilterableAdapter(adapter)) {
+          adapter.setTargetFilter(updatedTargets);
+        }
+      }
+    });
+
+    // Phase 4: Start remaining adapters (they now have target filters set)
+    log.info('Phase 3: Starting secondary adapters...');
+    await this.registry.startAllExcept('polymarket');
+
+    log.info('Engine started (Polymarket-first funnel active)');
   }
 
   async stop(): Promise<void> {

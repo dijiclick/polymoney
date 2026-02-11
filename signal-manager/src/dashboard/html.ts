@@ -81,6 +81,14 @@ body{background:var(--bg);color:var(--text);font-family:'SF Mono',Monaco,'Cascad
 .adapter-pill .dot{width:6px;height:6px;border-radius:50%}
 .dot-on{background:var(--green)}.dot-off{background:var(--red)}.dot-warn{background:var(--yellow)}
 
+/* Source badges */
+.src-badges{display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle}
+.src-badge{font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;letter-spacing:.5px}
+.src-badge.pm{background:rgba(68,138,255,.2);color:var(--blue)}
+.src-badge.xbet{background:rgba(255,196,0,.15);color:var(--yellow)}
+.src-badge.fs{background:rgba(24,255,255,.15);color:var(--cyan)}
+.ev-elapsed{font-size:11px;color:var(--yellow);font-weight:600;margin-left:6px}
+
 .empty-state{text-align:center;color:var(--text2);padding:40px;font-size:12px}
 ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px}
 </style>
@@ -214,32 +222,45 @@ function renderEvents(){
     const isLive=ev.status==='live';
     const isOpen=openEvents.has(ev.id);
     const sc=ev.score?ev.score.home+' - '+ev.score.away:'';
+    const elapsed=ev.elapsed||'';
     const mkeys=Object.keys(ev.markets).filter(k=>!k.startsWith('__')).sort();
-    
-    let oddsHtml='<div class="odds-row"><div class="odds-header">Market</div><div class="odds-header" style="text-align:center;color:var(--blue)">Polymarket</div><div class="odds-header" style="text-align:center;color:var(--yellow)">1xBet</div><div class="odds-header" style="text-align:center;color:var(--cyan)">FlashScore</div></div>';
-    
+    const srcCount=ev.sources?ev.sources.length:1;
+    const mktCount=mkeys.length;
+
+    // Source badges
+    const SRC_MAP={polymarket:{label:'PM',cls:'pm'},onexbet:{label:'1xBet',cls:'xbet'},flashscore:{label:'FS',cls:'fs'}};
+    const badges=(ev.sources||[]).map(s=>{const m=SRC_MAP[s];return m?'<span class="src-badge '+m.cls+'">'+m.label+'</span>':'';}).join('');
+
+    let oddsHtml='<div class="odds-row"><div class="odds-header">Market</div><div class="odds-header" style="text-align:center;color:var(--blue)">PM (prob)</div><div class="odds-header" style="text-align:center;color:var(--yellow)">1xBet (dec)</div><div class="odds-header" style="text-align:center;color:var(--cyan)">FlashScore</div></div>';
+
     for(const k of mkeys.slice(0,15)){
       const srcs=ev.markets[k];
       const pm=srcs.polymarket;
       const xb=srcs.onexbet;
       const fs=srcs.flashscore;
-      
-      // Detect divergence
+
+      // Convert all to implied probability for divergence check
+      const toProb=(o,src)=>{if(!o)return null;if(src==='polymarket')return Math.min(o.value,1);return 1/o.value;};
+      const pmProb=toProb(pm,'polymarket');
+      const xbProb=toProb(xb,'onexbet');
+      const fsProb=toProb(fs,'flashscore');
+      const probs=[pmProb,xbProb,fsProb].filter(p=>p!==null);
       let hasDivergence=false;
-      const vals=Object.values(srcs);
-      if(vals.length>=2){
-        for(let i=0;i<vals.length;i++)for(let j=i+1;j<vals.length;j++){
-          const d=Math.abs(vals[i].value-vals[j].value)/((vals[i].value+vals[j].value)/2)*100;
-          if(d>10)hasDivergence=true;
-        }
+      if(probs.length>=2){
+        const maxP=Math.max(...probs);const minP=Math.min(...probs);
+        if(maxP-minP>0.10)hasDivergence=true;
       }
-      
-      const fmtOdds=(o,cls)=>o?'<div class="odds-cell '+cls+(hasDivergence?' divergent':'')+'">'+o.value.toFixed(3)+'<br><span style="font-size:9px;color:var(--text2)">'+(1/o.value*100).toFixed(1)+'%</span></div>':'<div class="odds-cell" style="color:var(--text2)">—</div>';
-      
-      oddsHtml+='<div class="odds-row"><div class="odds-label">'+fmtKey(k)+'</div>'+fmtOdds(pm,'pm')+fmtOdds(xb,'xbet')+fmtOdds(fs,'fs')+'</div>';
+
+      // PM: show as probability %
+      const fmtPm=(o)=>{if(!o)return '<div class="odds-cell" style="color:var(--text2)">\\u2014</div>';const p=Math.min(o.value,1)*100;return '<div class="odds-cell pm'+(hasDivergence?' divergent':'')+'">'+p.toFixed(1)+'%<br><span style="font-size:9px;color:var(--text2)">'+(1/Math.min(o.value,1)).toFixed(2)+'</span></div>';};
+      // 1xBet/FS: show as decimal odds + implied %
+      const fmtDec=(o,cls)=>{if(!o)return '<div class="odds-cell" style="color:var(--text2)">\\u2014</div>';return '<div class="odds-cell '+cls+(hasDivergence?' divergent':'')+'">'+o.value.toFixed(3)+'<br><span style="font-size:9px;color:var(--text2)">'+(1/o.value*100).toFixed(1)+'%</span></div>';};
+
+      oddsHtml+='<div class="odds-row"><div class="odds-label">'+fmtKey(k)+'</div>'+fmtPm(pm)+fmtDec(xb,'xbet')+fmtDec(fs,'fs')+'</div>';
     }
-    
-    return '<div class="ev'+(isLive?' live':'')+(isOpen?' open':'')+'" data-id="'+ev.id+'"><div class="ev-top" onclick="toggleEv(&quot;'+ev.id+'&quot;)"><div><span class="ev-teams">'+ev.home+' vs '+ev.away+'</span>'+(isLive?' <span class="ev-live-badge">● LIVE</span>':'')+'<br><span class="ev-league">'+ev.league+' · '+Object.keys(ev.markets).length+' markets · '+Object.keys(Object.values(ev.markets)[0]||{}).length+' sources</span></div><div>'+(sc?'<span class="ev-score">'+sc+'</span>':'')+'</div></div><div class="ev-odds">'+oddsHtml+'</div></div>';
+
+    const srcText=srcCount===1?'1 source':srcCount+' sources';
+    return '<div class="ev'+(isLive?' live':'')+(isOpen?' open':'')+'" data-id="'+ev.id+'"><div class="ev-top" onclick="toggleEv(&quot;'+ev.id+'&quot;)"><div><span class="ev-teams">'+ev.home+' vs '+ev.away+'</span>'+(isLive?' <span class="ev-live-badge">\u25CF LIVE</span>':'')+'<span class="src-badges">'+badges+'</span><br><span class="ev-league">'+ev.sport+' \u00B7 '+ev.league+' \u00B7 '+mktCount+' markets \u00B7 '+srcText+'</span></div><div>'+(sc?'<span class="ev-score">'+sc+'</span>'+(elapsed?'<span class="ev-elapsed">'+elapsed+'</span>':''):'')+'</div></div><div class="ev-odds">'+oddsHtml+'</div></div>';
   }).join('');
 }
 
@@ -262,7 +283,24 @@ function renderSignals(){
 }
 
 function toggleEv(id){openEvents.has(id)?openEvents.delete(id):openEvents.add(id);renderEvents();}
-function fmtKey(k){return k.replace(/_ft$/,'').replace(/_/g,' ').replace(/^ml /,'ML ').replace(/^dc /,'DC ').toUpperCase();}
+function fmtKey(k){
+  return k
+    .replace(/_ft$/,'')
+    .replace(/^ml_home$/,'ML Home')
+    .replace(/^ml_away$/,'ML Away')
+    .replace(/^draw$/,'Draw')
+    .replace(/^dc_1x$/,'DC 1X')
+    .replace(/^dc_12$/,'DC 12')
+    .replace(/^dc_x2$/,'DC X2')
+    .replace(/^o_(\d+)_(\d+)$/,'Over $1.$2')
+    .replace(/^u_(\d+)_(\d+)$/,'Under $1.$2')
+    .replace(/^handicap_home$/,'Handicap Home')
+    .replace(/^handicap_away$/,'Handicap Away')
+    .replace(/^btts_yes$/,'BTTS Yes')
+    .replace(/^btts_no$/,'BTTS No')
+    .replace(/_/g,' ')
+    .replace(/\b\w/g,c=>c.toUpperCase());
+}
 
 connect();
 </script>
