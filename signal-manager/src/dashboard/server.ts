@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Engine } from '../core/engine.js';
 import type { DashboardConfig } from '../types/config.js';
@@ -130,8 +132,42 @@ export class Dashboard {
       return;
     }
 
+    // GET /logs/goal-timing — download goal-timing.log
+    if (req.url === '/logs/goal-timing') {
+      return this.serveLogFile(res, 'goal-timing.log');
+    }
+    // GET /logs/reaction-times — download reaction-times.jsonl
+    if (req.url === '/logs/reaction-times') {
+      return this.serveLogFile(res, 'reaction-times.jsonl');
+    }
+    // GET /logs/opportunities — download opportunities.jsonl
+    if (req.url === '/logs/opportunities') {
+      return this.serveLogFile(res, 'opportunities.jsonl');
+    }
+
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(DASHBOARD_HTML);
+  }
+
+  private serveLogFile(res: ServerResponse, filename: string): void {
+    const filePath = join(process.cwd(), 'data', filename);
+    if (!existsSync(filePath)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end(`${filename} not found`);
+      return;
+    }
+    try {
+      const content = readFileSync(filePath, 'utf-8');
+      const ext = filename.endsWith('.jsonl') ? 'application/x-ndjson' : 'text/plain';
+      res.writeHead(200, {
+        'Content-Type': `${ext}; charset=utf-8`,
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      });
+      res.end(content);
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end(`Error reading ${filename}: ${err.message}`);
+    }
   }
 
   private broadcast(): void {

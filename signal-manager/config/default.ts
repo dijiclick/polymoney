@@ -17,7 +17,7 @@ export const DEFAULT_CONFIG: Config = {
     onexbet: {
       enabled: true,
       liveFeedBaseUrl: 'https://1xlite-81284.pro',
-      pollIntervalMs: 5_000,
+      pollIntervalMs: 500,
       sportIds: [1], // Soccer
     },
     flashscore: {
