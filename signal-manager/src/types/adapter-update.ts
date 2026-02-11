@@ -8,6 +8,7 @@ export interface AdapterMarketUpdate {
 export interface AdapterEventUpdate {
   sourceId: string;
   sourceEventId: string;
+  sourceEventSlug?: string;
   sport: string;
   league: string;
   startTime: number;

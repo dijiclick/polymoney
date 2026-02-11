@@ -46,13 +46,22 @@ export class OnexbetAdapter implements IFilterableAdapter {
     this.status = 'connecting';
 
     try {
-      // 1. Discover live events and filter to Polymarket targets
-      const allGames = await this.discovery.discoverLiveEvents();
-      const filtered = this.filterGames(allGames);
-      this.gameIds = filtered.map(g => g.I);
-      log.info(`Discovered ${allGames.length} live games, ${filtered.length} match Polymarket targets`);
+      // 1. Discover live + pre-match events, filter to Polymarket targets
+      const [liveGames, preMatchGames] = await Promise.all([
+        this.discovery.discoverLiveEvents(),
+        this.discovery.discoverPreMatchEvents(),
+      ]);
+      const liveFiltered = this.filterGames(liveGames);
+      const preMatchFiltered = this.filterGames(preMatchGames);
+      const liveIds = liveFiltered.map(g => g.I);
+      const preMatchIds = preMatchFiltered.map(g => g.I);
+      this.gameIds = [...liveIds, ...preMatchIds];
+      log.info(`Discovered ${liveGames.length} live + ${preMatchGames.length} pre-match, ${liveFiltered.length}+${preMatchFiltered.length} match PM targets`);
 
-      // 2. Set up live feed handler
+      // 2. Tell live feed which IDs are pre-match (uses LineFeed URL)
+      this.liveFeed.setPreMatchIds(preMatchIds);
+
+      // 3. Set up feed handler
       this.liveFeed.onData((gameData) => {
         if (!this.callback) return;
         const summary = this.discovery.getTrackedGame(gameData.I);
@@ -63,24 +72,31 @@ export class OnexbetAdapter implements IFilterableAdapter {
         }
       });
 
-      // 3. Start polling
+      // 4. Start polling
       if (this.gameIds.length > 0) {
         this.liveFeed.startPolling(this.gameIds);
       }
 
-      // 4. Re-discover events periodically (every 30s) to find new games
+      // 5. Re-discover events periodically (every 30s)
       this.discoveryTimer = setInterval(async () => {
         try {
-          const allGames = await this.discovery.discoverLiveEvents();
-          const filtered = this.filterGames(allGames);
-          const newGameIds = filtered.map(g => g.I);
+          const [liveGames, preMatchGames] = await Promise.all([
+            this.discovery.discoverLiveEvents(),
+            this.discovery.discoverPreMatchEvents(),
+          ]);
+          const liveFiltered = this.filterGames(liveGames);
+          const preMatchFiltered = this.filterGames(preMatchGames);
+          const newLiveIds = liveFiltered.map(g => g.I);
+          const newPreMatchIds = preMatchFiltered.map(g => g.I);
+          const newGameIds = [...newLiveIds, ...newPreMatchIds];
 
           const added = newGameIds.filter(id => !this.gameIds.includes(id));
           if (added.length > 0) {
-            log.info(`New Polymarket-matched games: ${added.length}`);
+            log.info(`New PM-matched games: +${added.length} (live=${newLiveIds.length}, pre=${newPreMatchIds.length})`);
           }
 
           this.gameIds = newGameIds;
+          this.liveFeed.setPreMatchIds(newPreMatchIds);
           this.liveFeed.updateGameList(newGameIds);
 
           if (!this.liveFeed.isPolling && newGameIds.length > 0) {

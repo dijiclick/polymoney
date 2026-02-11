@@ -31,5 +31,6 @@ export interface UnifiedEvent {
   away: TeamInfo;
   stats: EventStats;
   markets: { [marketKey: string]: MarketSources };
+  polymarketSlug?: string;
   _lastUpdate: number;
 }

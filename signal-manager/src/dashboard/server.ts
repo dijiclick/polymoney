@@ -3,7 +3,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Engine } from '../core/engine.js';
 import type { DashboardConfig } from '../types/config.js';
 import { getAlerts } from '../signals/index.js';
-import { getTradeSignals } from '../signals/trading.js';
+import { getTradeSignals, getClosedOpportunities } from '../signals/trading.js';
+import { getReactionLog } from '../signals/reaction-timer.js';
 import { TradingController } from '../trading/controller.js';
 import { createLogger } from '../util/logger.js';
 import { DASHBOARD_HTML } from './html.js';
@@ -88,6 +89,18 @@ export class Dashboard {
       return;
     }
 
+    if (req.url === '/api/reactions') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getReactionLog()));
+      return;
+    }
+
+    if (req.url === '/api/stats') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(this.buildStats()));
+      return;
+    }
+
     if (req.url === '/api/trading') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(this.tradingController?.getState() || { initialized: false }));
@@ -131,6 +144,57 @@ export class Dashboard {
     }
   }
 
+  private buildStats() {
+    const reactions = getReactionLog();
+    const closed = getClosedOpportunities();
+    const active = getTradeSignals();
+
+    // Reaction stats
+    const pmReactions: number[] = [];
+    const xbReactions: number[] = [];
+    for (const r of reactions) {
+      for (const t of r.trajectories) {
+        if (t.firstReactionMs > 0) {
+          if (t.source === 'polymarket') pmReactions.push(t.firstReactionMs);
+          else if (t.source === 'onexbet') xbReactions.push(t.firstReactionMs);
+        }
+      }
+    }
+    const avg = (arr: number[]) => arr.length === 0 ? 0 : Math.round(arr.reduce((s, v) => s + v, 0) / arr.length);
+    const median = (arr: number[]) => {
+      if (arr.length === 0) return 0;
+      const sorted = [...arr].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+    };
+
+    // Opportunity stats — by market type
+    const marketBreakdown: Record<string, { count: number; avgPeakEdge: number; avgDurationMs: number }> = {};
+    for (const opp of closed) {
+      const mkt = opp.market;
+      if (!marketBreakdown[mkt]) marketBreakdown[mkt] = { count: 0, avgPeakEdge: 0, avgDurationMs: 0 };
+      const b = marketBreakdown[mkt];
+      b.avgPeakEdge = (b.avgPeakEdge * b.count + opp.peakEdge) / (b.count + 1);
+      const duration = opp.lastUpdated - opp.firstSeen;
+      b.avgDurationMs = (b.avgDurationMs * b.count + duration) / (b.count + 1);
+      b.count++;
+    }
+
+    return {
+      uptime: process.uptime(),
+      reactions: {
+        goalsTracked: reactions.length,
+        pm: { count: pmReactions.length, avgMs: avg(pmReactions), medianMs: median(pmReactions) },
+        xbet: { count: xbReactions.length, avgMs: avg(xbReactions), medianMs: median(xbReactions) },
+      },
+      opportunities: {
+        active: active.length,
+        closed: closed.length,
+        byMarket: marketBreakdown,
+      },
+    };
+  }
+
   private buildState() {
     const events = this.engine.getAllEvents();
     const adapters: Record<string, string> = {};
@@ -165,6 +229,8 @@ export class Dashboard {
           homeAliases: e.home.aliases,
           awayAliases: e.away.aliases,
           sources: Array.from(sourceSet),
+          pmSlug: e.polymarketSlug || null,
+          startTime: e.startTime || 0,
           score: e.stats.score || null,
           elapsed: e.stats.elapsed || null,
           period: e.stats.period || null,
@@ -185,6 +251,7 @@ export class Dashboard {
       alerts: getAlerts().slice(0, 50),
       tradeSignals: getTradeSignals().slice(0, 100),
       trading: this.tradingController?.getState() || null,
+      reactionLog: getReactionLog().slice(0, 50),
     };
   }
 }

@@ -17,6 +17,7 @@ export function normalizePriceChange(
   return {
     sourceId: SOURCE_ID,
     sourceEventId: mapping.eventId,
+    sourceEventSlug: mapping.eventSlug,
     sport: mapping.sport,
     league: mapping.league,
     startTime: mapping.startTime,

@@ -31,14 +31,22 @@ export class OnexbetDiscovery {
   }
 
   async discoverLiveEvents(): Promise<OnexbetGameSummary[]> {
+    return this.discoverEvents('LiveFeed', 'live');
+  }
+
+  async discoverPreMatchEvents(): Promise<OnexbetGameSummary[]> {
+    return this.discoverEvents('LineFeed', 'pre-match');
+  }
+
+  private async discoverEvents(feedPath: 'LiveFeed' | 'LineFeed', label: string): Promise<OnexbetGameSummary[]> {
     const allGames: OnexbetGameSummary[] = [];
 
     for (const sportId of this.config.sportIds) {
       try {
-        const games = await this.fetchLiveGames(sportId);
+        const games = await this.fetchGames(sportId, feedPath);
         allGames.push(...games);
       } catch (err) {
-        log.warn(`Failed to discover sport ${sportId}`, err);
+        log.warn(`Failed to discover ${label} sport ${sportId}`, err);
       }
     }
 
@@ -49,18 +57,18 @@ export class OnexbetDiscovery {
     return allGames;
   }
 
-  private async fetchLiveGames(sportId: number): Promise<OnexbetGameSummary[]> {
-    const url = `${this.config.liveFeedBaseUrl}/service-api/LiveFeed/GetTopGamesStatZip?lng=en&antisports=66&partner=7&country=190&sports=${sportId}`;
+  private async fetchGames(sportId: number, feedPath: 'LiveFeed' | 'LineFeed'): Promise<OnexbetGameSummary[]> {
+    const url = `${this.config.liveFeedBaseUrl}/service-api/${feedPath}/GetTopGamesStatZip?lng=en&antisports=66&partner=7&country=190&sports=${sportId}`;
 
     const resp = await fetch(url, {
       headers: {
         ...HEADERS,
-        'Referer': `${this.config.liveFeedBaseUrl}/en/live/${sportIdToSlug(sportId)}/`,
+        'Referer': `${this.config.liveFeedBaseUrl}/en/${feedPath === 'LiveFeed' ? 'live' : 'line'}/${sportIdToSlug(sportId)}/`,
       },
     });
 
     if (!resp.ok) {
-      throw new Error(`GET GetTopGamesStatZip sport=${sportId} failed: ${resp.status}`);
+      throw new Error(`GET ${feedPath}/GetTopGamesStatZip sport=${sportId} failed: ${resp.status}`);
     }
 
     const data = await resp.json() as any;
@@ -77,12 +85,12 @@ export class OnexbetDiscovery {
           L: item.L || '',
           CN: item.CN,
           S: sportId,
-          T: item.T || 0,
+          T: item.S || item.T || 0, // API puts start time in S field
         });
       }
     }
 
-    log.debug(`Sport ${sportId}: found ${games.length} live games`);
+    log.debug(`${feedPath} sport ${sportId}: found ${games.length} games`);
     return games;
   }
 

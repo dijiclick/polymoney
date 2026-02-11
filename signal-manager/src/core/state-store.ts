@@ -68,6 +68,11 @@ export class StateStore {
       // Merge aliases
       event.home.aliases[update.sourceId] = update.homeTeam;
       event.away.aliases[update.sourceId] = update.awayTeam;
+
+      // Store Polymarket slug if available
+      if (update.sourceEventSlug && !event.polymarketSlug) {
+        event.polymarketSlug = update.sourceEventSlug;
+      }
     }
 
     event._lastUpdate = Date.now();
@@ -99,6 +104,7 @@ export class StateStore {
       },
       stats: update.stats ? { ...update.stats } : {},
       markets,
+      polymarketSlug: update.sourceEventSlug,
       _lastUpdate: Date.now(),
     };
   }

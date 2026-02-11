@@ -14,11 +14,13 @@ export function normalizeGameData(
   // GetGameZip wraps data in .Value
   const val = game.Value || game as any;
 
-  const sportId = val.S || summary?.S || 1;
+  // val.S from GetGameZip is timestamp, not sport ID — use summary.S for sport ID
+  const sportId = summary?.S || 1;
   // Use Polymarket target metadata when available for consistent event matching
   const sport = target?.sport || sportIdToSlug(sportId);
   const league = target?.league || val.L || summary?.L || '';
-  const startTime = target?.startTime || (summary?.T || 0) * 1000;
+  // summary.T already has start time (set from API's S field in discovery)
+  const startTime = target?.startTime || (summary?.T || val.S || 0) * 1000;
   const homeTeam = val.O1 || summary?.O1 || '';
   const awayTeam = val.O2 || summary?.O2 || '';
 

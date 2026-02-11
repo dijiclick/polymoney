@@ -40,6 +40,7 @@ export interface PolymarketSport {
 export interface TokenMapping {
   tokenId: string;
   eventId: string;
+  eventSlug: string;
   conditionId: string;
   sport: string;
   league: string;
@@ -227,6 +228,7 @@ export class PolymarketDiscovery {
       this.tokenMap.set(tokenIds[0], {
         tokenId: tokenIds[0],
         eventId: event.id,
+        eventSlug: event.slug,
         conditionId: market.conditionId,
         sport: sportSlug,
         league: sportSlug, // Use sport slug as league for now
@@ -244,6 +246,7 @@ export class PolymarketDiscovery {
         this.tokenMap.set(tokenIds[1], {
           tokenId: tokenIds[1],
           eventId: event.id,
+          eventSlug: event.slug,
           conditionId: market.conditionId,
           sport: sportSlug,
           league: sportSlug,

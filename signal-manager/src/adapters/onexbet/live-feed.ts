@@ -53,6 +53,7 @@ export class OnexbetLiveFeed {
   private consecutiveFailures = 0;
   private maxConsecutiveFailures = 10;
   private prevOddsHash: Map<number, string> = new Map();
+  private preMatchIds: Set<number> = new Set();
 
   constructor(config: OnexbetAdapterConfig) {
     this.config = config;
@@ -91,6 +92,10 @@ export class OnexbetLiveFeed {
     return this.pollTimer !== null;
   }
 
+  setPreMatchIds(ids: number[]): void {
+    this.preMatchIds = new Set(ids);
+  }
+
   private async pollGames(gameIds: number[]): Promise<void> {
     for (const gameId of gameIds) {
       try {
@@ -117,18 +122,21 @@ export class OnexbetLiveFeed {
   }
 
   private async fetchGameDetail(gameId: number): Promise<OnexbetGameData | null> {
-    const url = `${this.config.liveFeedBaseUrl}/service-api/LiveFeed/GetGameZip?id=${gameId}&lng=en&isSubGames=true&GroupEvents=true&countevents=250&grMode=4&partner=7&country=190&marketType=1`;
+    // Use LineFeed for pre-match games, LiveFeed for live games
+    const feedPath = this.preMatchIds.has(gameId) ? 'LineFeed' : 'LiveFeed';
+    const refSection = feedPath === 'LineFeed' ? 'line' : 'live';
+    const url = `${this.config.liveFeedBaseUrl}/service-api/${feedPath}/GetGameZip?id=${gameId}&lng=en&isSubGames=true&GroupEvents=true&countevents=250&grMode=4&partner=7&country=190&marketType=1`;
 
     const resp = await fetch(url, {
       headers: {
         ...HEADERS,
-        'Referer': `${this.config.liveFeedBaseUrl}/en/live/`,
+        'Referer': `${this.config.liveFeedBaseUrl}/en/${refSection}/`,
       },
     });
 
     if (!resp.ok) {
       if (resp.status === 404) return null;
-      throw new Error(`GetGameZip ${gameId} failed: ${resp.status}`);
+      throw new Error(`${feedPath}/GetGameZip ${gameId} failed: ${resp.status}`);
     }
 
     const data = await resp.json() as any;

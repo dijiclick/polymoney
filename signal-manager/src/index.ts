@@ -7,6 +7,7 @@ import { DEFAULT_CONFIG } from '../config/default.js';
 import { setLogLevel, createLogger } from './util/logger.js';
 import { oddsDivergenceSignal, scoreChangeSignal, staleOddsSignal } from './signals/index.js';
 import { tradingSignal, scoreTradeSignal } from './signals/trading.js';
+import { reactionTimerSignal } from './signals/reaction-timer.js';
 import { TradingBot } from './trading/bot.js';
 import { TradingController } from './trading/controller.js';
 import type { SignalFunction } from './core/signal-dispatcher.js';
@@ -49,6 +50,7 @@ async function main() {
   engine.registerSignal(staleOddsSignal);
   engine.registerSignal(tradingSignal);
   engine.registerSignal(scoreTradeSignal);
+  engine.registerSignal(reactionTimerSignal);
 
   // Register adapters
   if (config.adapters.polymarket.enabled) {

@@ -1,62 +1,144 @@
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { UnifiedEvent } from '../types/unified-event.js';
 import type { SignalFunction } from '../core/signal-dispatcher.js';
 import { createLogger } from '../util/logger.js';
 
 const log = createLogger('trading');
 
-export type TradeAction = 'BUY_YES' | 'BUY_NO' | 'SELL_YES' | 'SELL_NO' | 'HOLD';
+export type TradeAction = 'BUY_YES' | 'BUY_NO' | 'HOLD';
 
-export interface TradeSignal {
+export interface Opportunity {
   id: string;
-  timestamp: number;
   eventId: string;
   homeTeam: string;
   awayTeam: string;
   league: string;
-  market: string;           // e.g. "ml_home_ft"
+  market: string;
   action: TradeAction;
-  confidence: number;       // 0-100
-  reason: string;
-  polyPrice: number;        // Current Polymarket price (0-1)
-  fairPrice: number;        // Estimated fair price from fast sources
-  edge: number;             // % edge
-  expectedProfit: number;   // Expected profit per $1
-  urgency: 'low' | 'medium' | 'high' | 'critical';
-  source: string;           // Which fast source triggered this
+  edge: number;            // absolute pp edge
+  edgeDirection: number;   // positive = PM underpriced, negative = PM overpriced
+  polyProb: number;        // PM implied probability (0-100)
+  xbetProb: number;        // 1xBet implied probability (0-100)
+  polyOdds: number;        // PM decimal odds
+  xbetOdds: number;        // 1xBet decimal odds
+  polyAgeMs: number;       // how old PM data is
+  xbetAgeMs: number;       // how old 1xBet data is
+  quality: 'good' | 'medium' | 'suspect';
+  qualityNote: string;
+  firstSeen: number;       // when first detected
+  lastUpdated: number;     // when last refreshed
+  belowThresholdSince: number | null;
+  suspectSince: number | null;    // when quality first became 'suspect'
+  peakEdge: number;        // highest edge seen during lifetime
   score?: { home: number; away: number };
+  eventStatus: string;
+  edgeHistory: number[];   // last N edge values for trend
 }
 
-const MAX_SIGNALS = 500;
-const signals: TradeSignal[] = [];
-let signalCounter = 0;
-
-export function getTradeSignals(): TradeSignal[] {
-  return signals;
+interface ClosedOpportunityLog {
+  id: string;
+  eventId: string;
+  homeTeam: string;
+  awayTeam: string;
+  league: string;
+  market: string;
+  action: TradeAction;
+  peakEdge: number;
+  finalEdge: number;
+  quality: string;
+  firstSeen: number;
+  closedAt: number;
+  durationMs: number;
+  eventStatus: string;
+  polyProb: number;
+  xbetProb: number;
 }
 
-// Convert decimal odds to implied probability
-function oddsToProb(decimal: number): number {
+// Active opportunities — one per event+market, updates in-place
+const opportunities: Map<string, Opportunity> = new Map();
+// Historical log of closed opportunities (in-memory)
+const closedOpportunities: Opportunity[] = [];
+
+let idCounter = 0;
+
+const MAX_EDGE_HISTORY = 20;
+const MIN_EDGE_PP = 3;           // minimum 3pp edge to show
+const MAX_SANE_EDGE_PP = 35;     // >35pp is likely data error
+const STALE_LIVE_MS = 30_000;    // 30s for live events
+const STALE_PREMATCH_MS = 600_000; // 10min for pre-match
+const EXPIRE_NO_EDGE_MS = 30_000;  // remove opportunity 30s after edge drops below threshold
+
+const LOG_DIR = join(process.cwd(), 'data');
+const OPP_LOG_FILE = join(LOG_DIR, 'opportunities.jsonl');
+
+function ensureLogDir(): void {
+  try { mkdirSync(LOG_DIR, { recursive: true }); } catch { /* exists */ }
+}
+
+function writeClosedOpp(opp: Opportunity): void {
+  ensureLogDir();
+  const now = Date.now();
+  const entry: ClosedOpportunityLog = {
+    id: opp.id,
+    eventId: opp.eventId,
+    homeTeam: opp.homeTeam,
+    awayTeam: opp.awayTeam,
+    league: opp.league,
+    market: opp.market,
+    action: opp.action,
+    peakEdge: opp.peakEdge,
+    finalEdge: opp.edge,
+    quality: opp.quality,
+    firstSeen: opp.firstSeen,
+    closedAt: now,
+    durationMs: now - opp.firstSeen,
+    eventStatus: opp.eventStatus,
+    polyProb: opp.polyProb,
+    xbetProb: opp.xbetProb,
+  };
+  appendFileSync(OPP_LOG_FILE, JSON.stringify(entry) + '\n', 'utf-8');
+}
+
+export function getTradeSignals(): Opportunity[] {
+  // Return only active, non-suspect opportunities
+  return Array.from(opportunities.values())
+    .filter(o => o.belowThresholdSince === null && o.quality !== 'suspect')
+    .sort((a, b) => {
+      const qOrder = { good: 0, medium: 1, suspect: 2 };
+      const qDiff = qOrder[a.quality] - qOrder[b.quality];
+      if (qDiff !== 0) return qDiff;
+      return b.edge - a.edge;
+    });
+}
+
+export function getClosedOpportunities(): Opportunity[] {
+  return closedOpportunities;
+}
+
+function toProb(decimal: number): number {
   if (decimal <= 0) return 0;
-  return 1 / decimal;
+  return (1 / decimal) * 100;
 }
 
-// Convert Polymarket ask price to probability
-function askToProb(ask: number): number {
-  return ask; // Ask price IS the probability on Polymarket
+function closeOpportunity(key: string, opp: Opportunity): void {
+  opportunities.delete(key);
+  closedOpportunities.unshift(opp);
+  if (closedOpportunities.length > 200) closedOpportunities.length = 200;
+  // Only persist opportunities that had a real edge at some point
+  if (opp.peakEdge >= MIN_EDGE_PP) {
+    writeClosedOpp(opp);
+  }
 }
 
-function addSignal(signal: TradeSignal): void {
-  signals.unshift(signal);
-  if (signals.length > MAX_SIGNALS) signals.length = MAX_SIGNALS;
-}
-
-// Main trading signal: compare Polymarket implied prob vs 1xBet/FlashScore
+// Main trading signal — processes ALL market keys with both sources
 export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
-  // Only trigger on market changes, not score-only updates
+  // Accept any market key (not just ML) — skip internal keys
   const marketKeys = changedKeys.filter(k => !k.startsWith('__'));
   if (marketKeys.length === 0) return;
 
-  // Check each market that has multi-source data
+  const now = Date.now();
+
   for (const key of marketKeys) {
     const sources = event.markets[key];
     if (!sources) continue;
@@ -64,86 +146,141 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
     const polyData = sources['polymarket'];
     const xbetData = sources['onexbet'];
 
-    // Need at least Polymarket + one fast source
-    if (!polyData) continue;
-    if (!xbetData) continue;
+    // Need both sources
+    if (!polyData || !xbetData) continue;
 
-    const polyDecimal = polyData.value;     // Decimal odds from Polymarket
-    const polyProb = oddsToProb(polyDecimal); // Implied probability
-    const xbetProb = oddsToProb(xbetData.value);
+    const polyProb = toProb(polyData.value);
+    const xbetProb = toProb(xbetData.value);
+    const edgeDirection = xbetProb - polyProb; // positive = PM underpriced
+    const absEdge = Math.abs(edgeDirection);
 
-    // Calculate edge: how much Polymarket misprices vs 1xBet
-    // Positive edge = Polymarket thinks outcome is LESS likely than 1xBet
-    // → BUY YES on Polymarket (it's underpriced)
-    // Negative edge = Polymarket thinks outcome is MORE likely
-    // → BUY NO on Polymarket (YES is overpriced)
-
-    const edge = (xbetProb - polyProb) * 100; // In percentage points
-    const absEdge = Math.abs(edge);
-
-    // Minimum 5% edge to signal
-    if (absEdge < 5) continue;
-
-    // Check for stale data (>60s old = ignore)
-    const now = Date.now();
     const polyAge = now - polyData.timestamp;
     const xbetAge = now - xbetData.timestamp;
-    if (polyAge > 60000 || xbetAge > 60000) continue;
 
-    const polyPrice = polyProb; // Price to buy YES
-    const fairPrice = xbetProb;
+    const oppKey = `${event.id}:${key}`;
+    const existing = opportunities.get(oppKey);
 
-    let action: TradeAction;
-    let reason: string;
-    let expectedProfit: number;
+    // === Quality assessment ===
+    const isLive = event.status === 'live';
+    const staleThreshold = isLive ? STALE_LIVE_MS : STALE_PREMATCH_MS;
 
-    if (edge > 0) {
-      // Polymarket underprices this outcome → BUY YES
-      action = 'BUY_YES';
-      reason = `1xBet implies ${(xbetProb * 100).toFixed(1)}% but Poly prices at ${(polyProb * 100).toFixed(1)}% — underpriced by ${absEdge.toFixed(1)}pp`;
-      expectedProfit = (fairPrice - polyPrice) / polyPrice;
-    } else {
-      // Polymarket overprices this outcome → BUY NO (sell YES)
-      action = 'BUY_NO';
-      reason = `1xBet implies ${(xbetProb * 100).toFixed(1)}% but Poly prices at ${(polyProb * 100).toFixed(1)}% — overpriced by ${absEdge.toFixed(1)}pp`;
-      expectedProfit = (polyPrice - fairPrice) / (1 - polyPrice);
+    let quality: 'good' | 'medium' | 'suspect' = 'good';
+    let qualityNote = '';
+
+    if (absEdge > MAX_SANE_EDGE_PP) {
+      quality = 'suspect';
+      qualityNote = `Edge ${absEdge.toFixed(0)}pp too high — likely data mismatch`;
+    } else if (polyAge > staleThreshold) {
+      quality = 'suspect';
+      qualityNote = `PM data stale (${Math.round(polyAge / 1000)}s old)`;
+    } else if (xbetAge > staleThreshold) {
+      quality = isLive ? 'suspect' : 'medium';
+      qualityNote = `1xBet data ${Math.round(xbetAge / 1000)}s old`;
+    } else if (absEdge > 20) {
+      quality = 'medium';
+      qualityNote = 'Very large edge — verify manually';
     }
 
-    const confidence = Math.min(95, Math.round(absEdge * 3));
-    const urgency: TradeSignal['urgency'] =
-      absEdge > 20 ? 'critical' :
-      absEdge > 15 ? 'high' :
-      absEdge > 10 ? 'medium' : 'low';
+    if (quality === 'good' && absEdge < 8 && absEdge >= MIN_EDGE_PP) {
+      qualityNote = 'Sources close, edge within normal range';
+    }
 
-    const signal: TradeSignal = {
-      id: `sig_${++signalCounter}`,
-      timestamp: now,
-      eventId: event.id,
-      homeTeam: event.home.name || Object.values(event.home.aliases)[0] || '?',
-      awayTeam: event.away.name || Object.values(event.away.aliases)[0] || '?',
-      league: event.league,
-      market: key,
-      action,
-      confidence,
-      reason,
-      polyPrice,
-      fairPrice,
-      edge: absEdge,
-      expectedProfit: Math.round(expectedProfit * 10000) / 100, // as %
-      urgency,
-      source,
-      score: event.stats.score,
-    };
+    // === Edge below threshold → update or skip ===
+    if (absEdge < MIN_EDGE_PP) {
+      if (existing) {
+        existing.edge = absEdge;
+        existing.edgeDirection = edgeDirection;
+        existing.action = edgeDirection > 0 ? 'BUY_YES' : 'BUY_NO';
+        existing.polyProb = polyProb;
+        existing.xbetProb = xbetProb;
+        existing.polyOdds = polyData.value;
+        existing.xbetOdds = xbetData.value;
+        existing.polyAgeMs = polyAge;
+        existing.xbetAgeMs = xbetAge;
+        existing.quality = quality;
+        existing.qualityNote = qualityNote || 'Edge below threshold';
+        existing.lastUpdated = now;
+        existing.score = event.stats.score;
+        existing.eventStatus = event.status;
+        if (existing.belowThresholdSince === null) {
+          existing.belowThresholdSince = now;
+        }
+        existing.suspectSince = quality === 'suspect' ? (existing.suspectSince ?? now) : null;
+        existing.edgeHistory.push(absEdge);
+        if (existing.edgeHistory.length > MAX_EDGE_HISTORY) existing.edgeHistory.shift();
+      }
+      continue;
+    }
 
-    addSignal(signal);
+    // === Create or update opportunity ===
+    const action: TradeAction = edgeDirection > 0 ? 'BUY_YES' : 'BUY_NO';
+    const homeName = event.home.name || Object.values(event.home.aliases)[0] || '?';
+    const awayName = event.away.name || Object.values(event.away.aliases)[0] || '?';
 
-    if (urgency === 'critical' || urgency === 'high') {
-      log.info(`🚨 ${action} | ${signal.homeTeam} vs ${signal.awayTeam} | ${formatMarketKey(key)} | Edge: ${absEdge.toFixed(1)}% | ${reason}`);
+    if (existing) {
+      existing.action = action;
+      existing.edge = absEdge;
+      existing.edgeDirection = edgeDirection;
+      existing.polyProb = polyProb;
+      existing.xbetProb = xbetProb;
+      existing.polyOdds = polyData.value;
+      existing.xbetOdds = xbetData.value;
+      existing.polyAgeMs = polyAge;
+      existing.xbetAgeMs = xbetAge;
+      existing.quality = quality;
+      existing.qualityNote = qualityNote;
+      existing.lastUpdated = now;
+      existing.belowThresholdSince = null;
+      existing.suspectSince = quality === 'suspect' ? (existing.suspectSince ?? now) : null;
+      if (absEdge > existing.peakEdge) existing.peakEdge = absEdge;
+      existing.score = event.stats.score;
+      existing.eventStatus = event.status;
+      existing.edgeHistory.push(absEdge);
+      if (existing.edgeHistory.length > MAX_EDGE_HISTORY) existing.edgeHistory.shift();
+    } else {
+      const opp: Opportunity = {
+        id: `opp_${++idCounter}`,
+        eventId: event.id,
+        homeTeam: homeName,
+        awayTeam: awayName,
+        league: event.league,
+        market: key,
+        action,
+        edge: absEdge,
+        edgeDirection,
+        polyProb,
+        xbetProb,
+        polyOdds: polyData.value,
+        xbetOdds: xbetData.value,
+        polyAgeMs: polyAge,
+        xbetAgeMs: xbetAge,
+        quality,
+        qualityNote,
+        firstSeen: now,
+        lastUpdated: now,
+        belowThresholdSince: null,
+        suspectSince: quality === 'suspect' ? now : null,
+        peakEdge: absEdge,
+        score: event.stats.score,
+        eventStatus: event.status,
+        edgeHistory: [absEdge],
+      };
+      opportunities.set(oppKey, opp);
+
+      if (quality !== 'suspect') {
+        log.info(
+          `📊 NEW ${action} | ${homeName} vs ${awayName} | ${key.replace(/_ft$/, '')} | ` +
+          `PM:${polyProb.toFixed(1)}% vs 1xBet:${xbetProb.toFixed(1)}% | Edge:${absEdge.toFixed(1)}pp [${quality}]`
+        );
+      }
     }
   }
 };
 
-// Score-based trading: when a goal happens on 1xBet but Polymarket hasn't reacted
+// Score-based trading: when a goal happens but Polymarket hasn't reacted
+// Only for ML markets where we can infer direction from the score
+const ML_KEYS = ['ml_home_ft', 'ml_away_ft', 'draw_ft'];
+
 export const scoreTradeSignal: SignalFunction = (event, changedKeys, source) => {
   if (source === 'polymarket') return;
   if (!changedKeys.includes('__score')) return;
@@ -152,73 +289,86 @@ export const scoreTradeSignal: SignalFunction = (event, changedKeys, source) => 
   const { score } = event.stats;
   const now = Date.now();
 
-  // Check if Polymarket odds are stale (haven't updated recently)
-  // Look at moneyline markets
-  for (const key of ['ml_home_ft', 'ml_away_ft', 'draw_ft']) {
+  for (const key of ML_KEYS) {
     const sources = event.markets[key];
     if (!sources?.polymarket) continue;
 
     const polyAge = now - sources.polymarket.timestamp;
 
-    // If Polymarket hasn't updated in >5 seconds after a score change, signal
-    if (polyAge > 5000) {
-      const polyProb = oddsToProb(sources.polymarket.value);
+    if (polyAge > 10000) {
+      const polyProb = toProb(sources.polymarket.value);
+      const homeName = event.home.name || Object.values(event.home.aliases)[0] || '?';
+      const awayName = event.away.name || Object.values(event.away.aliases)[0] || '?';
 
-      // Determine which side the goal favors
       let action: TradeAction;
-      let reason: string;
-
       if (key === 'ml_home_ft') {
-        // Home scored → home win more likely → BUY YES if Polymarket still low
-        if (score.home > score.away) {
-          action = 'BUY_YES';
-          reason = `⚽ GOAL! ${score.home}-${score.away} — Home leading but Poly hasn't updated (${(polyAge/1000).toFixed(0)}s stale)`;
-        } else {
-          action = 'BUY_NO';
-          reason = `⚽ GOAL! ${score.home}-${score.away} — Home trailing but Poly hasn't updated (${(polyAge/1000).toFixed(0)}s stale)`;
-        }
+        action = score.home > score.away ? 'BUY_YES' : 'BUY_NO';
       } else if (key === 'ml_away_ft') {
-        if (score.away > score.home) {
-          action = 'BUY_YES';
-          reason = `⚽ GOAL! ${score.home}-${score.away} — Away leading but Poly hasn't updated (${(polyAge/1000).toFixed(0)}s stale)`;
-        } else {
-          action = 'BUY_NO';
-          reason = `⚽ GOAL! ${score.home}-${score.away} — Away trailing but Poly hasn't updated (${(polyAge/1000).toFixed(0)}s stale)`;
-        }
+        action = score.away > score.home ? 'BUY_YES' : 'BUY_NO';
       } else {
-        // Draw market — if scores are equal, draw more likely
-        if (score.home === score.away) {
-          action = 'BUY_YES';
-          reason = `⚽ GOAL! ${score.home}-${score.away} — Scores level, draw more likely, Poly stale (${(polyAge/1000).toFixed(0)}s)`;
-        } else {
-          action = 'BUY_NO';
-          reason = `⚽ GOAL! ${score.home}-${score.away} — Not level, draw less likely, Poly stale (${(polyAge/1000).toFixed(0)}s)`;
-        }
+        action = score.home === score.away ? 'BUY_YES' : 'BUY_NO';
       }
 
-      addSignal({
-        id: `sig_${++signalCounter}`,
-        timestamp: now,
-        eventId: event.id,
-        homeTeam: event.home.name || Object.values(event.home.aliases)[0] || '?',
-        awayTeam: event.away.name || Object.values(event.away.aliases)[0] || '?',
-        league: event.league,
-        market: key,
-        action,
-        confidence: 80,
-        reason,
-        polyPrice: polyProb,
-        fairPrice: 0, // Unknown — the speed advantage IS the edge
-        edge: 0,
-        expectedProfit: 0,
-        urgency: 'critical',
-        source,
-        score,
-      });
+      const oppKey = `${event.id}:${key}`;
+      if (!opportunities.has(oppKey)) {
+        opportunities.set(oppKey, {
+          id: `opp_${++idCounter}`,
+          eventId: event.id,
+          homeTeam: homeName,
+          awayTeam: awayName,
+          league: event.league,
+          market: key,
+          action,
+          edge: 0,
+          edgeDirection: 0,
+          polyProb,
+          xbetProb: 0,
+          polyOdds: sources.polymarket.value,
+          xbetOdds: 0,
+          polyAgeMs: polyAge,
+          xbetAgeMs: 0,
+          quality: 'medium',
+          qualityNote: `Goal ${score.home}-${score.away} but PM stale (${Math.round(polyAge / 1000)}s)`,
+          firstSeen: now,
+          lastUpdated: now,
+          belowThresholdSince: now,
+          suspectSince: null,
+          peakEdge: 0,
+          score,
+          eventStatus: event.status,
+          edgeHistory: [0],
+        });
+
+        log.info(
+          `⚽ GOAL SIGNAL | ${homeName} vs ${awayName} | ${score.home}-${score.away} | ` +
+          `${key.replace(/_ft$/, '')} | PM stale by ${Math.round(polyAge / 1000)}s`
+        );
+      }
     }
   }
 };
 
-function formatMarketKey(key: string): string {
-  return key.replace(/_ft$/, '').replace(/_/g, ' ').toUpperCase();
-}
+// Periodic cleanup: remove stale opportunities
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, opp] of opportunities) {
+    const age = now - opp.lastUpdated;
+
+    // Remove opportunities that haven't been updated in 60s
+    if (age > 60_000) {
+      closeOpportunity(key, opp);
+      continue;
+    }
+
+    // Remove opportunities where edge has been below threshold for 30s
+    if (opp.belowThresholdSince !== null && (now - opp.belowThresholdSince) > EXPIRE_NO_EDGE_MS) {
+      closeOpportunity(key, opp);
+      continue;
+    }
+
+    // Remove suspect opportunities after 60s (data mismatches that won't resolve)
+    if (opp.suspectSince !== null && (now - opp.suspectSince) > 60_000) {
+      closeOpportunity(key, opp);
+    }
+  }
+}, 10_000);

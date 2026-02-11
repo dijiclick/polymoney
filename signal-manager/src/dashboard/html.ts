@@ -24,26 +24,32 @@ body{background:var(--bg);color:var(--text);font-family:'SF Mono',Monaco,'Cascad
 .left{display:flex;flex-direction:column;overflow:hidden}
 .right-panel{background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
 
-/* Signal Feed */
+/* Opportunity Panel */
 .signal-header{padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;color:var(--yellow);text-transform:uppercase;letter-spacing:1px;display:flex;justify-content:space-between;align-items:center}
 .signal-feed{flex:1;overflow-y:auto;padding:6px}
-.signal-card{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:border-color .2s}
-.signal-card:hover{border-color:var(--blue)}
-.signal-card.critical{border-left:3px solid var(--red);background:rgba(255,23,68,.06)}
-.signal-card.high{border-left:3px solid var(--orange);background:rgba(255,145,0,.04)}
-.signal-card.medium{border-left:3px solid var(--yellow)}
-.signal-card.low{border-left:3px solid var(--blue)}
-.sig-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
-.sig-action{font-weight:700;font-size:13px;padding:2px 8px;border-radius:3px}
-.sig-action.buy{background:rgba(0,230,118,.15);color:var(--green)}
-.sig-action.sell{background:rgba(255,23,68,.15);color:var(--red)}
-.sig-match{font-size:12px;font-weight:600}
-.sig-market{color:var(--cyan);font-size:11px}
-.sig-reason{color:var(--text2);font-size:11px;margin-top:3px;line-height:1.4}
-.sig-meta{display:flex;gap:12px;margin-top:5px;font-size:10px;color:var(--text2)}
-.sig-meta .edge{color:var(--green);font-weight:700}
-.sig-meta .conf{color:var(--yellow)}
-.sig-time{font-size:10px;color:var(--text2)}
+.opp-card{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;transition:border-color .2s}
+.opp-card.good{border-left:3px solid var(--green)}
+.opp-card.medium{border-left:3px solid var(--yellow)}
+.opp-card.suspect{border-left:3px solid var(--red);opacity:.6}
+.opp-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.opp-action{font-weight:700;font-size:12px;padding:2px 8px;border-radius:3px}
+.opp-action.yes{background:rgba(0,230,118,.15);color:var(--green)}
+.opp-action.no{background:rgba(255,23,68,.15);color:var(--red)}
+.opp-edge{font-size:16px;font-weight:800;color:var(--green)}
+.opp-match{font-size:12px;font-weight:600}
+.opp-market{color:var(--cyan);font-size:11px}
+.opp-bar{display:flex;align-items:center;gap:6px;margin:6px 0 4px;font-size:11px}
+.opp-bar-track{flex:1;height:6px;background:var(--bg);border-radius:3px;position:relative;overflow:hidden}
+.opp-bar-pm{position:absolute;top:0;height:100%;background:var(--blue);border-radius:3px;transition:width .3s}
+.opp-bar-xb{position:absolute;top:0;height:100%;border-right:2px solid var(--yellow)}
+.opp-probs{display:flex;justify-content:space-between;font-size:10px;color:var(--text2)}
+.opp-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;font-size:10px;color:var(--text2)}
+.opp-meta .val{font-weight:600}
+.opp-quality{font-size:9px;padding:1px 5px;border-radius:3px;font-weight:600}
+.opp-quality.good{background:rgba(0,230,118,.15);color:var(--green)}
+.opp-quality.medium{background:rgba(255,196,0,.15);color:var(--yellow)}
+.opp-quality.suspect{background:rgba(255,23,68,.15);color:var(--red)}
+.opp-trend{font-size:11px;font-weight:600;margin-left:4px}
 
 /* Events Table */
 .events-header{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
@@ -88,6 +94,9 @@ body{background:var(--bg);color:var(--text);font-family:'SF Mono',Monaco,'Cascad
 .src-badge.xbet{background:rgba(255,196,0,.15);color:var(--yellow)}
 .src-badge.fs{background:rgba(24,255,255,.15);color:var(--cyan)}
 .ev-elapsed{font-size:11px;color:var(--yellow);font-weight:600;margin-left:6px}
+.pm-link{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-left:6px;border-radius:4px;background:rgba(68,138,255,.15);color:var(--blue);text-decoration:none;font-size:13px;font-weight:700;vertical-align:middle;transition:background .2s}
+.pm-link:hover{background:rgba(68,138,255,.35)}
+.ev-countdown{font-size:12px;color:var(--text2);font-weight:500;padding:2px 8px;background:var(--bg3);border-radius:4px;white-space:nowrap}
 
 .empty-state{text-align:center;color:var(--text2);padding:40px;font-size:12px}
 ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px}
@@ -99,7 +108,7 @@ body{background:var(--bg);color:var(--text);font-family:'SF Mono',Monaco,'Cascad
   <div class="right">
     <div class="pulse" id="ws-dot"></div>
     <span class="stat">Events: <b id="s-events">0</b></span>
-    <span class="stat">Signals: <b id="s-signals">0</b></span>
+    <span class="stat">Opps: <b id="s-signals">0</b></span>
     <span class="stat">Live: <b id="s-live" style="color:var(--red)">0</b></span>
     <span class="stat" id="s-latency"></span>
   </div>
@@ -122,7 +131,7 @@ body{background:var(--bg);color:var(--text);font-family:'SF Mono',Monaco,'Cascad
   
   <div class="right-panel">
     <div class="signal-header">
-      <span>🚨 Trade Signals</span>
+      <span>📊 Live Opportunities</span>
       <span id="sig-count" style="color:var(--text2)">0</span>
     </div>
     <div class="signal-feed" id="signals"><div class="empty-state">Waiting for signals...</div></div>
@@ -156,10 +165,10 @@ function connect(){
     const prev=state;
     state=JSON.parse(e.data);
     render();
-    // Alert sound on new critical/high signals
+    // Alert sound on new good opportunities
     if(prev && state.tradeSignals.length>prev.tradeSignals.length){
       const newest=state.tradeSignals[0];
-      if(newest&&(newest.urgency==='critical'||newest.urgency==='high')){
+      if(newest&&newest.quality==='good'&&newest.edge>10){
         try{document.getElementById('alert-sound').play().catch(()=>{})}catch(e){}
       }
     }
@@ -198,9 +207,14 @@ function renderEvents(){
     const bMulti=Object.values(b.markets).some(m=>Object.keys(m).length>1);
     if(aMulti&&!bMulti)return -1;
     if(bMulti&&!aMulti)return 1;
-    return b.lastUpdate-a.lastUpdate;
+    const aSrc=(a.sources||[]).length;const bSrc=(b.sources||[]).length;
+    if(aSrc!==bSrc)return bSrc-aSrc;
+    return a.id<b.id?-1:a.id>b.id?1:0;
   });
   
+  // Hide events with no Polymarket markets
+  evs=evs.filter(e=>Object.keys(e.markets).some(k=>!k.startsWith('__')&&e.markets[k].polymarket));
+
   if(filter==='live')evs=evs.filter(e=>e.status==='live');
   if(filter==='multi')evs=evs.filter(e=>Object.values(e.markets).some(m=>Object.keys(m).length>1));
   if(filter==='opportunity')evs=evs.filter(e=>{
@@ -223,62 +237,108 @@ function renderEvents(){
     const isOpen=openEvents.has(ev.id);
     const sc=ev.score?ev.score.home+' - '+ev.score.away:'';
     const elapsed=ev.elapsed||'';
+    // Countdown for scheduled (non-live) events
+    let countdown='';
+    if(ev.status!=='live'&&ev.startTime>0){
+      const diffMs=ev.startTime-Date.now();
+      if(diffMs>0){
+        const d=Math.floor(diffMs/86400000);
+        const h=Math.floor((diffMs%86400000)/3600000);
+        const m=Math.floor((diffMs%3600000)/60000);
+        countdown=d>0?d+'d '+h+'h':h>0?h+'h '+m+'m':m+'m';
+      } else {
+        countdown='starting...';
+      }
+    }
     const mkeys=Object.keys(ev.markets).filter(k=>!k.startsWith('__')).sort();
     const srcCount=ev.sources?ev.sources.length:1;
-    const mktCount=mkeys.length;
+    const pmKeys_count=mkeys.filter(k=>ev.markets[k].polymarket).length;
+    const mktCount=pmKeys_count;
 
     // Source badges
     const SRC_MAP={polymarket:{label:'PM',cls:'pm'},onexbet:{label:'1xBet',cls:'xbet'},flashscore:{label:'FS',cls:'fs'}};
     const badges=(ev.sources||[]).map(s=>{const m=SRC_MAP[s];return m?'<span class="src-badge '+m.cls+'">'+m.label+'</span>':'';}).join('');
 
-    let oddsHtml='<div class="odds-row"><div class="odds-header">Market</div><div class="odds-header" style="text-align:center;color:var(--blue)">PM (prob)</div><div class="odds-header" style="text-align:center;color:var(--yellow)">1xBet (dec)</div><div class="odds-header" style="text-align:center;color:var(--cyan)">FlashScore</div></div>';
+    // Get FlashScore live score for this event
+    const fsScore=ev.markets['__score']&&ev.markets['__score'].flashscore;
+    const fsScoreText=fsScore?Math.floor(fsScore.value/100)+' - '+(fsScore.value%100):'';
 
-    for(const k of mkeys.slice(0,15)){
+    let oddsHtml='<div class="odds-row"><div class="odds-header">Market</div><div class="odds-header" style="text-align:center;color:var(--blue)">PM (%)</div><div class="odds-header" style="text-align:center;color:var(--yellow)">1xBet (%)</div><div class="odds-header" style="text-align:center;color:var(--cyan)">FS Live</div></div>';
+
+    // Only show markets that have Polymarket odds, ML first then draw then rest
+    const pmKeys=mkeys.filter(k=>ev.markets[k].polymarket).sort((a,b)=>{
+      const order=k=>{if(k.startsWith('ml_home'))return 0;if(k.startsWith('ml_away'))return 1;if(k.startsWith('draw'))return 2;return 3;};
+      const d=order(a)-order(b);if(d!==0)return d;return a<b?-1:a>b?1:0;
+    });
+    for(const k of pmKeys.slice(0,15)){
       const srcs=ev.markets[k];
       const pm=srcs.polymarket;
       const xb=srcs.onexbet;
-      const fs=srcs.flashscore;
 
-      // Convert all to implied probability for divergence check
-      const toProb=(o,src)=>{if(!o)return null;if(src==='polymarket')return Math.min(o.value,1);return 1/o.value;};
-      const pmProb=toProb(pm,'polymarket');
-      const xbProb=toProb(xb,'onexbet');
-      const fsProb=toProb(fs,'flashscore');
-      const probs=[pmProb,xbProb,fsProb].filter(p=>p!==null);
+      // Convert to implied probability for divergence check
+      const toProb=(o)=>{if(!o)return null;return 1/o.value;};
+      const pmProb=toProb(pm);
+      const xbProb=toProb(xb);
+      const probs=[pmProb,xbProb].filter(p=>p!==null);
       let hasDivergence=false;
       if(probs.length>=2){
         const maxP=Math.max(...probs);const minP=Math.min(...probs);
         if(maxP-minP>0.10)hasDivergence=true;
       }
 
-      // PM: show as probability %
-      const fmtPm=(o)=>{if(!o)return '<div class="odds-cell" style="color:var(--text2)">\\u2014</div>';const p=Math.min(o.value,1)*100;return '<div class="odds-cell pm'+(hasDivergence?' divergent':'')+'">'+p.toFixed(1)+'%<br><span style="font-size:9px;color:var(--text2)">'+(1/Math.min(o.value,1)).toFixed(2)+'</span></div>';};
-      // 1xBet/FS: show as decimal odds + implied %
-      const fmtDec=(o,cls)=>{if(!o)return '<div class="odds-cell" style="color:var(--text2)">\\u2014</div>';return '<div class="odds-cell '+cls+(hasDivergence?' divergent':'')+'">'+o.value.toFixed(3)+'<br><span style="font-size:9px;color:var(--text2)">'+(1/o.value*100).toFixed(1)+'%</span></div>';};
+      // PM: show probability % as main, decimal underneath
+      const fmtPm=(o)=>{if(!o)return '<div class="odds-cell" style="color:var(--text2)">\\u2014</div>';const pct=(1/o.value*100);return '<div class="odds-cell pm'+(hasDivergence?' divergent':'')+'">'+pct.toFixed(1)+'%<br><span style="font-size:9px;color:var(--text2)">'+o.value.toFixed(2)+'</span></div>';};
+      // 1xBet: show probability % as main, decimal underneath (same as PM)
+      const fmtXb=(o)=>{if(!o)return '<div class="odds-cell" style="color:var(--text2)">\\u2014</div>';const pct=(1/o.value*100);return '<div class="odds-cell xbet'+(hasDivergence?' divergent':'')+'">'+pct.toFixed(1)+'%<br><span style="font-size:9px;color:var(--text2)">'+o.value.toFixed(2)+'</span></div>';};
+      // FS: show live score in every row
+      const fsFmt='<div class="odds-cell fs">'+(fsScoreText||'\\u2014')+'</div>';
 
-      oddsHtml+='<div class="odds-row"><div class="odds-label">'+fmtKey(k)+'</div>'+fmtPm(pm)+fmtDec(xb,'xbet')+fmtDec(fs,'fs')+'</div>';
+      oddsHtml+='<div class="odds-row"><div class="odds-label">'+fmtKey(k)+'</div>'+fmtPm(pm)+fmtXb(xb)+fsFmt+'</div>';
     }
 
     const srcText=srcCount===1?'1 source':srcCount+' sources';
-    return '<div class="ev'+(isLive?' live':'')+(isOpen?' open':'')+'" data-id="'+ev.id+'"><div class="ev-top" onclick="toggleEv(&quot;'+ev.id+'&quot;)"><div><span class="ev-teams">'+ev.home+' vs '+ev.away+'</span>'+(isLive?' <span class="ev-live-badge">\u25CF LIVE</span>':'')+'<span class="src-badges">'+badges+'</span><br><span class="ev-league">'+ev.sport+' \u00B7 '+ev.league+' \u00B7 '+mktCount+' markets \u00B7 '+srcText+'</span></div><div>'+(sc?'<span class="ev-score">'+sc+'</span>'+(elapsed?'<span class="ev-elapsed">'+elapsed+'</span>':''):'')+'</div></div><div class="ev-odds">'+oddsHtml+'</div></div>';
+    const pmLink=ev.pmSlug?'<a href="https://polymarket.com/event/'+ev.pmSlug+'" target="_blank" rel="noopener" class="pm-link" title="Open on Polymarket" onclick="event.stopPropagation()">&#x2197;</a>':'';
+    const rightInfo=sc?'<span class="ev-score">'+sc+'</span>'+(elapsed?'<span class="ev-elapsed">'+elapsed+'</span>':''):countdown?'<span class="ev-countdown">\u23F0 '+countdown+'</span>':'';
+    return '<div class="ev'+(isLive?' live':'')+(isOpen?' open':'')+'" data-id="'+ev.id+'"><div class="ev-top" onclick="toggleEv(&quot;'+ev.id+'&quot;)"><div><span class="ev-teams">'+ev.home+' vs '+ev.away+'</span>'+pmLink+(isLive?' <span class="ev-live-badge">\u25CF LIVE</span>':'')+'<span class="src-badges">'+badges+'</span><br><span class="ev-league">'+ev.sport+' \u00B7 '+ev.league+' \u00B7 '+mktCount+' markets \u00B7 '+srcText+'</span></div><div>'+rightInfo+'</div></div><div class="ev-odds">'+oddsHtml+'</div></div>';
   }).join('');
 }
 
 function renderSignals(){
   if(!state)return;
   const el=document.getElementById('signals');
-  const sigs=state.tradeSignals;
-  document.getElementById('sig-count').textContent=sigs.length;
-  
-  if(sigs.length===0){el.innerHTML='<div class="empty-state">No trade signals yet.<br>Signals appear when odds diverge between sources.</div>';return;}
-  
-  el.innerHTML=sigs.slice(0,100).map(s=>{
-    const isBuy=s.action.startsWith('BUY');
-    const ago=Math.floor((Date.now()-s.timestamp)/1000);
-    const timeStr=ago<60?ago+'s':Math.floor(ago/60)+'m';
-    const scoreTxt=s.score?s.score.home+'-'+s.score.away:'';
-    
-    return '<div class="signal-card '+s.urgency+'"><div class="sig-top"><span class="sig-action '+(isBuy?'buy':'sell')+'">'+s.action.replace('_',' ')+'</span><span class="sig-time">'+timeStr+' ago</span></div><div class="sig-match">'+s.homeTeam+' vs '+s.awayTeam+(scoreTxt?' <span style="color:var(--green)">'+scoreTxt+'</span>':'')+'</div><div class="sig-market">'+fmtKey(s.market)+'</div><div class="sig-reason">'+s.reason+'</div><div class="sig-meta"><span class="edge">Edge: '+s.edge.toFixed(1)+'%</span><span class="conf">Conf: '+s.confidence+'%</span><span>Poly: '+(s.polyPrice*100).toFixed(1)+'%</span><span>Fair: '+(s.fairPrice*100).toFixed(1)+'%</span>'+(s.expectedProfit?'<span style="color:var(--green)">+'+s.expectedProfit.toFixed(1)+'%</span>':'')+'</div></div>';
+  const opps=state.tradeSignals||[];
+  document.getElementById('sig-count').textContent=opps.length;
+
+  if(opps.length===0){el.innerHTML='<div class="empty-state">No opportunities detected.<br>Opportunities appear when PM and 1xBet odds diverge by 3+pp.</div>';return;}
+
+  el.innerHTML=opps.map(o=>{
+    const isYes=o.action==='BUY_YES';
+    const activeFor=Math.floor((Date.now()-o.firstSeen)/1000);
+    const activeStr=activeFor<60?activeFor+'s':Math.floor(activeFor/60)+'m '+activeFor%60+'s';
+    const scoreTxt=o.score?o.score.home+'-'+o.score.away:'';
+    const statusBadge=o.eventStatus==='live'?'<span style="color:var(--red);font-weight:700;font-size:9px"> \u25CF LIVE</span>':'';
+
+    // Edge trend from history
+    let trendIcon='';
+    if(o.edgeHistory&&o.edgeHistory.length>=3){
+      const recent=o.edgeHistory.slice(-3);
+      const avg1=(recent[0]+recent[1])/2;
+      const last=recent[2];
+      if(last>avg1+0.5)trendIcon='<span class="opp-trend" style="color:var(--green)">\u2191</span>';
+      else if(last<avg1-0.5)trendIcon='<span class="opp-trend" style="color:var(--red)">\u2193</span>';
+      else trendIcon='<span class="opp-trend" style="color:var(--text2)">\u2192</span>';
+    }
+
+    // Probability comparison bar
+    const pmPct=Math.min(100,Math.max(0,o.polyProb));
+    const xbPct=Math.min(100,Math.max(0,o.xbetProb));
+    const bar='<div class="opp-bar"><span style="color:var(--blue);min-width:40px">PM '+pmPct.toFixed(1)+'%</span><div class="opp-bar-track"><div class="opp-bar-pm" style="width:'+pmPct+'%"></div><div class="opp-bar-xb" style="left:'+xbPct+'%"></div></div><span style="color:var(--yellow);min-width:40px;text-align:right">'+xbPct.toFixed(1)+'% 1xB</span></div>';
+
+    // Data freshness
+    const pmFresh=o.polyAgeMs<5000?'<span class="val" style="color:var(--green)">&lt;5s</span>':o.polyAgeMs<30000?'<span class="val">'+Math.round(o.polyAgeMs/1000)+'s</span>':'<span class="val" style="color:var(--red)">'+Math.round(o.polyAgeMs/1000)+'s</span>';
+    const xbFresh=o.xbetAgeMs<10000?'<span class="val" style="color:var(--green)">&lt;10s</span>':o.xbetAgeMs<60000?'<span class="val">'+Math.round(o.xbetAgeMs/1000)+'s</span>':'<span class="val" style="color:var(--red)">'+Math.round(o.xbetAgeMs/1000)+'s</span>';
+
+    return '<div class="opp-card '+o.quality+'"><div class="opp-top"><div><span class="opp-action '+(isYes?'yes':'no')+'">'+o.action.replace('_',' ')+'</span> <span class="opp-quality '+o.quality+'">'+o.quality.toUpperCase()+'</span></div><div style="text-align:right"><span class="opp-edge">'+o.edge.toFixed(1)+'pp</span>'+trendIcon+'</div></div><div class="opp-match">'+o.homeTeam+' vs '+o.awayTeam+(scoreTxt?' <span style="color:var(--green)">'+scoreTxt+'</span>':'')+statusBadge+'</div><div class="opp-market">'+fmtKey(o.market)+'</div>'+bar+'<div class="opp-meta"><span>Active: <span class="val">'+activeStr+'</span></span><span>PM: '+pmFresh+'</span><span>1xBet: '+xbFresh+'</span></div>'+(o.qualityNote?'<div style="font-size:9px;color:var(--text2);margin-top:3px;font-style:italic">'+o.qualityNote+'</div>':'')+'</div>';
   }).join('');
 }
 
