@@ -43,6 +43,15 @@ export class PolymarketAdapter implements IAdapter {
     const tokenMap = await this.discovery.discover();
     const tokenIds = this.discovery.getAllTokenIds();
 
+    // Seed initial per-token display prices from discovery snapshot.
+    // This keeps wide-spread markets closer to PM UI before first live trade updates arrive.
+    for (const tokenId of tokenIds) {
+      const mapping = tokenMap.get(tokenId);
+      if (mapping?.initialPrice !== undefined) {
+        this.clobWs.seedLastTrade(tokenId, mapping.initialPrice);
+      }
+    }
+
     if (tokenIds.length === 0) {
       log.warn('No sports tokens found');
       this.status = 'connected'; // Still connected, just no data
@@ -89,6 +98,12 @@ export class PolymarketAdapter implements IAdapter {
     // 5. Periodic discovery refresh for new markets
     this.discovery.startPeriodicRefresh(
       (newTokens) => {
+        for (const tokenId of newTokens) {
+          const mapping = this.discovery.getTokenMapping(tokenId);
+          if (mapping?.initialPrice !== undefined) {
+            this.clobWs.seedLastTrade(tokenId, mapping.initialPrice);
+          }
+        }
         this.clobWs.subscribe(newTokens);
       },
       (targets) => {

@@ -59,6 +59,15 @@ export class ClobWebSocket {
     this.onPrice = callback;
   }
 
+  // Seed per-token display prices so wide-spread markets don't default to best ask
+  // before first in-session last_trade_price event arrives.
+  seedLastTrade(tokenId: string, price: number): void {
+    if (!Number.isFinite(price) || price <= 0 || price > 1) return;
+    if (!this.lastTrade.has(tokenId)) {
+      this.lastTrade.set(tokenId, price);
+    }
+  }
+
   async connect(tokenIds: string[]): Promise<void> {
     this.stopping = false;
     for (const t of tokenIds) this.subscribedTokens.add(t);
@@ -155,7 +164,12 @@ export class ClobWebSocket {
           const bestAsk = pc.best_ask ? parseFloat(pc.best_ask) : 0;
 
           if (bestAsk > 0 && bestAsk <= 1 && this.onPrice) {
-            const lastTrade = this.lastTrade.get(pc.asset_id) || 0;
+            const hintedPrice = pc.price ? parseFloat(pc.price) : 0;
+            let lastTrade = this.lastTrade.get(pc.asset_id) || 0;
+            if (lastTrade <= 0 && hintedPrice > 0 && hintedPrice <= 1) {
+              lastTrade = hintedPrice;
+              this.lastTrade.set(pc.asset_id, hintedPrice);
+            }
             const priceData = this.computeDisplayPrice(bestBid, bestAsk, lastTrade);
             this.onPrice(pc.asset_id, priceData, ts);
           }

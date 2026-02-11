@@ -18,6 +18,7 @@ export interface PolymarketMarket {
   groupItemTitle?: string;       // "O/U 2.5", "Sunderland AFC (-1.5)", etc.
   groupItemThreshold?: number;
   bestAsk?: string;
+  lastTradePrice?: number | string;
 }
 
 export interface PolymarketEvent {
@@ -51,6 +52,7 @@ export interface TokenMapping {
   timespan: string;
   startTime: number;
   isYesToken: boolean;
+  initialPrice?: number;
 }
 
 export class PolymarketDiscovery {
@@ -224,6 +226,11 @@ export class PolymarketDiscovery {
       const marketInfo = this.classifyMarket(market, home, away);
       if (!marketInfo) continue;
 
+      const seededPrices = this.parseInitialOutcomePrices(market.outcomePrices);
+      const yesSeedPrice = this.parseUnitPrice(market.lastTradePrice) ?? seededPrices[0];
+      const noSeedPrice = seededPrices[1]
+        ?? (yesSeedPrice !== undefined ? this.parseUnitPrice(1 - yesSeedPrice) : undefined);
+
       // Yes token (index 0)
       this.tokenMap.set(tokenIds[0], {
         tokenId: tokenIds[0],
@@ -239,6 +246,7 @@ export class PolymarketDiscovery {
         timespan: 'ft',
         startTime,
         isYesToken: true,
+        initialPrice: yesSeedPrice,
       });
 
       // No token (index 1)
@@ -257,9 +265,31 @@ export class PolymarketDiscovery {
           timespan: 'ft',
           startTime,
           isYesToken: false,
+          initialPrice: noSeedPrice,
         });
       }
     }
+  }
+
+  private parseInitialOutcomePrices(raw: string | undefined): Array<number | undefined> {
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      const out: Array<number | undefined> = [];
+      for (const v of parsed) {
+        out.push(this.parseUnitPrice(v));
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  private parseUnitPrice(value: unknown): number | undefined {
+    const n = typeof value === 'string' ? parseFloat(value) : typeof value === 'number' ? value : NaN;
+    if (!Number.isFinite(n) || n <= 0 || n > 1) return undefined;
+    return n;
   }
 
   private parseTeamsFromTitle(title: string): { home: string; away: string } {
