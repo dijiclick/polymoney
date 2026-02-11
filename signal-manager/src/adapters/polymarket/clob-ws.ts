@@ -6,6 +6,9 @@ const log = createLogger('pm-clob-ws');
 export interface PriceChangeEvent {
   asset_id: string;
   price: string;
+  size: string;
+  side: string;
+  best_bid: string;
   best_ask: string;
 }
 
@@ -14,12 +17,23 @@ export interface ClobMessage {
   market?: string;
   timestamp?: string;
   price_changes?: PriceChangeEvent[];
-  // book event
+  // last_trade_price event
   asset_id?: string;
+  price?: string;
+  side?: string;
+  size?: string;
+  // book event
   sells?: Array<{ price: string; size: string }>;
 }
 
-type PriceCallback = (tokenId: string, bestAsk: number, timestamp: number) => void;
+export interface PriceData {
+  bestBid: number;
+  bestAsk: number;
+  lastTradePrice: number;
+  midpoint: number;       // computed display price matching PM UI
+}
+
+type PriceCallback = (tokenId: string, price: PriceData, timestamp: number) => void;
 
 export class ClobWebSocket {
   private ws: WebSocket | null = null;
@@ -33,6 +47,8 @@ export class ClobWebSocket {
   private onPrice: PriceCallback | null = null;
   private _connected = false;
   private stopping = false;
+  // Track last known prices per token for midpoint computation
+  private lastTrade: Map<string, number> = new Map();
 
   constructor(url: string, pingIntervalMs: number) {
     this.url = url;
@@ -135,18 +151,46 @@ export class ClobWebSocket {
         const ts = msg.timestamp ? parseInt(msg.timestamp, 10) : Date.now();
         for (let i = 0; i < msg.price_changes.length; i++) {
           const pc = msg.price_changes[i];
-          if (pc.best_ask && this.onPrice) {
-            const bestAsk = parseFloat(pc.best_ask);
-            if (bestAsk > 0 && bestAsk <= 1) {
-              this.onPrice(pc.asset_id, bestAsk, ts);
-            }
+          const bestBid = pc.best_bid ? parseFloat(pc.best_bid) : 0;
+          const bestAsk = pc.best_ask ? parseFloat(pc.best_ask) : 0;
+
+          if (bestAsk > 0 && bestAsk <= 1 && this.onPrice) {
+            const lastTrade = this.lastTrade.get(pc.asset_id) || 0;
+            const priceData = this.computeDisplayPrice(bestBid, bestAsk, lastTrade);
+            this.onPrice(pc.asset_id, priceData, ts);
           }
         }
+      } else if (msg.event_type === 'last_trade_price' && msg.asset_id && msg.price) {
+        const ts = msg.timestamp ? parseInt(msg.timestamp, 10) : Date.now();
+        const tradePrice = parseFloat(msg.price);
+        if (tradePrice > 0 && tradePrice <= 1) {
+          this.lastTrade.set(msg.asset_id, tradePrice);
+          // Don't emit here — wait for next price_change with updated bid/ask
+        }
       }
-      // Skip "book" events — thin markets show misleading limit orders
+      // Skip "book" events — use price_change for best bid/ask
     } catch {
       // Ignore parse errors silently — could be non-JSON keepalive
     }
+  }
+
+  /** Replicate PM UI display price: midpoint if spread ≤ 10c, else last trade */
+  private computeDisplayPrice(bestBid: number, bestAsk: number, lastTradePrice: number): PriceData {
+    const spread = bestAsk - bestBid;
+    let midpoint: number;
+
+    if (bestBid > 0 && spread <= 0.10) {
+      // Tight spread: use midpoint (PM UI behavior)
+      midpoint = (bestBid + bestAsk) / 2;
+    } else if (lastTradePrice > 0) {
+      // Wide spread: use last trade price
+      midpoint = lastTradePrice;
+    } else {
+      // Fallback: use best_ask (our old behavior)
+      midpoint = bestAsk;
+    }
+
+    return { bestBid, bestAsk, lastTradePrice, midpoint };
   }
 
   private sendSubscribe(tokenIds: string[]): void {

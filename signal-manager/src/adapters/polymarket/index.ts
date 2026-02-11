@@ -50,12 +50,12 @@ export class PolymarketAdapter implements IAdapter {
     }
 
     // 2. Set up CLOB WS price handler
-    this.clobWs.onPriceChange((tokenId, bestAsk, timestamp) => {
+    this.clobWs.onPriceChange((tokenId, priceData, timestamp) => {
       if (!this.callback) return;
       const mapping = this.discovery.getTokenMapping(tokenId);
       if (!mapping) return;
 
-      const update = normalizePriceChange(mapping, bestAsk, timestamp);
+      const update = normalizePriceChange(mapping, priceData.midpoint, timestamp);
       this.callback(update);
     });
 

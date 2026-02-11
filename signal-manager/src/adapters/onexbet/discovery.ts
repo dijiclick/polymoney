@@ -58,7 +58,7 @@ export class OnexbetDiscovery {
   }
 
   private async fetchGames(sportId: number, feedPath: 'LiveFeed' | 'LineFeed'): Promise<OnexbetGameSummary[]> {
-    const url = `${this.config.liveFeedBaseUrl}/service-api/${feedPath}/GetTopGamesStatZip?lng=en&antisports=66&partner=7&country=190&sports=${sportId}`;
+    const url = `${this.config.liveFeedBaseUrl}/service-api/${feedPath}/Get1x2_Zip?sports=${sportId}&count=500&lng=en&getEmpty=true&partner=7&country=190`;
 
     const resp = await fetch(url, {
       headers: {
@@ -68,7 +68,7 @@ export class OnexbetDiscovery {
     });
 
     if (!resp.ok) {
-      throw new Error(`GET ${feedPath}/GetTopGamesStatZip sport=${sportId} failed: ${resp.status}`);
+      throw new Error(`GET ${feedPath}/Get1x2_Zip sport=${sportId} failed: ${resp.status}`);
     }
 
     const data = await resp.json() as any;

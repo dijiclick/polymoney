@@ -54,6 +54,8 @@ export class OnexbetLiveFeed {
   private maxConsecutiveFailures = 10;
   private prevOddsHash: Map<number, string> = new Map();
   private preMatchIds: Set<number> = new Set();
+  private currentGameIds: number[] = [];
+  private polling = false;
 
   constructor(config: OnexbetAdapterConfig) {
     this.config = config;
@@ -65,15 +67,18 @@ export class OnexbetLiveFeed {
 
   startPolling(gameIds: number[]): void {
     if (this.pollTimer) return;
+    this.currentGameIds = gameIds;
 
     this.pollTimer = setInterval(async () => {
-      await this.pollGames(gameIds);
+      if (this.polling) return; // Skip if previous cycle still running
+      await this.pollGames();
     }, this.config.pollIntervalMs);
 
-    this.pollGames(gameIds);
+    this.pollGames();
   }
 
-  async updateGameList(gameIds: number[]): Promise<void> {
+  updateGameList(gameIds: number[]): void {
+    this.currentGameIds = gameIds;
     for (const id of this.prevOddsHash.keys()) {
       if (!gameIds.includes(id)) {
         this.prevOddsHash.delete(id);
@@ -96,29 +101,42 @@ export class OnexbetLiveFeed {
     this.preMatchIds = new Set(ids);
   }
 
-  private async pollGames(gameIds: number[]): Promise<void> {
-    for (const gameId of gameIds) {
-      try {
-        const gameData = await this.fetchGameDetail(gameId);
-        if (!gameData) continue;
+  private async pollGames(): Promise<void> {
+    this.polling = true;
+    const ids = this.currentGameIds;
 
-        const hash = this.computeOddsHash(gameData);
-        const prevHash = this.prevOddsHash.get(gameId);
-        if (hash === prevHash) continue;
-        this.prevOddsHash.set(gameId, hash);
-
-        if (this.onGameData) {
-          this.onGameData(gameData);
-        }
-
-        this.consecutiveFailures = 0;
-      } catch (err) {
-        this.consecutiveFailures++;
-        if (this.consecutiveFailures <= this.maxConsecutiveFailures) {
-          log.warn(`Poll failed for game ${gameId} (${this.consecutiveFailures}x)`, err);
+    // Fetch all games in parallel (concurrency limited by batching)
+    const BATCH_SIZE = 8;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(gameId => this.fetchAndEmit(gameId))
+      );
+      for (const r of results) {
+        if (r.status === 'rejected') {
+          this.consecutiveFailures++;
+          if (this.consecutiveFailures <= this.maxConsecutiveFailures) {
+            log.warn(`Poll failed (${this.consecutiveFailures}x):`, r.reason?.message || r.reason);
+          }
         }
       }
     }
+    this.polling = false;
+  }
+
+  private async fetchAndEmit(gameId: number): Promise<void> {
+    const gameData = await this.fetchGameDetail(gameId);
+    if (!gameData) return;
+
+    const hash = this.computeOddsHash(gameData);
+    const prevHash = this.prevOddsHash.get(gameId);
+    if (hash === prevHash) return;
+    this.prevOddsHash.set(gameId, hash);
+
+    if (this.onGameData) {
+      this.onGameData(gameData);
+    }
+    this.consecutiveFailures = 0;
   }
 
   private async fetchGameDetail(gameId: number): Promise<OnexbetGameData | null> {
