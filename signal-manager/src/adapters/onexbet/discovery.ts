@@ -1,5 +1,5 @@
 import type { OnexbetAdapterConfig } from '../../types/config.js';
-import { sportIdToSlug } from './market-map.js';
+import { sportIdToSlug, sportIdToUrlSlug } from './market-map.js';
 import { createLogger } from '../../util/logger.js';
 
 const log = createLogger('1xbet-discovery');
@@ -63,7 +63,7 @@ export class OnexbetDiscovery {
     const resp = await fetch(url, {
       headers: {
         ...HEADERS,
-        'Referer': `${this.config.liveFeedBaseUrl}/en/${feedPath === 'LiveFeed' ? 'live' : 'line'}/${sportIdToSlug(sportId)}/`,
+        'Referer': `${this.config.liveFeedBaseUrl}/en/${feedPath === 'LiveFeed' ? 'live' : 'line'}/${sportIdToUrlSlug(sportId)}/`,
       },
     });
 

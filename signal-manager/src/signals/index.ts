@@ -84,7 +84,7 @@ export const scoreChangeSignal: SignalFunction = (event, changedKeys, source) =>
     eventId: event.id,
     homeTeam: event.home.name || '?',
     awayTeam: event.away.name || '?',
-    message: `⚽ GOAL! ${event.home.name} ${score.home} - ${score.away} ${event.away.name} (via ${source})`,
+    message: `🏆 SCORE! ${event.home.name} ${score.home} - ${score.away} ${event.away.name} [${event.sport || '?'}] (via ${source})`,
     data: { source, score, markets: Object.keys(event.markets) },
     timestamp: Date.now(),
   });

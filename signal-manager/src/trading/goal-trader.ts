@@ -1,10 +1,11 @@
 /**
- * GoalTrader — Auto buy on goal detection, smart exit strategy
+ * GoalTrader — Auto buy on score change detection, smart exit strategy
  *
- * Entry: When 1xBet detects a goal, immediately buy the favored ML outcome on Polymarket.
+ * Entry: When 1xBet detects a score change, buy the favored ML outcome on Polymarket.
+ * Works across ALL sports — soccer goals, basketball runs, hockey goals, etc.
  * Exit: 3-layer strategy based on price stabilization, take-profit, time limit, or stop-loss.
  *
- * Only handles moneyline (match winner) markets: ml_home_ft, ml_away_ft, draw_ft.
+ * Handles moneyline (match winner) markets: ml_home_ft, ml_away_ft, draw_ft.
  */
 
 import type { UnifiedEvent } from '../types/unified-event.js';
@@ -82,12 +83,45 @@ const DEFAULT_CONFIG: GoalTraderConfig = {
 
 const ML_KEYS = ['ml_home_ft', 'ml_away_ft', 'draw_ft'];
 
-// Expected move in probability points by goal type
+// Expected move in probability points by goal type (soccer-baseline)
 const EXPECTED_MOVE: Record<GoalType, number> = {
   equalizer: 35,
   go_ahead: 18,
   opening: 8,
   extending: 3,
+};
+
+// Sport categories for score-change handling
+type SportCategory = 'low_scoring' | 'high_scoring' | 'set_based' | 'round_based';
+
+function getSportCategory(sport: string): SportCategory {
+  const s = sport.toLowerCase();
+  // High-scoring: basketball, esports (frequent scoring, small per-point impact)
+  if (s.includes('basketball') || s === 'nba' || s === 'ncaab' || s === 'cbb'
+    || s.startsWith('bk') || s.startsWith('esports') || s === 'cs2' || s === 'lol'
+    || s === 'dota2' || s === 'val' || s === 'baseball' || s === 'mlb' || s === 'kbo'
+    || s === 'cricket' || s.startsWith('cr') || s === 'ipl' || s === 'american_football'
+    || s === 'nfl' || s === 'cfb') {
+    return 'high_scoring';
+  }
+  // Set-based: tennis (games within sets, need set changes to trade)
+  if (s.includes('tennis') || s === 'atp' || s === 'wta' || s === 'volleyball') {
+    return 'set_based';
+  }
+  // Round-based: MMA/UFC, boxing (round finishes matter)
+  if (s === 'mma' || s === 'ufc' || s === 'boxing' || s === 'zuffa') {
+    return 'round_based';
+  }
+  // Low-scoring: soccer, ice hockey, rugby (each score event is significant)
+  return 'low_scoring';
+}
+
+// Minimum score delta required to trigger a trade, by sport category
+const MIN_SCORE_DELTA: Record<SportCategory, number> = {
+  low_scoring: 1,     // Soccer/hockey: every goal matters
+  high_scoring: 5,    // Basketball: need 5+ point swing to be meaningful
+  set_based: 1,       // Tennis: set-level changes only (handled in logic)
+  round_based: 0,     // MMA: any finish signal
 };
 
 // --- GoalTrader class ---
@@ -154,25 +188,45 @@ export class GoalTrader {
 
   private handleGoal(event: UnifiedEvent, source: string): void {
     const match = this.matchName(event);
+    const sport = event.sport || '';
 
     if (!this.config.enabled) {
-      log.debug(`Goal signal ignored (GoalTrader disabled) | ${match} | source=${source}`);
+      log.debug(`Score signal ignored (GoalTrader disabled) | ${match} | source=${source}`);
       return;
     }
     if (!event.stats.score) {
-      log.warn(`Goal signal but no score data | ${match} | source=${source}`);
+      log.warn(`Score signal but no score data | ${match} | source=${source}`);
       return;
     }
 
     const score = event.stats.score;
     const prevScore = event._prevScore || { home: 0, away: 0 };
+    const sportCategory = getSportCategory(sport);
 
-    log.info(`⚽ GOAL DETECTED | ${match} | ${prevScore.home}-${prevScore.away} → ${score.home}-${score.away} | source=${source}`);
+    // For high-scoring sports (basketball, baseball, esports), require a meaningful swing
+    const totalDelta = Math.abs((score.home + score.away) - (prevScore.home + prevScore.away));
+    const minDelta = MIN_SCORE_DELTA[sportCategory];
+    if (totalDelta < minDelta) {
+      log.debug(`Score change too small for ${sport} (delta=${totalDelta}, min=${minDelta}) | ${match}`);
+      return;
+    }
 
-    // Deduplicate: don't act on the same goal twice
+    // For high-scoring sports, only trade on lead changes (not every basket/run)
+    if (sportCategory === 'high_scoring') {
+      const prevLeader = prevScore.home > prevScore.away ? 'home' : prevScore.away > prevScore.home ? 'away' : 'tied';
+      const newLeader = score.home > score.away ? 'home' : score.away > score.home ? 'away' : 'tied';
+      if (prevLeader === newLeader) {
+        log.debug(`High-scoring sport: lead unchanged (${newLeader}) | ${match} | ${score.home}-${score.away}`);
+        return;
+      }
+    }
+
+    log.info(`🏆 SCORE CHANGE | ${match} | ${prevScore.home}-${prevScore.away} → ${score.home}-${score.away} | sport=${sport} (${sportCategory}) | source=${source}`);
+
+    // Deduplicate: don't act on the same score twice
     const goalKey = `${event.id}:${score.home}-${score.away}`;
     if (this.processedGoals.has(goalKey)) {
-      log.info(`⚽ Goal already processed (dedup) | ${match} | ${score.home}-${score.away}`);
+      log.info(`🏆 Score already processed (dedup) | ${match} | ${score.home}-${score.away}`);
       return;
     }
     this.processedGoals.add(goalKey);
@@ -181,14 +235,14 @@ export class GoalTrader {
     const goalType = this.classifyGoal(score, prevScore);
 
     if (goalType === 'extending' && this.config.skipExtendingLead) {
-      log.info(`⚽ SKIP extending goal ${score.home}-${score.away} | ${match}`);
+      log.info(`🏆 SKIP extending lead ${score.home}-${score.away} | ${match}`);
       return;
     }
 
     // Determine which ML market to buy and the direction
     const { marketKey, side } = this.inferTrade(score, prevScore);
     if (!marketKey) {
-      log.warn(`⚽ Could not infer trade direction | ${match} | ${score.home}-${score.away}`);
+      log.warn(`🏆 Could not infer trade direction | ${match} | ${score.home}-${score.away}`);
       return;
     }
 
@@ -196,7 +250,7 @@ export class GoalTrader {
     const tokenId = event._tokenIds[marketKey];
     if (!tokenId) {
       const availableTokens = Object.keys(event._tokenIds).join(', ') || 'none';
-      log.warn(`⚽ No tokenId for ${marketKey} on ${match} — available: [${availableTokens}]`);
+      log.warn(`🏆 No tokenId for ${marketKey} on ${match} — available: [${availableTokens}]`);
       return;
     }
 
@@ -204,20 +258,25 @@ export class GoalTrader {
     const pmData = event.markets[marketKey]?.polymarket;
     if (!pmData) {
       const availableMarkets = Object.keys(event.markets).join(', ') || 'none';
-      log.warn(`⚽ No PM price for ${marketKey} on ${match} — available markets: [${availableMarkets}]`);
+      log.warn(`🏆 No PM price for ${marketKey} on ${match} — available markets: [${availableMarkets}]`);
       return;
     }
 
     // Don't buy if we already have a position on this event
     for (const pos of this.positions.values()) {
       if (pos.eventId === event.id) {
-        log.info(`⚽ Already have position on ${match} — skipping`);
+        log.info(`🏆 Already have position on ${match} — skipping`);
         return;
       }
     }
 
     const entryPrice = 1 / pmData.value; // Convert decimal odds to probability
-    const expectedMove = EXPECTED_MOVE[goalType];
+    // Scale expected move by sport: hockey goals ~ soccer, high-scoring sports get smaller expected moves
+    const moveScale = sportCategory === 'low_scoring' ? 1.0
+      : sportCategory === 'high_scoring' ? 0.5
+      : sportCategory === 'set_based' ? 0.7
+      : 0.8;
+    const expectedMove = Math.round(EXPECTED_MOVE[goalType] * moveScale);
     const tradeSize = this.getTradeSize(goalType);
 
     // Calculate exit targets
@@ -231,13 +290,13 @@ export class GoalTrader {
     const now = Date.now();
 
     log.info(
-      `⚽ GOAL TRADE | ${match} | ${score.home}-${score.away} | Type: ${goalType} | ` +
+      `🏆 TRADE | ${match} | ${score.home}-${score.away} | Type: ${goalType} | Sport: ${sport} | ` +
       `${side} ${marketKey} @ ${entryPrice.toFixed(3)} | Size: $${tradeSize} | ` +
       `TP: ${takeProfitPrice.toFixed(3)} | SL: ${stopLossPrice.toFixed(3)} | Expected: +${expectedMove}pp`
     );
 
     // Execute buy
-    this.executeBuy(event, tokenId, marketKey, side, entryPrice, tradeSize, goalType, score, expectedMove, takeProfitPrice, stopLossPrice, match);
+    this.executeBuy(event, tokenId, marketKey, side, entryPrice, tradeSize, goalType, score, expectedMove, takeProfitPrice, stopLossPrice, match, sport);
   }
 
   private async executeBuy(
@@ -245,7 +304,7 @@ export class GoalTrader {
     side: 'YES' | 'NO', price: number, amount: number,
     goalType: GoalType, score: { home: number; away: number },
     expectedMovePp: number, takeProfitPrice: number, stopLossPrice: number,
-    match: string,
+    match: string, sport: string,
   ): Promise<void> {
     const buyFn = side === 'YES' ? this.bot.buyYes.bind(this.bot) : this.bot.buyNo.bind(this.bot);
     const result = await buyFn(tokenId, amount, price, { eventName: match });

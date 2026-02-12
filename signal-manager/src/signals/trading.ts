@@ -277,7 +277,7 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
   }
 };
 
-// Score-based trading: when a goal happens but Polymarket hasn't reacted
+// Score-based trading: when a score change happens but Polymarket hasn't reacted
 // Only for ML markets where we can infer direction from the score
 const ML_KEYS = ['ml_home_ft', 'ml_away_ft', 'draw_ft'];
 
@@ -328,7 +328,7 @@ export const scoreTradeSignal: SignalFunction = (event, changedKeys, source) => 
           polyAgeMs: polyAge,
           xbetAgeMs: 0,
           quality: 'medium',
-          qualityNote: `Goal ${score.home}-${score.away} but PM stale (${Math.round(polyAge / 1000)}s)`,
+          qualityNote: `Score ${score.home}-${score.away} but PM stale (${Math.round(polyAge / 1000)}s)`,
           firstSeen: now,
           lastUpdated: now,
           belowThresholdSince: now,
@@ -340,8 +340,8 @@ export const scoreTradeSignal: SignalFunction = (event, changedKeys, source) => 
         });
 
         log.info(
-          `⚽ GOAL SIGNAL | ${homeName} vs ${awayName} | ${score.home}-${score.away} | ` +
-          `${key.replace(/_ft$/, '')} | PM stale by ${Math.round(polyAge / 1000)}s`
+          `🏆 SCORE SIGNAL | ${homeName} vs ${awayName} | ${score.home}-${score.away} | ` +
+          `${key.replace(/_ft$/, '')} | ${event.sport || '?'} | PM stale by ${Math.round(polyAge / 1000)}s`
         );
       }
     }

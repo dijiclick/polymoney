@@ -16,9 +16,28 @@ export const DEFAULT_CONFIG: Config = {
     },
     onexbet: {
       enabled: true,
-      liveFeedBaseUrl: 'https://1xlite-81284.pro',
+      liveFeedBaseUrl: 'https://1xlite-14395.pro',
       pollIntervalMs: 500,
-      sportIds: [1], // Soccer
+      sportIds: [
+        // Traditional sports
+        1,   // Soccer
+        2,   // Ice Hockey (NHL, KHL, SHL, AHL)
+        3,   // Basketball (NBA, NCAAB, Euro)
+        4,   // Tennis (ATP, WTA)
+        12,  // Baseball (MLB, KBO)
+        13,  // American Football (NFL, CFB)
+        17,  // Cricket (IPL, T20, ODI)
+        62,  // MMA/UFC
+        // Esports
+        85,  // EA Sports FC / FIFA
+        86,  // Counter-Strike 2
+        97,  // Dota 2
+        106, // League of Legends
+        109, // Rocket League
+        125, // Call of Duty
+        150, // StarCraft 2
+        298, // Overwatch
+      ],
     },
     flashscore: {
       enabled: false,

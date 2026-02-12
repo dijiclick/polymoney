@@ -62,10 +62,14 @@ function ask(question) {
 function banner() {
   const lines = [
     '',
-    '  ╔══════════════════════════════════════════╗',
-    '  ║     POLYMARKET SIGNAL MANAGER v2         ║',
-    '  ║     Goal Detection + Auto Trading        ║',
-    '  ╚══════════════════════════════════════════╝',
+    '  ╔══════════════════════════════════════════════════╗',
+    '  ║     POLYMARKET SIGNAL MANAGER v3                 ║',
+    '  ║     Multi-Sport Score Detection + Auto Trading   ║',
+    '  ╚══════════════════════════════════════════════════╝',
+    '',
+    '  Sports: Soccer, Basketball, Hockey, Tennis, Baseball,',
+    '          Football, Cricket, MMA/UFC, Esports (CS2,',
+    '          LoL, Dota 2, RL, CoD, SC2, OW, EA FC)',
     '',
     `  Wallet: ${process.env.POLY_FUNDER_ADDRESS || 'NOT SET'}`,
     `  Trading key: ${process.env.POLY_PRIVATE_KEY ? 'loaded' : 'MISSING'}`,
@@ -149,13 +153,13 @@ async function main() {
     process.exit(1);
   }
 
-  const answer = await ask('  Enable auto goal trading? (y/n): ');
+  const answer = await ask('  Enable auto trading? (y/n): ');
   const enableAutoTrade = answer.trim().toLowerCase().startsWith('y');
 
   log('');
   if (enableAutoTrade) {
-    log('  Mode: AUTO TRADING — bot will arm + GoalTrader ON');
-    log('  The bot will auto-buy on goals and auto-sell on exit signals');
+    log('  Mode: AUTO TRADING — bot will arm + ScoreTrader ON');
+    log('  Bot will auto-buy on score changes and auto-sell on exit signals');
   } else {
     log('  Mode: MONITOR ONLY — signals will fire but no trades');
   }
@@ -235,11 +239,12 @@ async function main() {
 
     log('');
     log('  ============================================');
-    log('  AUTO TRADING ACTIVE');
-    log('  - Monitoring 1xBet for goals');
-    log('  - Will auto-buy ML outcomes on Polymarket');
-    log('  - Exit: stabilization / take-profit / stop-loss');
-    log('  - Trade size: $1 per goal');
+    log('  AUTO TRADING ACTIVE — ALL SPORTS');
+    log('  - Monitoring 1xBet for score changes');
+    log('  - Soccer/Hockey: every goal triggers trade');
+    log('  - Basketball/NFL: lead changes only');
+    log('  - Auto-buy ML outcomes on Polymarket');
+    log('  - Exit: stabilization / TP / SL / 5min max');
     log('  ============================================');
     log('');
     log('  Press Ctrl+C to stop');

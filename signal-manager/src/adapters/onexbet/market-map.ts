@@ -81,19 +81,69 @@ function resolveTimespan(label: string): TimeSpan {
   return PERIOD_MAP[normalized] || 'ft';
 }
 
-// Sport ID mapping (will be expanded as we discover more)
+// Sport ID mapping — 1xBet sport ID → canonical slug
+// Covers all sports that overlap with Polymarket
 export const SPORT_IDS: Record<number, string> = {
+  // Traditional sports
   1: 'soccer',
   2: 'ice_hockey',
   3: 'basketball',
-  4: 'handball',
-  5: 'tennis',
-  12: 'american_football',
+  4: 'tennis',
+  5: 'volleyball',
+  6: 'table_tennis',
+  9: 'rugby',
+  12: 'baseball',
+  13: 'american_football',
+  14: 'aussie_rules',
+  17: 'cricket',
+  22: 'golf',
+  36: 'handball',
   40: 'boxing',
-  43: 'esports',
-  // TODO: Call GetSportsShortZip and fill this out
+  62: 'mma',
+  66: 'cricket',       // alternate cricket ID
+  114: 'rugby',        // alternate rugby ID
+
+  // Esports
+  43: 'esports',       // generic esports
+  85: 'esports_fifa',
+  86: 'esports_cs2',
+  97: 'esports_dota2',
+  106: 'esports_lol',
+  109: 'esports_rl',
+  125: 'esports_cod',
+  150: 'esports_sc2',
+  298: 'esports_ow',
 };
 
 export function sportIdToSlug(id: number): string {
   return SPORT_IDS[id] || `sport_${id}`;
+}
+
+// 1xBet URL path slugs (for Referer header) — different from canonical names
+const URL_SLUGS: Record<number, string> = {
+  1: 'football',
+  2: 'ice-hockey',
+  3: 'basketball',
+  4: 'tennis',
+  5: 'volleyball',
+  6: 'table-tennis',
+  9: 'rugby',
+  12: 'baseball',
+  13: 'american-football',
+  17: 'cricket',
+  22: 'golf',
+  40: 'boxing',
+  62: 'mma',
+  85: 'esports-fifa',
+  86: 'esports-counter-strike',
+  97: 'esports-dota-2',
+  106: 'esports-league-of-legends',
+  109: 'esports-rocket-league',
+  125: 'esports-call-of-duty',
+  150: 'esports-starcraft-2',
+  298: 'esports-overwatch',
+};
+
+export function sportIdToUrlSlug(id: number): string {
+  return URL_SLUGS[id] || sportIdToSlug(id).replace(/_/g, '-');
 }

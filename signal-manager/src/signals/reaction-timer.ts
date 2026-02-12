@@ -163,7 +163,7 @@ export const reactionTimerSignal: SignalFunction = (event, changedKeys, source) 
     });
 
     log.info(
-      `⏱ GOAL [${source}] ${matchName} | ${prevScore.home}-${prevScore.away} → ${newScore.home}-${newScore.away} | Tracking ${trajectories.size} streams across ${Object.keys(snapshot).length} markets`
+      `⏱ SCORE [${source}] ${matchName} | ${event.sport || '?'} | ${prevScore.home}-${prevScore.away} → ${newScore.home}-${newScore.away} | Tracking ${trajectories.size} streams across ${Object.keys(snapshot).length} markets`
     );
 
     // Evict oldest if too many
