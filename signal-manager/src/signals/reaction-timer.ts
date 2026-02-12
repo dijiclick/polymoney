@@ -222,7 +222,7 @@ export const reactionTimerSignal: SignalFunction = (event, changedKeys, source) 
         if (traj.points.length === 1) {
           const srcLabel = source === 'polymarket' ? 'PM' : '1xBet';
           const initProb = toProb(traj.initial);
-          log.info(
+          log.debug(
             `⏱ ${srcLabel} FIRST [${(delta / 1000).toFixed(1)}s] ${pending.match} | ${mk} | ${initProb.toFixed(1)}% → ${newProb.toFixed(1)}% (Δ${(newProb - initProb).toFixed(1)}pp)`
           );
         }

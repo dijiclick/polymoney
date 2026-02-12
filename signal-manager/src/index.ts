@@ -14,7 +14,6 @@ import { reactionTimerSignal } from './signals/reaction-timer.js';
 import { TradingBot } from './trading/bot.js';
 import { TradingController } from './trading/controller.js';
 import { GoalTrader } from './trading/goal-trader.js';
-import type { SignalFunction } from './core/signal-dispatcher.js';
 
 // Load .env file (no dotenv dependency needed)
 try {
@@ -34,24 +33,6 @@ try {
 
 const log = createLogger('main');
 
-// Dev signal: log updates
-const devSignal: SignalFunction = (event, changedKeys, source) => {
-  if (changedKeys.length === 0) return;
-  const marketSummary = changedKeys.filter(k => !k.startsWith('__')).slice(0, 3).map(key => {
-    const sources = event.markets[key];
-    if (!sources) return `${key}: (no data)`;
-    const vals = Object.entries(sources)
-      .map(([src, odds]) => `${src}=${odds.value.toFixed(3)}`)
-      .join(', ');
-    return `${key}: ${vals}`;
-  }).join(' | ');
-
-  if (marketSummary) {
-    log.info(
-      `[${source}] ${event.home.aliases[source] || event.home.name} vs ${event.away.aliases[source] || event.away.name} | ${marketSummary}${changedKeys.length > 3 ? ` (+${changedKeys.length - 3} more)` : ''}`
-    );
-  }
-};
 
 async function main() {
   const config = DEFAULT_CONFIG;
@@ -63,8 +44,7 @@ async function main() {
   // Create engine
   const engine = new Engine(config);
 
-  // Register signals
-  engine.registerSignal(devSignal);
+  // Register signals (devSignal removed — use dashboard for live prices)
   engine.registerSignal(oddsDivergenceSignal);
   engine.registerSignal(scoreChangeSignal);
   engine.registerSignal(staleOddsSignal);
@@ -136,7 +116,7 @@ async function main() {
       .map(([id, s]) => `${id}=${s}`)
       .join(', ');
     log.info(`Status: ${statusStr} | Events: ${engine.eventCount}`);
-  }, 30_000);
+  }, 60_000);
 
   // Graceful shutdown
   const shutdown = async () => {

@@ -115,8 +115,10 @@ export class OnexbetLiveFeed {
       for (const r of results) {
         if (r.status === 'rejected') {
           this.consecutiveFailures++;
-          if (this.consecutiveFailures <= this.maxConsecutiveFailures) {
-            log.warn(`Poll failed (${this.consecutiveFailures}x):`, r.reason?.message || r.reason);
+          if (this.consecutiveFailures === 1) {
+            log.warn(`Poll failed: ${r.reason?.message || r.reason}`);
+          } else if (this.consecutiveFailures <= this.maxConsecutiveFailures) {
+            log.debug(`Poll failed (${this.consecutiveFailures}x): ${r.reason?.message || r.reason}`);
           }
         }
       }

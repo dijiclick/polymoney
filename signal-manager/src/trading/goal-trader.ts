@@ -233,7 +233,7 @@ export class GoalTrader {
     // Deduplicate: don't act on the same score twice
     const goalKey = `${event.id}:${score.home}-${score.away}`;
     if (this.processedGoals.has(goalKey)) {
-      log.info(`🏆 Score already processed (dedup) | ${match} | ${score.home}-${score.away}`);
+      log.debug(`Score dedup | ${match} | ${score.home}-${score.away}`);
       return;
     }
     this.processedGoals.add(goalKey);

@@ -112,7 +112,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .odds-pm,.odds-xb{text-align:center;font-family:'SF Mono','Cascadia Code',monospace;font-weight:500}
 .odds-pm{color:var(--blue)}.odds-xb{color:var(--amber)}
 .odds-edge{text-align:center;font-family:'SF Mono','Cascadia Code',monospace;font-weight:600}
-.odds-edge.pos{color:var(--green)}.odds-edge.neg{color:var(--text-muted)}
+.odds-edge.pos{color:var(--green)}.odds-edge.neg{color:var(--red)}
 .odds-edge.hot{color:var(--green);background:rgba(16,185,129,.08);border-radius:3px}
 
 /* ─── RIGHT PANEL ─── */
@@ -479,7 +479,7 @@ function renderOdds(ev,mkeys){
     h+='<div class="odds-cell odds-lbl">'+fmtKey(k)+'</div>'
       +'<div class="odds-cell odds-pm">'+(pmP!==null?pmP.toFixed(1)+'%':'\\u2014')+'</div>'
       +'<div class="odds-cell odds-xb">'+(xbP!==null?xbP.toFixed(1)+'%':'\\u2014')+'</div>'
-      +'<div class="odds-cell odds-edge '+edgeCls+'">'+(edge!==null?(edge>0?'+':'')+edge.toFixed(1)+'pp':'\\u2014')+'</div>';
+      +'<div class="odds-cell odds-edge '+edgeCls+'">'+(edge!==null?(edge>0?'+':'')+edge.toFixed(1)+'%':'\\u2014')+'</div>';
   }
   h+='</div>';
   return h;
@@ -490,7 +490,7 @@ function renderSignals(){
   var el=document.getElementById('signals');
   var opps=state.tradeSignals||[];
   document.getElementById('sig-cnt').textContent=opps.length;
-  if(opps.length===0){el.innerHTML='<div class="empty">No opportunities detected<br><span style="font-size:11px;margin-top:4px;display:block">Signals appear when PM & 1xBet diverge by 3+ pp</span></div>';return;}
+  if(opps.length===0){el.innerHTML='<div class="empty">No opportunities detected<br><span style="font-size:11px;margin-top:4px;display:block">Signals appear when PM & 1xBet diverge by 3%+</span></div>';return;}
   var h='';
   for(var i=0;i<opps.length;i++){
     var o=opps[i];
@@ -515,7 +515,7 @@ function renderSignals(){
     var escAway=o.awayTeam.replace(/'/g,"\\\\'");
     h+='<div class="opp '+o.quality+'" style="cursor:pointer" onclick="openSignalEvent(\\''+escHome+'\\',\\''+escAway+'\\')">'
       +'<div class="opp-header"><div><span class="opp-action '+(isYes?'yes':'no')+'">'+o.action.replace('_',' ')+'</span> <span class="q-badge '+o.quality+'">'+o.quality.toUpperCase()+'</span></div>'
-      +'<div class="opp-edge-box"><span class="opp-edge">'+o.edge.toFixed(1)+'<span style="font-size:12px;font-weight:600">pp</span></span>'+trend+'</div></div>'
+      +'<div class="opp-edge-box"><span class="opp-edge">'+o.edge.toFixed(1)+'<span style="font-size:12px;font-weight:600">%</span></span>'+trend+'</div></div>'
       +'<div class="opp-match">'+o.homeTeam+' vs '+o.awayTeam+(scoreTxt?' <span style="color:var(--green);font-weight:700">'+scoreTxt+'</span>':'')+liveBadge+'</div>'
       +'<div class="opp-market">'+fmtKey(o.market)+'</div>'
       +'<div class="opp-bar"><span class="opp-bar-label pm-l">PM '+pmP.toFixed(1)+'%</span><div class="opp-track"><div class="opp-fill" style="width:'+pmP+'%"></div><div class="opp-marker" style="left:'+xbP+'%"></div></div><span class="opp-bar-label xb-l">'+xbP.toFixed(1)+'% 1xB</span></div>'

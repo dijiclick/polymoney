@@ -127,10 +127,6 @@ export class TradingController {
   /** Handle a new trading opportunity from the signal engine */
   async handleSignal(opp: Opportunity): Promise<void> {
     if (!this.autoTradeEnabled) return;
-    if (!this.bot.isArmed) {
-      log.debug(`Auto-trade skip (disarmed) | ${opp.homeTeam} vs ${opp.awayTeam} | ${opp.market} | Edge:${opp.edge.toFixed(1)}pp`);
-      return;
-    }
 
     // Only trade good quality signals with meaningful edge
     if (opp.quality !== 'good') return;
@@ -142,7 +138,7 @@ export class TradingController {
 
     const tokenId = event._tokenIds[opp.market];
     if (!tokenId) {
-      log.warn(`No tokenId for ${opp.market} | ${opp.homeTeam} vs ${opp.awayTeam}`);
+      log.info(`SIGNAL (no tokenId) | ${opp.action} ${opp.market} | ${opp.homeTeam} vs ${opp.awayTeam} | Edge:${opp.edge.toFixed(1)}pp [${opp.quality}]`);
       return;
     }
 
@@ -151,10 +147,11 @@ export class TradingController {
     // Price on CLOB is probability (0-1); polyProb is 0-100
     const price = isBuyYes ? opp.polyProb / 100 : (100 - opp.polyProb) / 100;
     const roundedPrice = Math.round(price * 100) / 100;
+    const mode = this.bot.isArmed ? 'LIVE' : 'DRY';
 
     log.info(
-      `AUTO-TRADE | ${opp.action} ${opp.market} | ${opp.homeTeam} vs ${opp.awayTeam} | ` +
-      `Edge:${opp.edge.toFixed(1)}pp | Price:${roundedPrice} | $${amount}`
+      `TRADE [${mode}] | ${opp.action} ${opp.market} | ${opp.homeTeam} vs ${opp.awayTeam} | ` +
+      `Edge:${opp.edge.toFixed(1)}pp | PM:${opp.polyProb.toFixed(1)}% 1xBet:${opp.xbetProb.toFixed(1)}% | Price:${roundedPrice} | $${amount}`
     );
 
     await this.bot.trade({
