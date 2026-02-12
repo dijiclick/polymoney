@@ -112,12 +112,15 @@ export class TradingBot extends EventEmitter {
 
     try {
       const signer = new Wallet(this.config.privateKey);
-      
-      // Create client and derive API creds
+
+      // Create client with signature type for correct API key derivation
       const tempClient = new ClobClient(
         this.config.host,
         this.config.chainId,
-        signer
+        signer,
+        undefined, // no creds yet
+        this.config.signatureType,
+        this.config.funderAddress
       );
       const creds = await tempClient.createOrDeriveApiKey();
       

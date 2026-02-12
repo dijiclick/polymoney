@@ -50,14 +50,21 @@ export class StateStore {
         const s = update.stats;
         if (s.score) {
           const prev = event.stats.score;
-          if (!prev || prev.home !== s.score.home || prev.away !== s.score.away) {
+          const scoreChanged = !prev || prev.home !== s.score.home || prev.away !== s.score.away;
+          const sourceChanged = event._lastScoreSource && event._lastScoreSource !== update.sourceId;
+
+          // Emit __score if the actual score changed OR if the same score arrives
+          // from a different source (critical: PM WebSocket can set score before 1xBet poll,
+          // and GoalTrader only acts on non-PM sources)
+          if (scoreChanged || sourceChanged) {
             changedKeys.push('__score');
-            // Save previous score for goal classification
-            if (prev) {
+            // Save previous score for goal classification (only when score actually changed)
+            if (scoreChanged && prev) {
               event._prevScore = { home: prev.home, away: prev.away };
             }
           }
           event.stats.score = s.score;
+          event._lastScoreSource = update.sourceId;
         }
         if (s.period !== undefined) event.stats.period = s.period;
         if (s.elapsed !== undefined) event.stats.elapsed = s.elapsed;

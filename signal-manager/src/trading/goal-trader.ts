@@ -132,8 +132,12 @@ export class GoalTrader {
   get signalHandler(): SignalFunction {
     return (event: UnifiedEvent, changedKeys: string[], source: string) => {
       // --- Entry: goal detected from non-PM source ---
-      if (changedKeys.includes('__score') && source !== 'polymarket') {
-        this.handleGoal(event, source);
+      if (changedKeys.includes('__score')) {
+        if (source === 'polymarket') {
+          log.debug(`Score change from PM (ignored for trading) | ${event.home.name || '?'} vs ${event.away.name || '?'} | score=${event.stats.score?.home}-${event.stats.score?.away}`);
+        } else {
+          this.handleGoal(event, source);
+        }
       }
 
       // --- Exit monitoring: PM price updates for open positions ---
@@ -149,47 +153,65 @@ export class GoalTrader {
   // --- Entry Logic ---
 
   private handleGoal(event: UnifiedEvent, source: string): void {
-    if (!this.config.enabled) return;
-    if (!event.stats.score) return;
+    const match = this.matchName(event);
+
+    if (!this.config.enabled) {
+      log.debug(`Goal signal ignored (GoalTrader disabled) | ${match} | source=${source}`);
+      return;
+    }
+    if (!event.stats.score) {
+      log.warn(`Goal signal but no score data | ${match} | source=${source}`);
+      return;
+    }
 
     const score = event.stats.score;
     const prevScore = event._prevScore || { home: 0, away: 0 };
 
+    log.info(`⚽ GOAL DETECTED | ${match} | ${prevScore.home}-${prevScore.away} → ${score.home}-${score.away} | source=${source}`);
+
     // Deduplicate: don't act on the same goal twice
     const goalKey = `${event.id}:${score.home}-${score.away}`;
-    if (this.processedGoals.has(goalKey)) return;
+    if (this.processedGoals.has(goalKey)) {
+      log.info(`⚽ Goal already processed (dedup) | ${match} | ${score.home}-${score.away}`);
+      return;
+    }
     this.processedGoals.add(goalKey);
 
     // Classify the goal
     const goalType = this.classifyGoal(score, prevScore);
 
     if (goalType === 'extending' && this.config.skipExtendingLead) {
-      log.info(`⚽ SKIP extending goal ${score.home}-${score.away} | ${this.matchName(event)}`);
+      log.info(`⚽ SKIP extending goal ${score.home}-${score.away} | ${match}`);
       return;
     }
 
     // Determine which ML market to buy and the direction
     const { marketKey, side } = this.inferTrade(score, prevScore);
-    if (!marketKey) return;
+    if (!marketKey) {
+      log.warn(`⚽ Could not infer trade direction | ${match} | ${score.home}-${score.away}`);
+      return;
+    }
 
     // Get tokenId from the pipeline
     const tokenId = event._tokenIds[marketKey];
     if (!tokenId) {
-      log.warn(`⚽ No tokenId for ${marketKey} on ${this.matchName(event)} — cannot trade`);
+      const availableTokens = Object.keys(event._tokenIds).join(', ') || 'none';
+      log.warn(`⚽ No tokenId for ${marketKey} on ${match} — available: [${availableTokens}]`);
       return;
     }
 
     // Get current PM price for this market
     const pmData = event.markets[marketKey]?.polymarket;
     if (!pmData) {
-      log.warn(`⚽ No PM price for ${marketKey} on ${this.matchName(event)} — cannot trade`);
+      const availableMarkets = Object.keys(event.markets).join(', ') || 'none';
+      log.warn(`⚽ No PM price for ${marketKey} on ${match} — available markets: [${availableMarkets}]`);
       return;
     }
 
     // Don't buy if we already have a position on this event
     for (const pos of this.positions.values()) {
       if (pos.eventId === event.id) {
-        log.info(`⚽ Already have position on ${this.matchName(event)} — skipping`);
+        log.info(`⚽ Already have position on ${match} — skipping`);
         return;
       }
     }
@@ -207,7 +229,6 @@ export class GoalTrader {
       : Math.min(0.99, entryPrice + this.config.stopLossPp / 100);
 
     const now = Date.now();
-    const match = this.matchName(event);
 
     log.info(
       `⚽ GOAL TRADE | ${match} | ${score.home}-${score.away} | Type: ${goalType} | ` +

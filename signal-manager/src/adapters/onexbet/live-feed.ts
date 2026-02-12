@@ -162,17 +162,35 @@ export class OnexbetLiveFeed {
   }
 
   private computeOddsHash(game: OnexbetGameData): string {
-    const val = game.Value || game;
-    const ge = (val as any).GE;
-    if (!ge || !Array.isArray(ge)) return '';
-    
+    const val = game.Value || game as any;
+
+    // Include score in hash so score-only changes (when markets are suspended
+    // during goals) are detected and not deduplicated away
     let hash = '';
-    for (const group of ge) {
-      if (!group.E) continue;
-      for (const market of group.E) {
-        if (!Array.isArray(market) || market.length === 0) continue;
-        const m = market[0];
-        hash += `${group.G}:${m.T}:${m.C};`;
+    const sc = (val as any).SC;
+    if (sc) {
+      if (sc.FS) {
+        hash += `SC:${sc.FS.S1 || 0}-${sc.FS.S2 || 0};`;
+      } else if (sc.PS && Array.isArray(sc.PS)) {
+        let h = 0, a = 0;
+        for (const p of sc.PS) {
+          const v = p.Value || p;
+          h += v.S1 || 0;
+          a += v.S2 || 0;
+        }
+        hash += `SC:${h}-${a};`;
+      }
+    }
+
+    const ge = (val as any).GE;
+    if (ge && Array.isArray(ge)) {
+      for (const group of ge) {
+        if (!group.E) continue;
+        for (const market of group.E) {
+          if (!Array.isArray(market) || market.length === 0) continue;
+          const m = market[0];
+          hash += `${group.G}:${m.T}:${m.C};`;
+        }
       }
     }
     return hash;

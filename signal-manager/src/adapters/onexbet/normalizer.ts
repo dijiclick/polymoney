@@ -54,9 +54,7 @@ export function normalizeGameData(
     }
   }
 
-  if (markets.length === 0) return null;
-
-  // Parse score from SC structure
+  // Parse score from SC structure (moved BEFORE the markets check)
   let score: { home: number; away: number } | undefined;
   if (val.SC) {
     if (val.SC.FS) {
@@ -71,6 +69,10 @@ export function normalizeGameData(
       score = { home: totalHome, away: totalAway };
     }
   }
+
+  // Allow through if we have score data even without markets
+  // (during goals, bookmakers suspend markets for 30-60s — but score still changes)
+  if (markets.length === 0 && !score) return null;
 
   return {
     sourceId: SOURCE_ID,

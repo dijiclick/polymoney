@@ -21,7 +21,7 @@ export const DEFAULT_CONFIG: Config = {
       sportIds: [1], // Soccer
     },
     flashscore: {
-      enabled: true,
+      enabled: false,
       pollIntervalMs: 15_000,
       leagues: [
         { sport: 'soccer', fsPath: 'football/england/premier-league', name: 'EPL' },

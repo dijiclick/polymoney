@@ -35,6 +35,8 @@ export interface UnifiedEvent {
   _tokenIds: Record<string, string>;
   /** Previous score before last update (for goal classification) */
   _prevScore?: { home: number; away: number };
+  /** Source that last set the score (for cross-source dedup) */
+  _lastScoreSource?: string;
   polymarketSlug?: string;
   _lastUpdate: number;
 }
