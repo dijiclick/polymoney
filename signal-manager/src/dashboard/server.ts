@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Engine } from '../core/engine.js';
@@ -155,6 +155,14 @@ export class Dashboard {
     if (req.url === '/logs/goal-trades') {
       return this.serveLogFile(res, 'goal-trades.jsonl');
     }
+    // GET /logs/sessions — list session log files
+    if (req.url === '/logs/sessions') {
+      return this.serveSessionList(res);
+    }
+    // GET /logs/sessions/latest — download latest session log
+    if (req.url === '/logs/sessions/latest') {
+      return this.serveLatestSession(res);
+    }
 
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(DASHBOARD_HTML);
@@ -178,6 +186,55 @@ export class Dashboard {
     } catch (err: any) {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end(`Error reading ${filename}: ${err.message}`);
+    }
+  }
+
+  private serveSessionList(res: ServerResponse): void {
+    const dir = join(process.cwd(), 'data', 'sessions');
+    if (!existsSync(dir)) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify([]));
+      return;
+    }
+    try {
+      const files = readdirSync(dir)
+        .filter(f => f.startsWith('session-') && f.endsWith('.log'))
+        .sort()
+        .reverse();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(files));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end(`Error: ${err.message}`);
+    }
+  }
+
+  private serveLatestSession(res: ServerResponse): void {
+    const dir = join(process.cwd(), 'data', 'sessions');
+    if (!existsSync(dir)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('No sessions directory');
+      return;
+    }
+    try {
+      const files = readdirSync(dir)
+        .filter(f => f.startsWith('session-') && f.endsWith('.log'))
+        .sort()
+        .reverse();
+      if (files.length === 0) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('No session logs found');
+        return;
+      }
+      const content = readFileSync(join(dir, files[0]), 'utf-8');
+      res.writeHead(200, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${files[0]}"`,
+      });
+      res.end(content);
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end(`Error: ${err.message}`);
     }
   }
 
