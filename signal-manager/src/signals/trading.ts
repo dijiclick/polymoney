@@ -14,6 +14,7 @@ export interface Opportunity {
   homeTeam: string;
   awayTeam: string;
   league: string;
+  sport: string;
   market: string;
   action: TradeAction;
   edge: number;            // absolute pp edge
@@ -59,6 +60,14 @@ interface ClosedOpportunityLog {
 const opportunities: Map<string, Opportunity> = new Map();
 // Historical log of closed opportunities (in-memory)
 const closedOpportunities: Opportunity[] = [];
+
+// Callback for auto-trade pipeline
+let opportunityCallback: ((opp: Opportunity) => void) | null = null;
+
+/** Register a callback for new tradeable opportunities (auto-trade pipeline) */
+export function setOpportunityCallback(cb: (opp: Opportunity) => void): void {
+  opportunityCallback = cb;
+}
 
 let idCounter = 0;
 
@@ -244,6 +253,7 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
         homeTeam: homeName,
         awayTeam: awayName,
         league: event.league,
+        sport: event.sport || '',
         market: key,
         action,
         edge: absEdge,
@@ -272,6 +282,10 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
           `📊 NEW ${action} | ${homeName} vs ${awayName} | ${key.replace(/_ft$/, '')} | ` +
           `PM:${polyProb.toFixed(1)}% vs 1xBet:${xbetProb.toFixed(1)}% | Edge:${absEdge.toFixed(1)}pp [${quality}]`
         );
+        // Fire auto-trade callback for new tradeable opportunities
+        if (opportunityCallback) {
+          try { opportunityCallback(opp); } catch { /* don't crash signal pipeline */ }
+        }
       }
     }
   }
@@ -317,6 +331,7 @@ export const scoreTradeSignal: SignalFunction = (event, changedKeys, source) => 
           homeTeam: homeName,
           awayTeam: awayName,
           league: event.league,
+          sport: event.sport || '',
           market: key,
           action,
           edge: 0,

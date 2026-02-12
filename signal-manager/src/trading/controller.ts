@@ -8,6 +8,10 @@
 import { TradingBot, TradeRequest, TradingConfig } from './bot.js';
 import type { Engine } from '../core/engine.js';
 import type { GoalTrader } from './goal-trader.js';
+import type { Opportunity } from '../signals/trading.js';
+import { createLogger } from '../util/logger.js';
+
+const log = createLogger('trading-ctrl');
 
 export class TradingController {
   private bot: TradingBot;
@@ -120,33 +124,52 @@ export class TradingController {
     }
   }
 
-  /** Handle a trading signal from the signal engine */
-  async handleSignal(signal: any): Promise<void> {
+  /** Handle a new trading opportunity from the signal engine */
+  async handleSignal(opp: Opportunity): Promise<void> {
     if (!this.autoTradeEnabled) return;
-    if (!this.bot.isArmed) return;
-
-    // Only act on high-confidence signals
-    if (signal.type === 'TRADE_SIGNAL' && signal.data?.confidence >= 0.7) {
-      const { tokenId, action, price, edge, eventName } = signal.data;
-      if (!tokenId || !action || !price) return;
-
-      const amount = this.bot['config'].minTradeSize; // Use minimum for auto trades
-      const side = action.includes('BUY') ? 'BUY' : 'SELL';
-      const outcome = action.includes('NO') ? 'NO' : 'YES';
-
-      await this.bot.trade({
-        tokenId,
-        side: side as 'BUY' | 'SELL',
-        outcome: outcome as 'YES' | 'NO',
-        amount,
-        price,
-        orderType: 'FOK',
-        tickSize: '0.01',
-        negRisk: false,
-        eventName,
-        signalId: signal.id,
-      });
+    if (!this.bot.isArmed) {
+      log.debug(`Auto-trade skip (disarmed) | ${opp.homeTeam} vs ${opp.awayTeam} | ${opp.market} | Edge:${opp.edge.toFixed(1)}pp`);
+      return;
     }
+
+    // Only trade good quality signals with meaningful edge
+    if (opp.quality !== 'good') return;
+    if (opp.edge < 3) return;
+
+    // Look up tokenId from the engine
+    const event = this.engine.getAllEvents().find(e => e.id === opp.eventId);
+    if (!event) return;
+
+    const tokenId = event._tokenIds[opp.market];
+    if (!tokenId) {
+      log.warn(`No tokenId for ${opp.market} | ${opp.homeTeam} vs ${opp.awayTeam}`);
+      return;
+    }
+
+    const amount = this.bot['config'].minTradeSize;
+    const isBuyYes = opp.action === 'BUY_YES';
+    // Price on CLOB is probability (0-1); polyProb is 0-100
+    const price = isBuyYes ? opp.polyProb / 100 : (100 - opp.polyProb) / 100;
+    const roundedPrice = Math.round(price * 100) / 100;
+
+    log.info(
+      `AUTO-TRADE | ${opp.action} ${opp.market} | ${opp.homeTeam} vs ${opp.awayTeam} | ` +
+      `Edge:${opp.edge.toFixed(1)}pp | Price:${roundedPrice} | $${amount}`
+    );
+
+    await this.bot.trade({
+      tokenId,
+      side: 'BUY',
+      outcome: isBuyYes ? 'YES' : 'NO',
+      amount,
+      price: roundedPrice,
+      orderType: 'FOK',
+      tickSize: '0.01',
+      negRisk: false,
+      eventName: `${opp.homeTeam} vs ${opp.awayTeam}`,
+      signalId: opp.id,
+      marketKey: opp.market,
+    });
   }
 
   /** Quick buy by searching events */

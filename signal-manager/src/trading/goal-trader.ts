@@ -200,8 +200,15 @@ export class GoalTrader {
     }
 
     const score = event.stats.score;
-    const prevScore = event._prevScore || { home: 0, away: 0 };
     const sportCategory = getSportCategory(sport);
+
+    // _prevScore is only set after the first score change is observed.
+    // If undefined, this is the first score we've seen (bootstrap) — not a real goal.
+    if (!event._prevScore) {
+      log.info(`First score seen (bootstrap) | ${match} | ${score.home}-${score.away} | sport=${sport} | skipping`);
+      return;
+    }
+    const prevScore = event._prevScore;
 
     // For high-scoring sports (basketball, baseball, esports), require a meaningful swing
     const totalDelta = Math.abs((score.home + score.away) - (prevScore.home + prevScore.away));

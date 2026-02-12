@@ -9,7 +9,7 @@ import { Dashboard } from './dashboard/server.js';
 import { DEFAULT_CONFIG } from '../config/default.js';
 import { setLogLevel, createLogger } from './util/logger.js';
 import { oddsDivergenceSignal, scoreChangeSignal, staleOddsSignal } from './signals/index.js';
-import { tradingSignal, scoreTradeSignal } from './signals/trading.js';
+import { tradingSignal, scoreTradeSignal, setOpportunityCallback } from './signals/trading.js';
 import { reactionTimerSignal } from './signals/reaction-timer.js';
 import { TradingBot } from './trading/bot.js';
 import { TradingController } from './trading/controller.js';
@@ -95,6 +95,9 @@ async function main() {
   });
 
   const tradingController = new TradingController(tradingBot, engine);
+
+  // Wire auto-trade pipeline: new opportunities → controller.handleSignal
+  setOpportunityCallback((opp) => tradingController.handleSignal(opp));
 
   // Initialize GoalTrader (auto buy on goal + smart exit)
   const goalTrader = new GoalTrader(tradingBot, {
