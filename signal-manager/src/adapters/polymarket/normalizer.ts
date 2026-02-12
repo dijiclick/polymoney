@@ -23,7 +23,7 @@ export function normalizePriceChange(
     startTime: mapping.startTime,
     homeTeam: mapping.homeTeam,
     awayTeam: mapping.awayTeam,
-    markets: [{ key: marketKey, value: decimalOdds }],
+    markets: [{ key: marketKey, value: decimalOdds, tokenId: mapping.tokenId }],
     timestamp,
   };
 }

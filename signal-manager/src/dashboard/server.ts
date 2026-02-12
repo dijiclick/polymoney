@@ -109,6 +109,13 @@ export class Dashboard {
       return;
     }
 
+    if (req.url === '/api/goal-trader') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      const state = this.tradingController?.getState();
+      res.end(JSON.stringify(state?.goalTrader || { enabled: false }));
+      return;
+    }
+
     // POST /api/trading/command — execute trading commands
     if (req.url === '/api/trading/command' && req.method === 'POST') {
       let body = '';
@@ -143,6 +150,10 @@ export class Dashboard {
     // GET /logs/opportunities — download opportunities.jsonl
     if (req.url === '/logs/opportunities') {
       return this.serveLogFile(res, 'opportunities.jsonl');
+    }
+    // GET /logs/goal-trades — download goal-trades.jsonl
+    if (req.url === '/logs/goal-trades') {
+      return this.serveLogFile(res, 'goal-trades.jsonl');
     }
 
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });

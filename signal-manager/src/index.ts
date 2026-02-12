@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Engine } from './core/engine.js';
 import { PolymarketAdapter } from './adapters/polymarket/index.js';
 import { OnexbetAdapter } from './adapters/onexbet/index.js';
@@ -10,7 +13,24 @@ import { tradingSignal, scoreTradeSignal } from './signals/trading.js';
 import { reactionTimerSignal } from './signals/reaction-timer.js';
 import { TradingBot } from './trading/bot.js';
 import { TradingController } from './trading/controller.js';
+import { GoalTrader } from './trading/goal-trader.js';
 import type { SignalFunction } from './core/signal-dispatcher.js';
+
+// Load .env file (no dotenv dependency needed)
+try {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const envPath = resolve(__dirname, '..', '..', '.env');
+  const content = readFileSync(envPath, 'utf-8');
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx);
+    const val = trimmed.slice(eqIdx + 1);
+    if (!process.env[key]) process.env[key] = val;
+  }
+} catch { /* no .env file */ }
 
 const log = createLogger('main');
 
@@ -64,18 +84,30 @@ async function main() {
   }
 
   // Initialize trading bot (disabled by default — needs credentials in env)
+  const polyKey = process.env.POLY_PRIVATE_KEY || process.env.POLYMARKET_PRIVATE_KEY || '';
   const tradingBot = new TradingBot({
-    privateKey: process.env.POLY_PRIVATE_KEY || '',
+    privateKey: polyKey,
     funderAddress: process.env.POLY_FUNDER_ADDRESS || '',
     signatureType: parseInt(process.env.POLY_SIGNATURE_TYPE || '0') as 0 | 1 | 2,
     armed: false, // Always start disarmed
     minTradeSize: 1.0,
-    maxTradeSize: 5.0,
+    maxTradeSize: 1.0,
   });
 
   const tradingController = new TradingController(tradingBot, engine);
 
-  if (process.env.POLY_PRIVATE_KEY) {
+  // Initialize GoalTrader (auto buy on goal + smart exit)
+  const goalTrader = new GoalTrader(tradingBot, {
+    enabled: false,  // Must be explicitly enabled via command
+    sizeLarge: 1.0,
+    sizeMedium: 1.0,
+    sizeSmall: 1.0,
+  });
+  engine.registerSignal(goalTrader.signalHandler);
+  goalTrader.start();
+  tradingController.setGoalTrader(goalTrader);
+
+  if (polyKey) {
     const ok = await tradingBot.initialize();
     if (ok) log.info('Trading bot initialized (DISARMED)');
     else log.warn('Trading bot failed to initialize');

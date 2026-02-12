@@ -309,6 +309,28 @@ export class TradingBot extends EventEmitter {
     });
   }
 
+  /** Sell an existing position at market (FOK) */
+  async sellPosition(tokenId: string, shares: number, price: number, opts: { eventName?: string } = {}): Promise<TradeResult> {
+    const pos = this.positions.get(tokenId);
+    const outcome = pos?.side || 'YES';
+    return this.trade({
+      tokenId,
+      side: 'SELL',
+      outcome,
+      amount: shares * price, // USDC value
+      price,
+      orderType: 'FOK',
+      tickSize: '0.01',
+      negRisk: false,
+      eventName: opts.eventName,
+    });
+  }
+
+  /** Get a position by tokenId */
+  getPosition(tokenId: string): Position | undefined {
+    return this.positions.get(tokenId);
+  }
+
   /** Cancel all open orders */
   async cancelAll(): Promise<boolean> {
     if (!this.client || !this.initialized) return false;

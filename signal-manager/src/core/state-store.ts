@@ -39,6 +39,10 @@ export class StateStore {
         } else {
           bucket[update.sourceId] = { value: m.value, timestamp: update.timestamp };
         }
+        // Store Polymarket token IDs
+        if (m.tokenId) {
+          event._tokenIds[m.key] = m.tokenId;
+        }
       }
 
       // Merge stats in-place
@@ -48,6 +52,10 @@ export class StateStore {
           const prev = event.stats.score;
           if (!prev || prev.home !== s.score.home || prev.away !== s.score.away) {
             changedKeys.push('__score');
+            // Save previous score for goal classification
+            if (prev) {
+              event._prevScore = { home: prev.home, away: prev.away };
+            }
           }
           event.stats.score = s.score;
         }
@@ -81,11 +89,15 @@ export class StateStore {
 
   private createEvent(eventId: string, update: AdapterEventUpdate): UnifiedEvent {
     const markets: UnifiedEvent['markets'] = {};
+    const tokenIds: Record<string, string> = {};
     for (let i = 0; i < update.markets.length; i++) {
       const m = update.markets[i];
       markets[m.key] = {
         [update.sourceId]: { value: m.value, timestamp: update.timestamp },
       };
+      if (m.tokenId) {
+        tokenIds[m.key] = m.tokenId;
+      }
     }
 
     return {
@@ -104,6 +116,7 @@ export class StateStore {
       },
       stats: update.stats ? { ...update.stats } : {},
       markets,
+      _tokenIds: tokenIds,
       polymarketSlug: update.sourceEventSlug,
       _lastUpdate: Date.now(),
     };

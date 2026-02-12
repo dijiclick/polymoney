@@ -3,6 +3,8 @@ import type { EventStatus, EventStats } from './unified-event.js';
 export interface AdapterMarketUpdate {
   key: string;
   value: number;
+  /** Polymarket CLOB token ID (only set by polymarket adapter) */
+  tokenId?: string;
 }
 
 export interface AdapterEventUpdate {

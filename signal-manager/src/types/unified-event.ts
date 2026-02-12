@@ -31,6 +31,10 @@ export interface UnifiedEvent {
   away: TeamInfo;
   stats: EventStats;
   markets: { [marketKey: string]: MarketSources };
+  /** Polymarket CLOB token IDs: marketKey → tokenId */
+  _tokenIds: Record<string, string>;
+  /** Previous score before last update (for goal classification) */
+  _prevScore?: { home: number; away: number };
   polymarketSlug?: string;
   _lastUpdate: number;
 }

@@ -7,15 +7,21 @@
 
 import { TradingBot, TradeRequest, TradingConfig } from './bot.js';
 import type { Engine } from '../core/engine.js';
+import type { GoalTrader } from './goal-trader.js';
 
 export class TradingController {
   private bot: TradingBot;
   private engine: Engine;
   private autoTradeEnabled = false;
+  private goalTrader: GoalTrader | null = null;
 
   constructor(bot: TradingBot, engine: Engine) {
     this.bot = bot;
     this.engine = engine;
+  }
+
+  setGoalTrader(gt: GoalTrader): void {
+    this.goalTrader = gt;
   }
 
   /** Handle a command string (from Telegram or API) */
@@ -79,8 +85,38 @@ export class TradingController {
         return await this.quickBuy(parts[1], parseFloat(parts[2]));
       }
 
+      case 'goaltrader': {
+        if (!this.goalTrader) return '❌ GoalTrader not configured';
+        const sub = parts[1]?.toLowerCase();
+        if (sub === 'on' || sub === 'enable') {
+          this.goalTrader.enable();
+          return '⚽ GoalTrader ENABLED — will auto-trade on goals';
+        } else if (sub === 'off' || sub === 'disable') {
+          this.goalTrader.disable();
+          return '⚽ GoalTrader DISABLED';
+        } else if (sub === 'status') {
+          const s = this.goalTrader.getState();
+          const lines = [
+            `⚽ GoalTrader: ${s.enabled ? '🟢 ON' : '🔴 OFF'}`,
+            `Open positions: ${s.openPositions.length}`,
+            `Total trades: ${s.totalTrades}`,
+            `Total P&L: ${s.totalPnl >= 0 ? '+' : ''}$${s.totalPnl.toFixed(3)}`,
+            `Config: TP=${(s.config.takeProfitPct * 100).toFixed(0)}% | SL=${s.config.stopLossPp}pp | Hard exit=${s.config.hardExitMs / 1000}s`,
+          ];
+          if (s.openPositions.length > 0) {
+            lines.push('--- Open ---');
+            for (const p of s.openPositions) {
+              const hold = ((Date.now() - p.entryTime) / 1000).toFixed(0);
+              lines.push(`  ${p.match} | ${p.side} ${p.marketKey} @ ${p.entryPrice.toFixed(3)} → ${p.lastPrice.toFixed(3)} | ${hold}s`);
+            }
+          }
+          return lines.join('\n');
+        }
+        return 'Usage: goaltrader <on|off|status>';
+      }
+
       default:
-        return `Unknown command: ${action}\nCommands: arm, disarm, status, positions, history, cancel, autotrade, buy, sell, quickbuy`;
+        return `Unknown command: ${action}\nCommands: arm, disarm, status, positions, history, cancel, autotrade, buy, sell, quickbuy, goaltrader`;
     }
   }
 
@@ -178,6 +214,7 @@ export class TradingController {
     return {
       ...this.bot.getState(),
       autoTradeEnabled: this.autoTradeEnabled,
+      goalTrader: this.goalTrader?.getState() || null,
     };
   }
 }
