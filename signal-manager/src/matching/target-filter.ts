@@ -42,8 +42,18 @@ export class TargetEventFilter {
     let bestTarget: TargetEvent | undefined;
 
     for (const target of this.targets) {
-      const homeScore = jaroWinkler(homeNorm, target.homeNormalized);
-      const awayScore = jaroWinkler(awayNorm, target.awayNormalized);
+      let homeScore = jaroWinkler(homeNorm, target.homeNormalized);
+      let awayScore = jaroWinkler(awayNorm, target.awayNormalized);
+
+      // Substring boost: if the shorter name is contained within the longer one
+      // and is at least 3 chars, boost score to 0.90. Handles cases like
+      // "barys" ⊆ "barys_astana", "furia" ⊆ "furia_esports"
+      if (homeScore < minPerTeam) {
+        homeScore = this.substringBoost(homeNorm, target.homeNormalized, homeScore);
+      }
+      if (awayScore < minPerTeam) {
+        awayScore = this.substringBoost(awayNorm, target.awayNormalized, awayScore);
+      }
 
       // Both teams must individually meet minimum threshold
       if (homeScore < minPerTeam || awayScore < minPerTeam) continue;
@@ -65,5 +75,17 @@ export class TargetEventFilter {
     }
 
     return { matched: false, score: bestScore };
+  }
+
+  private substringBoost(a: string, b: string, currentScore: number): number {
+    const short = a.length <= b.length ? a : b;
+    const long = a.length <= b.length ? b : a;
+    // Must be at least 3 chars to prevent false positives like "b8" matching anything
+    if (short.length < 3) return currentScore;
+    // Check if shorter is a prefix of or contained within the longer
+    if (long.startsWith(short) || long.includes('_' + short) || long.includes(short + '_')) {
+      return Math.max(currentScore, 0.90);
+    }
+    return currentScore;
   }
 }

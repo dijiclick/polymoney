@@ -56,7 +56,21 @@ export class OnexbetAdapter implements IFilterableAdapter {
       const liveIds = liveFiltered.map(g => g.I);
       const preMatchIds = preMatchFiltered.map(g => g.I);
       this.gameIds = [...liveIds, ...preMatchIds];
+      // Log unmatched games for diagnosis
+      const allGames = [...liveGames, ...preMatchGames];
+      const unmatched = allGames.filter(g => !liveFiltered.some(f => f.I === g.I) && !preMatchFiltered.some(f => f.I === g.I));
+      const sportBreakdown: Record<number, { total: number; matched: number }> = {};
+      for (const g of allGames) {
+        if (!sportBreakdown[g.S]) sportBreakdown[g.S] = { total: 0, matched: 0 };
+        sportBreakdown[g.S].total++;
+      }
+      for (const g of [...liveFiltered, ...preMatchFiltered]) {
+        if (sportBreakdown[g.S]) sportBreakdown[g.S].matched++;
+      }
       log.info(`Discovered ${liveGames.length} live + ${preMatchGames.length} pre-match, ${liveFiltered.length}+${preMatchFiltered.length} match PM targets`);
+      for (const [sid, stats] of Object.entries(sportBreakdown)) {
+        if (stats.total > 0) log.info(`  Sport ${sid}: ${stats.matched}/${stats.total} matched`);
+      }
 
       // 2. Tell live feed which IDs are pre-match (uses LineFeed URL)
       this.liveFeed.setPreMatchIds(preMatchIds);
@@ -143,6 +157,8 @@ export class OnexbetAdapter implements IFilterableAdapter {
         if (result.targetEvent) {
           this.matchedTargets.set(game.I, result.targetEvent);
         }
+      } else if (result.score > 0.5) {
+        log.debug(`Near-miss (${result.score.toFixed(2)}): 1xBet "${game.O1}" vs "${game.O2}" (sport ${game.S})`);
       }
     }
     return filtered;

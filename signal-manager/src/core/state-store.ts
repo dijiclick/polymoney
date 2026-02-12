@@ -88,6 +88,11 @@ export class StateStore {
       if (update.sourceEventSlug && !event.polymarketSlug) {
         event.polymarketSlug = update.sourceEventSlug;
       }
+
+      // Store source event IDs (e.g. 1xBet game ID)
+      if (update.sourceEventId) {
+        event._sourceEventIds[update.sourceId] = update.sourceEventId;
+      }
     }
 
     event._lastUpdate = Date.now();
@@ -125,6 +130,7 @@ export class StateStore {
       markets,
       _tokenIds: tokenIds,
       polymarketSlug: update.sourceEventSlug,
+      _sourceEventIds: update.sourceEventId ? { [update.sourceId]: update.sourceEventId } : {},
       _lastUpdate: Date.now(),
     };
   }

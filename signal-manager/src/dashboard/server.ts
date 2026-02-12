@@ -299,6 +299,23 @@ export class Dashboard {
     };
   }
 
+  private buildXbetUrl(composite: string | undefined, status: string, home?: string, away?: string): string | null {
+    if (!composite) return null;
+    // Format: "gameId|leagueId|sportUrlSlug|leagueName"
+    const parts = composite.split('|');
+    if (parts.length < 3) return null;
+    const [gameId, leagueId, sportSlug] = parts;
+    const leagueName = parts.slice(3).join('|'); // in case league name had |
+    if (!gameId || leagueId === '0' || !leagueId) return null;
+
+    const slugify = (s: string) => s.toLowerCase().replace(/\./g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const section = status === 'live' ? 'live' : 'line';
+    const leagueSlug = slugify(leagueName);
+    const teamSlug = [home, away].filter(Boolean).map(t => slugify(t!)).join('-');
+
+    return `https://1xlite-14395.pro/en/${section}/${sportSlug}/${leagueId}-${leagueSlug}/${gameId}-${teamSlug}`;
+  }
+
   private buildState() {
     const events = this.engine.getAllEvents();
     const adapters: Record<string, string> = {};
@@ -309,6 +326,8 @@ export class Dashboard {
     return {
       timestamp: Date.now(),
       eventCount: events.length,
+      uptime: process.uptime(),
+      closedOpportunityCount: getClosedOpportunities().length,
       adapters,
       events: events.map(e => {
         // Collect unique sources across ALL markets
@@ -334,6 +353,7 @@ export class Dashboard {
           awayAliases: e.away.aliases,
           sources: Array.from(sourceSet),
           pmSlug: e.polymarketSlug || null,
+          xbetUrl: this.buildXbetUrl(e._sourceEventIds?.['onexbet'], e.status, e.home.aliases['onexbet'], e.away.aliases['onexbet']),
           startTime: e.startTime || 0,
           score: e.stats.score || null,
           elapsed: e.stats.elapsed || null,

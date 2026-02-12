@@ -17,6 +17,7 @@ export interface OnexbetGameSummary {
   O1: string;   // Home team
   O2: string;   // Away team
   L: string;    // League
+  LI?: number;  // League/Championship ID (for URL construction)
   CN?: string;  // Country name
   S: number;    // Sport ID
   T: number;    // Start time (unix seconds)
@@ -83,6 +84,7 @@ export class OnexbetDiscovery {
           O1: item.O1,
           O2: item.O2,
           L: item.L || '',
+          LI: item.LI || undefined,
           CN: item.CN,
           S: sportId,
           T: item.S || item.T || 0, // API puts start time in S field

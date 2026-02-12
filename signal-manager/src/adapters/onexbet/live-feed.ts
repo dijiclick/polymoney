@@ -127,6 +127,8 @@ export class OnexbetLiveFeed {
   private async fetchAndEmit(gameId: number): Promise<void> {
     const gameData = await this.fetchGameDetail(gameId);
     if (!gameData) return;
+    // GetGameZip doesn't include game ID in response — inject it
+    if (!gameData.I) gameData.I = gameId;
 
     const hash = this.computeOddsHash(gameData);
     const prevHash = this.prevOddsHash.get(gameId);

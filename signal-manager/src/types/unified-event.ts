@@ -38,5 +38,7 @@ export interface UnifiedEvent {
   /** Source that last set the score (for cross-source dedup) */
   _lastScoreSource?: string;
   polymarketSlug?: string;
+  /** Per-source external event IDs (e.g. 1xBet game ID) */
+  _sourceEventIds: Record<string, string>;
   _lastUpdate: number;
 }

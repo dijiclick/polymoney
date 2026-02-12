@@ -82,14 +82,21 @@ export class PolymarketDiscovery {
         }
       }
 
-      log.info(`Fetching events for ${uniqueTags.size} unique tags...`);
-
-      // Fetch events for each unique tag (skip tag "1" which is too broad)
+      // Filter to unfetched, non-broad tags
+      const tagsToFetch: [string, string][] = [];
       for (const [tagId, sportSlug] of uniqueTags) {
-        if (tagId === '1') continue; // Tag 1 = all sports, too broad
-        if (this.fetchedTags.has(tagId)) continue;
-        await this.fetchEventsForTag(tagId, sportSlug);
-        this.fetchedTags.add(tagId);
+        if (tagId === '1' || this.fetchedTags.has(tagId)) continue;
+        tagsToFetch.push([tagId, sportSlug]);
+      }
+      log.info(`Fetching events for ${tagsToFetch.length} unique tags (parallel batches of 10)...`);
+
+      // Fetch in parallel batches of 10 to avoid hammering the API
+      const BATCH = 10;
+      for (let i = 0; i < tagsToFetch.length; i += BATCH) {
+        const batch = tagsToFetch.slice(i, i + BATCH);
+        await Promise.all(batch.map(([tagId, sportSlug]) =>
+          this.fetchEventsForTag(tagId, sportSlug).then(() => this.fetchedTags.add(tagId))
+        ));
       }
 
       log.info(`Discovery complete: ${this.tokenMap.size} tokens mapped`);
@@ -294,12 +301,23 @@ export class PolymarketDiscovery {
 
   private parseTeamsFromTitle(title: string): { home: string; away: string } {
     // Strip Polymarket suffixes like "- More Markets", "- Team Totals", "- Handicaps"
-    const cleanTitle = title.replace(/\s*-\s*(More Markets|Team Totals|Handicaps|Player Props|Specials)$/i, '');
+    let cleanTitle = title.replace(/\s*-\s*(More Markets|Team Totals|Handicaps|Player Props|Specials)$/i, '');
+
+    // Strip game/league prefix: "Counter-Strike: Team vs Team" → "Team vs Team"
+    // Matches short prefixes (≤25 chars) ending with ": " only if "vs" follows
+    cleanTitle = cleanTitle.replace(/^[^:]{1,25}:\s+(?=.+\s+(?:vs\.?|v\.?)\s+)/i, '');
 
     // Patterns: "Team A vs. Team B", "Team A vs Team B", "Team A v Team B"
     const vsMatch = cleanTitle.match(/^(.+?)\s+(?:vs\.?|v\.?)\s+(.+?)$/i);
     if (vsMatch) {
-      return { home: vsMatch[1].trim(), away: vsMatch[2].trim() };
+      let home = vsMatch[1].trim();
+      let away = vsMatch[2].trim();
+
+      // Strip esports format suffix: "(BO3) - Tournament Name"
+      home = home.replace(/\s*\(BO\d+\)\s*(?:-\s*.+)?$/i, '').trim();
+      away = away.replace(/\s*\(BO\d+\)\s*(?:-\s*.+)?$/i, '').trim();
+
+      return { home, away };
     }
     return { home: '', away: '' };
   }

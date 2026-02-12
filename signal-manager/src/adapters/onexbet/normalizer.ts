@@ -2,7 +2,7 @@ import type { AdapterEventUpdate } from '../../types/adapter-update.js';
 import type { OnexbetGameData } from './live-feed.js';
 import type { OnexbetGameSummary } from './discovery.js';
 import type { TargetEvent } from '../../types/target-event.js';
-import { mapMarket, sportIdToSlug } from './market-map.js';
+import { mapMarket, sportIdToSlug, sportIdToUrlSlug } from './market-map.js';
 
 const SOURCE_ID = 'onexbet';
 
@@ -74,9 +74,16 @@ export function normalizeGameData(
   // (during goals, bookmakers suspend markets for 30-60s — but score still changes)
   if (markets.length === 0 && !score) return null;
 
+  // Encode game ID, league ID, sport URL slug, and league name for URL construction
+  // Format: "gameId|leagueId|sportUrlSlug|leagueName"
+  const leagueId = summary?.LI || 0;
+  const sportSlug = sportIdToUrlSlug(sportId);
+  const leagueName = summary?.L || val.L || '';
+  const compositeId = `${game.I}|${leagueId}|${sportSlug}|${leagueName}`;
+
   return {
     sourceId: SOURCE_ID,
-    sourceEventId: String(game.I),
+    sourceEventId: compositeId,
     sport,
     league,
     startTime,
