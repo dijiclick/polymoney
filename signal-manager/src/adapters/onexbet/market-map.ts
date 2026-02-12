@@ -98,7 +98,7 @@ export const SPORT_IDS: Record<number, string> = {
   17: 'cricket',
   22: 'golf',
   36: 'handball',
-  40: 'boxing',
+  40: 'esports',       // main esports category (pro tournaments)
   62: 'mma',
   66: 'cricket',       // alternate cricket ID
   114: 'rugby',        // alternate rugby ID
@@ -132,9 +132,12 @@ const URL_SLUGS: Record<number, string> = {
   13: 'american-football',
   17: 'cricket',
   22: 'golf',
-  40: 'boxing',
+  40: 'esports',
   62: 'mma',
   85: 'esports-fifa',
+  89: 'esports-ice-hockey',
+  91: 'esports-basketball',
+  94: 'esports-tennis',
   86: 'esports-counter-strike',
   97: 'esports-dota-2',
   106: 'esports-league-of-legends',

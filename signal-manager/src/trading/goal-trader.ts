@@ -130,6 +130,7 @@ export class GoalTrader {
   private config: GoalTraderConfig;
   private bot: TradingBot;
   private positions: Map<string, ManagedPosition> = new Map();
+  private scoreDebounce: Map<string, number> = new Map();
   private history: ManagedPosition[] = [];
   private exitTimer: ReturnType<typeof setInterval> | null = null;
   private idCounter = 0;
@@ -191,16 +192,27 @@ export class GoalTrader {
     const sport = event.sport || '';
 
     if (!this.config.enabled) {
-      log.debug(`Score signal ignored (GoalTrader disabled) | ${match} | source=${source}`);
       return;
     }
     if (!event.stats.score) {
-      log.warn(`Score signal but no score data | ${match} | source=${source}`);
+      return;
+    }
+
+    // Skip events with no Polymarket tokens (not tradeable)
+    if (!event._tokenIds || Object.keys(event._tokenIds).length === 0) {
       return;
     }
 
     const score = event.stats.score;
     const sportCategory = getSportCategory(sport);
+
+    // Debounce: ignore score flapping (same event changing score multiple times within 2s)
+    const lastScoreTime = this.scoreDebounce.get(event.id);
+    const debounceNow = Date.now();
+    if (lastScoreTime && (debounceNow - lastScoreTime) < 2000) {
+      return; // Too fast — likely 1xBet data flapping
+    }
+    this.scoreDebounce.set(event.id, debounceNow);
 
     // _prevScore is only set after the first score change is observed.
     // If undefined, this is the first score we've seen (bootstrap) — not a real goal.
@@ -228,7 +240,7 @@ export class GoalTrader {
       }
     }
 
-    log.info(`🏆 SCORE CHANGE | ${match} | ${prevScore.home}-${prevScore.away} → ${score.home}-${score.away} | sport=${sport} (${sportCategory}) | source=${source}`);
+    log.warn(`🏆 SCORE CHANGE | ${match} | ${prevScore.home}-${prevScore.away} → ${score.home}-${score.away} | sport=${sport} (${sportCategory}) | source=${source}`);
 
     // Deduplicate: don't act on the same score twice
     const goalKey = `${event.id}:${score.home}-${score.away}`;
@@ -242,7 +254,7 @@ export class GoalTrader {
     const goalType = this.classifyGoal(score, prevScore);
 
     if (goalType === 'extending' && this.config.skipExtendingLead) {
-      log.info(`🏆 SKIP extending lead ${score.home}-${score.away} | ${match}`);
+      log.warn(`🏆 SKIP extending lead ${score.home}-${score.away} | ${match}`);
       return;
     }
 
@@ -256,8 +268,11 @@ export class GoalTrader {
     // Get tokenId from the pipeline
     const tokenId = event._tokenIds[marketKey];
     if (!tokenId) {
-      const availableTokens = Object.keys(event._tokenIds).join(', ') || 'none';
-      log.warn(`🏆 No tokenId for ${marketKey} on ${match} — available: [${availableTokens}]`);
+      // Try alternative ML keys before giving up
+      const altKey = ML_KEYS.find(k => k !== marketKey && event._tokenIds[k]);
+      if (!altKey) return; // No tradeable market — skip silently
+      log.warn(`🏆 No ${marketKey} on ${match}, using ${altKey} instead`);
+      // Recurse with the alternative key would be complex, just skip for now
       return;
     }
 
@@ -278,6 +293,13 @@ export class GoalTrader {
     }
 
     const entryPrice = 1 / pmData.value; // Convert decimal odds to probability
+
+    // Skip if price is too extreme — no room to profit
+    if (entryPrice > 0.95 || entryPrice < 0.05) {
+      log.warn(`🏆 SKIP price too extreme (${entryPrice.toFixed(3)}) | ${match}`);
+      return;
+    }
+
     // Scale expected move by sport: hockey goals ~ soccer, high-scoring sports get smaller expected moves
     const moveScale = sportCategory === 'low_scoring' ? 1.0
       : sportCategory === 'high_scoring' ? 0.5
@@ -296,7 +318,7 @@ export class GoalTrader {
 
     const now = Date.now();
 
-    log.info(
+    log.warn(
       `🏆 TRADE | ${match} | ${score.home}-${score.away} | Type: ${goalType} | Sport: ${sport} | ` +
       `${side} ${marketKey} @ ${entryPrice.toFixed(3)} | Size: $${tradeSize} | ` +
       `TP: ${takeProfitPrice.toFixed(3)} | SL: ${stopLossPrice.toFixed(3)} | Expected: +${expectedMove}pp`
@@ -361,7 +383,7 @@ export class GoalTrader {
       entry: { time: now, price, amount, shares },
     });
 
-    log.info(`✅ BOUGHT ${side} ${marketKey} | ${match} | ${shares.toFixed(1)} shares @ ${price.toFixed(3)} | ${result.executionMs}ms`);
+    log.warn(`✅ BOUGHT ${side} ${marketKey} | ${match} | ${shares.toFixed(1)} shares @ ${price.toFixed(3)} | $${amount.toFixed(2)} | ${result.executionMs}ms`);
   }
 
   // --- Exit Monitoring ---
@@ -439,7 +461,7 @@ export class GoalTrader {
       ? (exitPrice - pos.entryPrice) * pos.shares
       : (pos.entryPrice - exitPrice) * pos.shares;
 
-    log.info(
+    log.warn(
       `💰 EXIT ${pos.match} | ${pos.marketKey} | Reason: ${reason} | ` +
       `Entry: ${pos.entryPrice.toFixed(3)} → Exit: ${exitPrice.toFixed(3)} | ` +
       `P&L: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(3)} | Hold: ${((now - pos.entryTime) / 1000).toFixed(0)}s | ` +

@@ -16,8 +16,8 @@ export const DEFAULT_CONFIG: Config = {
     },
     onexbet: {
       enabled: true,
-      liveFeedBaseUrl: 'https://1xlite-14395.pro',
-      pollIntervalMs: 500,
+      liveFeedBaseUrl: 'https://1xlite-65169.pro',
+      pollIntervalMs: 200,
       sportIds: [
         // Traditional sports
         1,   // Soccer
@@ -29,8 +29,12 @@ export const DEFAULT_CONFIG: Config = {
         17,  // Cricket (IPL, T20, ODI)
         62,  // MMA/UFC
         // Esports
+        40,  // Esports (main — pro tournaments: Dota2, CS2, LoL under this ID)
         85,  // EA Sports FC / FIFA
         86,  // Counter-Strike 2
+        89,  // Esports Ice Hockey
+        91,  // Esports Basketball
+        94,  // Esports Tennis
         97,  // Dota 2
         106, // League of Legends
         109, // Rocket League
@@ -64,5 +68,5 @@ export const DEFAULT_CONFIG: Config = {
     teamMappingsPath: resolve(__dirname, '..', '..', 'data', 'team-mappings.json'),
   },
   cleanupIntervalMs: 60_000,
-  logLevel: 'info',
+  logLevel: 'warn',
 };

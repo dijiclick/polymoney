@@ -66,6 +66,7 @@ export class OnexbetDiscovery {
         ...HEADERS,
         'Referer': `${this.config.liveFeedBaseUrl}/en/${feedPath === 'LiveFeed' ? 'live' : 'line'}/${sportIdToUrlSlug(sportId)}/`,
       },
+      signal: AbortSignal.timeout(8000),
     });
 
     if (!resp.ok) {

@@ -105,21 +105,15 @@ export class OnexbetLiveFeed {
     this.polling = true;
     const ids = this.currentGameIds;
 
-    // Fetch all games in parallel (concurrency limited by batching)
-    const BATCH_SIZE = 8;
-    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-      const batch = ids.slice(i, i + BATCH_SIZE);
-      const results = await Promise.allSettled(
-        batch.map(gameId => this.fetchAndEmit(gameId))
-      );
-      for (const r of results) {
-        if (r.status === 'rejected') {
-          this.consecutiveFailures++;
-          if (this.consecutiveFailures === 1) {
-            log.warn(`Poll failed: ${r.reason?.message || r.reason}`);
-          } else if (this.consecutiveFailures <= this.maxConsecutiveFailures) {
-            log.debug(`Poll failed (${this.consecutiveFailures}x): ${r.reason?.message || r.reason}`);
-          }
+    // Fetch ALL games in parallel (no batching — max speed)
+    const results = await Promise.allSettled(
+      ids.map(gameId => this.fetchAndEmit(gameId))
+    );
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        this.consecutiveFailures++;
+        if (this.consecutiveFailures === 1) {
+          log.warn(`Poll failed: ${r.reason?.message || r.reason}`);
         }
       }
     }
@@ -154,6 +148,8 @@ export class OnexbetLiveFeed {
         ...HEADERS,
         'Referer': `${this.config.liveFeedBaseUrl}/en/${refSection}/`,
       },
+      signal: AbortSignal.timeout(4000),
+      keepalive: true,
     });
 
     if (!resp.ok) {

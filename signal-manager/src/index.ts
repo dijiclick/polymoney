@@ -5,6 +5,7 @@ import { Engine } from './core/engine.js';
 import { PolymarketAdapter } from './adapters/polymarket/index.js';
 import { OnexbetAdapter } from './adapters/onexbet/index.js';
 import { FlashScoreAdapter } from './adapters/flashscore/index.js';
+import { PmSportsWsAdapter } from './adapters/pm-sports-ws/index.js';
 import { Dashboard } from './dashboard/server.js';
 import { DEFAULT_CONFIG } from '../config/default.js';
 import { setLogLevel, createLogger } from './util/logger.js';
@@ -14,6 +15,7 @@ import { reactionTimerSignal } from './signals/reaction-timer.js';
 import { TradingBot } from './trading/bot.js';
 import { TradingController } from './trading/controller.js';
 import { GoalTrader } from './trading/goal-trader.js';
+import { AutoRedeemer } from './trading/redeemer.js';
 
 // Load .env file (no dotenv dependency needed)
 try {
@@ -62,6 +64,8 @@ async function main() {
   if (config.adapters.flashscore.enabled) {
     engine.registerAdapter(new FlashScoreAdapter(config.adapters.flashscore));
   }
+  // PM Sports WS — always enabled (free, no config needed)
+  engine.registerAdapter(new PmSportsWsAdapter());
 
   // Initialize trading bot (disabled by default — needs credentials in env)
   const polyKey = process.env.POLY_PRIVATE_KEY || process.env.POLYMARKET_PRIVATE_KEY || '';
@@ -90,10 +94,18 @@ async function main() {
   goalTrader.start();
   tradingController.setGoalTrader(goalTrader);
 
+  // Auto-redeemer for resolved positions
+  let redeemer: AutoRedeemer | null = null;
+
   if (polyKey) {
     const ok = await tradingBot.initialize();
     if (ok) log.info('Trading bot initialized (DISARMED)');
     else log.warn('Trading bot failed to initialize');
+
+    // Start auto-redeemer (checks every 1 min) — sells resolved positions via CLOB (gasless)
+    redeemer = new AutoRedeemer(polyKey, process.env.POLY_FUNDER_ADDRESS || '', 60_000);
+    redeemer.setTradingBot(tradingBot);
+    redeemer.start();
   } else {
     log.info('Trading bot: no POLY_PRIVATE_KEY set — trading disabled');
   }

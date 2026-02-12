@@ -123,10 +123,34 @@ export class OnexbetAdapter implements IFilterableAdapter {
 
       this.status = 'connected';
       log.info('1xbet adapter started');
-    } catch (err) {
-      log.error('Failed to start', err);
+    } catch (err: any) {
+      log.warn(`Failed to start (will retry in 30s): ${err.message || err}`);
       this.status = 'error';
-      throw err;
+      // Don't throw — start retry loop instead
+      this.discoveryTimer = setInterval(async () => {
+        try {
+          const [liveGames, preMatchGames] = await Promise.all([
+            this.discovery.discoverLiveEvents(),
+            this.discovery.discoverPreMatchEvents(),
+          ]);
+          const liveFiltered = this.filterGames(liveGames);
+          const preMatchFiltered = this.filterGames(preMatchGames);
+          this.gameIds = [...liveFiltered.map(g => g.I), ...preMatchFiltered.map(g => g.I)];
+          this.liveFeed.setPreMatchIds(preMatchFiltered.map(g => g.I));
+          if (this.gameIds.length > 0) {
+            this.liveFeed.onData((gameData) => {
+              if (!this.callback) return;
+              const summary = this.discovery.getTrackedGame(gameData.I);
+              const target = this.matchedTargets.get(gameData.I);
+              const update = normalizeGameData(gameData, summary, target);
+              if (update) this.callback(update);
+            });
+            this.liveFeed.startPolling(this.gameIds);
+            this.status = 'connected';
+            log.warn(`1xbet adapter recovered: ${this.gameIds.length} games`);
+          }
+        } catch { /* still failing, keep retrying */ }
+      }, 30_000);
     }
   }
 

@@ -190,28 +190,23 @@ export class TradingBot extends EventEmitter {
       return result;
     }
 
-    // Amount bounds
-    if (req.amount < this.config.minTradeSize) {
-      result.error = `Amount $${req.amount} below minimum $${this.config.minTradeSize}`;
-      result.executionMs = Date.now() - start;
-      this.tradeHistory.push(result);
-      return result;
-    }
-    if (req.amount > this.config.maxTradeSize) {
-      result.error = `Amount $${req.amount} above maximum $${this.config.maxTradeSize}`;
-      result.executionMs = Date.now() - start;
-      this.tradeHistory.push(result);
-      return result;
+    // Amount bounds (only enforce on BUY — sells need to close full position)
+    if (req.side === 'BUY') {
+      if (req.amount < this.config.minTradeSize) {
+        result.error = `Amount $${req.amount} below minimum $${this.config.minTradeSize}`;
+        result.executionMs = Date.now() - start;
+        this.tradeHistory.push(result);
+        return result;
+      }
+      if (req.amount > this.config.maxTradeSize) {
+        result.error = `Amount $${req.amount} above maximum $${this.config.maxTradeSize}`;
+        result.executionMs = Date.now() - start;
+        this.tradeHistory.push(result);
+        return result;
+      }
     }
 
-    // Cooldown check
-    const lastTrade = this.lastTradeTime.get(req.tokenId);
-    if (lastTrade && (start - lastTrade) < this.config.tradeCooldownMs) {
-      result.error = `Cooldown: ${this.config.tradeCooldownMs - (start - lastTrade)}ms remaining`;
-      result.executionMs = Date.now() - start;
-      this.tradeHistory.push(result);
-      return result;
-    }
+    // No cooldown — execute immediately
 
     // Position limit check
     if (req.side === 'BUY' && this.positions.size >= this.config.maxOpenPositions) {
