@@ -7,6 +7,7 @@ import type { KambiAdapterConfig } from '../../types/config.js';
 import type { TargetEvent } from '../../types/target-event.js';
 import type { AdapterEventUpdate } from '../../types/adapter-update.js';
 import { TargetEventFilter } from '../../matching/target-filter.js';
+import { encodeThreshold } from '../../types/market-keys.js';
 import { createLogger } from '../../util/logger.js';
 
 const log = createLogger('kambi');
@@ -40,15 +41,22 @@ export class KambiAdapter implements IFilterableAdapter {
     log.info('Starting Kambi adapter...');
     await this.poll();
     this.status = 'connected';
-    this.pollTimer = setInterval(() => this.poll().catch(e => log.error('Poll error:', e.message)), this.config.pollIntervalMs);
+    this.scheduleNext();
     log.info(`Kambi adapter running (${this.config.pollIntervalMs}ms poll)`);
   }
 
   async stop(): Promise<void> {
-    if (this.pollTimer) clearInterval(this.pollTimer);
+    if (this.pollTimer) clearTimeout(this.pollTimer);
     this.pollTimer = null;
     this.status = 'stopped';
     log.info('Kambi adapter stopped');
+  }
+
+  private scheduleNext(): void {
+    this.pollTimer = setTimeout(async () => {
+      try { await this.poll(); } catch (e: any) { log.error('Poll error:', e.message); }
+      if (this.status !== 'stopped') this.scheduleNext();
+    }, this.config.pollIntervalMs);
   }
 
   private async poll(): Promise<void> {
@@ -130,16 +138,43 @@ export class KambiAdapter implements IFilterableAdapter {
   private marketKey(offer: any, outcome: any, home: string, away: string): string {
     const type = (offer.betOfferType?.name || 'unknown').toLowerCase();
     const label = (outcome.label || '').toLowerCase();
+
+    // 1X2 / Moneyline
     if (type.includes('match') || type.includes('1x2') || type.includes('moneyline')) {
-      if (label === '1' || label.includes(home.toLowerCase().slice(0, 5))) return 'home_ml_ft';
-      if (label === '2' || label.includes(away.toLowerCase().slice(0, 5))) return 'away_ml_ft';
+      if (label === '1' || label.includes(home.toLowerCase().slice(0, 5))) return 'ml_home_ft';
+      if (label === '2' || label.includes(away.toLowerCase().slice(0, 5))) return 'ml_away_ft';
       if (label === 'x' || label === 'draw') return 'draw_ft';
     }
+
+    // Over/Under totals
     if (type.includes('over/under') || type.includes('total')) {
-      const line = offer.line ? offer.line / 1000 : '';
-      if (label.includes('over')) return `over_${line}_ft`;
-      if (label.includes('under')) return `under_${line}_ft`;
+      const line = offer.line ? offer.line / 1000 : 0;
+      const t = encodeThreshold(line);
+      if (label.includes('over')) return `o_${t}_ft`;
+      if (label.includes('under')) return `u_${t}_ft`;
     }
+
+    // Handicap
+    if (type.includes('handicap')) {
+      const line = offer.line ? offer.line / 1000 : 0;
+      const t = encodeThreshold(line);
+      if (label === '1' || label.includes(home.toLowerCase().slice(0, 5))) return `handicap_home_${t}_ft`;
+      if (label === '2' || label.includes(away.toLowerCase().slice(0, 5))) return `handicap_away_${t}_ft`;
+    }
+
+    // Both teams to score
+    if (type.includes('both teams') || type.includes('btts')) {
+      if (label.includes('yes')) return 'btts_yes_ft';
+      if (label.includes('no')) return 'btts_no_ft';
+    }
+
+    // Double chance
+    if (type.includes('double chance')) {
+      if (label === '1x') return 'dc_1x_ft';
+      if (label === '12') return 'dc_12_ft';
+      if (label === 'x2') return 'dc_x2_ft';
+    }
+
     return `kambi_${type}_${label}`.replace(/[^a-z0-9_]/g, '_');
   }
 }

@@ -19,6 +19,13 @@ const adapterLatency: Map<string, LatencyStats> = new Map();
 const speedLog: { ts: number; match: string; score: string; winner: string; times: { src: string; ms: number }[] }[] = [];
 const scoreFirstSeen: Map<string, { ts: number; source: string }> = new Map();
 
+// === Fastest Source Tracking (for GoalTrader) ===
+const sourceWins: Map<string, number> = new Map();
+let _fastestSource: string = '';
+
+export function getFastestSource(): string { return _fastestSource; }
+export function getSourceWins(): Record<string, number> { return Object.fromEntries(sourceWins); }
+
 export function recordAdapterUpdate(sourceId: string, latencyMs: number): void {
   let stats = adapterLatency.get(sourceId);
   if (!stats) { stats = { samples: [], avg: 0, count: 0 }; adapterLatency.set(sourceId, stats); }
@@ -33,6 +40,13 @@ export function recordScoreChange(sourceId: string, eventId: string, homeTeam: s
   const now = Date.now();
   if (!scoreFirstSeen.has(key)) {
     scoreFirstSeen.set(key, { ts: now, source: sourceId });
+    // Track win for this source
+    sourceWins.set(sourceId, (sourceWins.get(sourceId) || 0) + 1);
+    // Recalculate fastest source
+    let maxWins = 0;
+    for (const [src, wins] of sourceWins) {
+      if (wins > maxWins) { maxWins = wins; _fastestSource = src; }
+    }
     if (scoreFirstSeen.size > 500) {
       const entries = Array.from(scoreFirstSeen.entries()).sort((a, b) => a[1].ts - b[1].ts);
       for (let i = 0; i < entries.length - 200; i++) scoreFirstSeen.delete(entries[i][0]);
@@ -414,7 +428,9 @@ export class Dashboard {
       trading: this.tradingController?.getState() || null,
       reactionLog: getReactionLog().slice(0, 50),
       adapterLatency: Object.fromEntries(Array.from(adapterLatency.entries()).map(([k, v]) => [k, { avg: v.avg, count: v.count }])),
-      speedLog: speedLog.slice(0, 20),
+      speedLog: speedLog.slice(0, 50),
+      fastestSource: _fastestSource,
+      sourceWins: Object.fromEntries(sourceWins),
     };
   }
 }

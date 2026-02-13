@@ -13,18 +13,20 @@ echo    1. Main + Dashboard    (Python discovery + Dashboard)
 echo    2. New + Dashboard     (Node.js trade sync + Dashboard)
 echo    3. Dashboard Only
 echo    4. Run All             (Python + Node.js + Dashboard)
+echo    5. Signal Manager      (Sports data + Goal trader + Dashboard :3847)
 echo.
-echo    5. Exit
+echo    6. Exit
 echo.
 echo ============================================================
 echo.
-set /p choice="Select option (1-5): "
+set /p choice="Select option (1-6): "
 
 if "%choice%"=="1" goto start_main_dashboard
 if "%choice%"=="2" goto start_new_dashboard
 if "%choice%"=="3" goto start_dashboard
 if "%choice%"=="4" goto start_all
-if "%choice%"=="5" exit /b 0
+if "%choice%"=="5" goto start_signal_manager
+if "%choice%"=="6" exit /b 0
 goto menu
 
 :check_python
@@ -221,6 +223,56 @@ echo    Wallet Discovery:   Python - watching live trades ^>= $100
 echo    Trade Sync:         Node.js - syncing trade history
 echo.
 echo    Close each window with Ctrl+C to stop
+echo.
+echo ============================================================
+echo.
+pause
+goto menu
+
+:: ============================================================
+::  Option 5: Signal Manager (Sports data + Goal trader)
+:: ============================================================
+:start_signal_manager
+
+cls
+echo.
+echo ============================================================
+echo    STARTING: Signal Manager
+echo ============================================================
+echo.
+echo    Sports data sources + Goal Trader + Dashboard
+echo    All sources filtered to Polymarket-only events
+echo    Fastest source auto-detection for FAK trading
+echo.
+
+if not exist "signal-manager\node_modules" (
+    echo [INFO] Installing signal manager dependencies...
+    cd signal-manager
+    call npm install
+    cd ..
+)
+
+if not exist "signal-manager\dist" (
+    echo [INFO] Building signal manager...
+    cd signal-manager
+    call npx tsc
+    cd ..
+)
+
+echo [1/1] Starting Signal Manager...
+start "Signal Manager" cmd /k "cd /d %~dp0signal-manager && node --max-old-space-size=4096 dist/src/index.js"
+
+echo.
+echo ============================================================
+echo    SIGNAL MANAGER RUNNING
+echo ============================================================
+echo.
+echo    Dashboard:    http://localhost:3847
+echo    Sources:      PM, 1xBet, Kambi, SofaScore, TheSports, Pinnacle
+echo    Goal Trader:  Fastest-source auto-detection active
+echo    FAK Mode:     Ready (arm via dashboard to enable live trading)
+echo.
+echo    Close the window with Ctrl+C to stop
 echo.
 echo ============================================================
 echo.

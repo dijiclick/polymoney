@@ -86,6 +86,27 @@ export class TargetEventFilter {
     if (long.startsWith(short) || long.includes('_' + short) || long.includes(short + '_')) {
       return Math.max(currentScore, 0.90);
     }
+    // Token-level matching: check if individual tokens from the shorter name
+    // fuzzy-match tokens in the longer name. Handles cases like:
+    // "rennes" ↔ "stade_rennais_1901" ("rennes" ~ "rennais" ≈ 0.88)
+    // "santa_clara" ↔ "santa_clara_1921" (exact token match)
+    const shortTokens = short.split('_').filter(t => t.length >= 3);
+    const longTokens = long.split('_').filter(t => t.length >= 3);
+    if (shortTokens.length > 0 && longTokens.length > 0) {
+      let totalBest = 0;
+      for (const st of shortTokens) {
+        let best = 0;
+        for (const lt of longTokens) {
+          const sim = jaroWinkler(st, lt);
+          if (sim > best) best = sim;
+        }
+        totalBest += best;
+      }
+      const avgTokenScore = totalBest / shortTokens.length;
+      if (avgTokenScore >= 0.85) {
+        return Math.max(currentScore, avgTokenScore);
+      }
+    }
     return currentScore;
   }
 }

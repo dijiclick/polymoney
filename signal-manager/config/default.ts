@@ -16,7 +16,7 @@ export const DEFAULT_CONFIG: Config = {
     },
     onexbet: {
       enabled: true,
-      liveFeedBaseUrl: 'https://1xlite-14395.pro',
+      liveFeedBaseUrl: 'https://1xbet.com',
       pollIntervalMs: 200,
       sportIds: [
         // Traditional sports
@@ -59,7 +59,7 @@ export const DEFAULT_CONFIG: Config = {
     kambi: {
       enabled: true,
       baseUrl: 'https://eu-offering-api.kambicdn.com',
-      pollIntervalMs: 1000,   // 1s poll — response ~400-600ms, fastest HTTP source
+      pollIntervalMs: 200,    // 5/sec poll — no CDN cache, always fresh
       timeoutMs: 8000,
     },
     thesports: {
@@ -78,7 +78,7 @@ export const DEFAULT_CONFIG: Config = {
     pinnacle: {
       enabled: true,
       baseUrl: 'https://guest.api.arcadia.pinnacle.com/0.1',
-      pollIntervalMs: 500,
+      pollIntervalMs: 200,
       timeoutMs: 5000,
       sportIds: [29, 4, 33, 19, 12, 5, 15],
     },

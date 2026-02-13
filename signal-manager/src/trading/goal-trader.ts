@@ -13,6 +13,7 @@ import type { SignalFunction } from '../core/signal-dispatcher.js';
 import type { TradingBot } from './bot.js';
 import { logGoalTrade, type GoalTradeLog } from './position-log.js';
 import { createLogger } from '../util/logger.js';
+import { getFastestSource } from '../dashboard/server.js';
 
 const log = createLogger('goal-trader');
 
@@ -66,6 +67,11 @@ export interface GoalTraderConfig {
   sizeLarge: number;
   sizeMedium: number;
   sizeSmall: number;
+  /** Prefer fastest source — only trade immediately when the historically fastest source reports.
+   *  Slower sources wait `slowSourceDelayMs` for the fast source to confirm before trading. */
+  preferFastestSource: boolean;
+  /** How long to wait for fastest source before accepting a slower source's goal (ms) */
+  slowSourceDelayMs: number;
 }
 
 const DEFAULT_CONFIG: GoalTraderConfig = {
@@ -79,6 +85,8 @@ const DEFAULT_CONFIG: GoalTraderConfig = {
   sizeLarge: 5.0,
   sizeMedium: 3.0,
   sizeSmall: 1.0,
+  preferFastestSource: true,     // Use dynamically tracked fastest source
+  slowSourceDelayMs: 500,        // Wait 500ms for fastest source before accepting slow source
 };
 
 const ML_KEYS = ['ml_home_ft', 'ml_away_ft', 'draw_ft'];
@@ -124,7 +132,29 @@ const MIN_SCORE_DELTA: Record<SportCategory, number> = {
   round_based: 0,     // MMA: any finish signal
 };
 
+// --- Goal Activity Log (for dashboard) ---
+
+export interface GoalActivity {
+  ts: number;
+  match: string;
+  score: string;
+  prevScore: string;
+  source: string;
+  sport: string;
+  goalType: GoalType | null;
+  action: 'BUY' | 'SKIP' | 'PENDING' | 'DRY_BUY';
+  reason: string;
+  /** Trade details if action is BUY/DRY_BUY */
+  trade?: { side: string; market: string; price: number; size: number; latencyMs: number };
+}
+
 // --- GoalTrader class ---
+
+interface PendingGoal {
+  event: UnifiedEvent;
+  source: string;
+  timer: ReturnType<typeof setTimeout>;
+}
 
 export class GoalTrader {
   private config: GoalTraderConfig;
@@ -136,6 +166,10 @@ export class GoalTrader {
   private idCounter = 0;
   // Track goals we've already acted on to avoid double-entry
   private processedGoals: Set<string> = new Set();
+  // Pending goals from slow sources waiting for fast source confirmation
+  private pendingGoals: Map<string, PendingGoal> = new Map();
+  // Activity log for dashboard — every goal event, traded or not
+  private goalLog: GoalActivity[] = [];
 
   constructor(bot: TradingBot, config: Partial<GoalTraderConfig> = {}) {
     this.bot = bot;
@@ -192,6 +226,10 @@ export class GoalTrader {
     const sport = event.sport || '';
 
     if (!this.config.enabled) {
+      if (event.stats.score && event._prevScore) {
+        const sc = event.stats.score, ps = event._prevScore;
+        this.logActivity({ ts: Date.now(), match, score: `${sc.home}-${sc.away}`, prevScore: `${ps.home}-${ps.away}`, source, sport, goalType: null, action: 'SKIP', reason: 'GoalTrader disabled' });
+      }
       return;
     }
     if (!event.stats.score) {
@@ -218,6 +256,7 @@ export class GoalTrader {
     // If undefined, this is the first score we've seen (bootstrap) — not a real goal.
     if (!event._prevScore) {
       log.info(`First score seen (bootstrap) | ${match} | ${score.home}-${score.away} | sport=${sport} | skipping`);
+      this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: '?', source, sport, goalType: null, action: 'SKIP', reason: 'Bootstrap (first score)' });
       return;
     }
     const prevScore = event._prevScore;
@@ -227,6 +266,7 @@ export class GoalTrader {
     const minDelta = MIN_SCORE_DELTA[sportCategory];
     if (totalDelta < minDelta) {
       log.debug(`Score change too small for ${sport} (delta=${totalDelta}, min=${minDelta}) | ${match}`);
+      this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType: null, action: 'SKIP', reason: `Delta too small (${totalDelta}<${minDelta})` });
       return;
     }
 
@@ -236,6 +276,7 @@ export class GoalTrader {
       const newLeader = score.home > score.away ? 'home' : score.away > score.home ? 'away' : 'tied';
       if (prevLeader === newLeader) {
         log.debug(`High-scoring sport: lead unchanged (${newLeader}) | ${match} | ${score.home}-${score.away}`);
+        this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType: null, action: 'SKIP', reason: 'Lead unchanged' });
         return;
       }
     }
@@ -245,16 +286,61 @@ export class GoalTrader {
     // Deduplicate: don't act on the same score twice
     const goalKey = `${event.id}:${score.home}-${score.away}`;
     if (this.processedGoals.has(goalKey)) {
+      // If this was a pending goal from a slow source, cancel its timer (fast source confirmed)
+      const pending = this.pendingGoals.get(goalKey);
+      if (pending) {
+        clearTimeout(pending.timer);
+        this.pendingGoals.delete(goalKey);
+      }
       log.debug(`Score dedup | ${match} | ${score.home}-${score.away}`);
       return;
     }
-    this.processedGoals.add(goalKey);
 
+    // === Fastest-source preference ===
+    // If enabled, check if this source is the historically fastest.
+    // If not, queue the goal and wait briefly for the fastest source to report it.
+    if (this.config.preferFastestSource) {
+      const fastest = getFastestSource();
+      if (fastest && fastest !== source && !this.pendingGoals.has(goalKey)) {
+        // This source is NOT the fastest — queue it and wait
+        log.info(`⏳ ${source} reported goal, waiting ${this.config.slowSourceDelayMs}ms for ${fastest} | ${match} | ${score.home}-${score.away}`);
+        const timer = setTimeout(() => {
+          this.pendingGoals.delete(goalKey);
+          if (!this.processedGoals.has(goalKey)) {
+            log.warn(`⏳ Fastest source (${fastest}) did not confirm in ${this.config.slowSourceDelayMs}ms — executing from ${source}`);
+            this.processedGoals.add(goalKey);
+            this.executeGoalTrade(event, source, match, sport, score, prevScore, sportCategory, goalKey);
+          }
+        }, this.config.slowSourceDelayMs);
+        this.pendingGoals.set(goalKey, { event, source, timer });
+        this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType: null, action: 'PENDING', reason: `Waiting for ${fastest} (${this.config.slowSourceDelayMs}ms)` });
+        return;
+      }
+      // If this IS the fastest source, check if a slow source is pending → cancel it and execute now
+      const pending = this.pendingGoals.get(goalKey);
+      if (pending) {
+        clearTimeout(pending.timer);
+        this.pendingGoals.delete(goalKey);
+        log.info(`⚡ Fastest source (${source}) confirmed goal — cancelling ${pending.source}'s delayed trade`);
+      }
+    }
+
+    this.processedGoals.add(goalKey);
+    this.executeGoalTrade(event, source, match, sport, score, prevScore, sportCategory, goalKey);
+  }
+
+  /** Core trade execution — called immediately for fastest source, or after delay for slow sources */
+  private executeGoalTrade(
+    event: UnifiedEvent, source: string, match: string, sport: string,
+    score: { home: number; away: number }, prevScore: { home: number; away: number },
+    sportCategory: SportCategory, goalKey: string,
+  ): void {
     // Classify the goal
     const goalType = this.classifyGoal(score, prevScore);
 
     if (goalType === 'extending' && this.config.skipExtendingLead) {
       log.warn(`🏆 SKIP extending lead ${score.home}-${score.away} | ${match}`);
+      this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType, action: 'SKIP', reason: 'Extending lead (skip config)' });
       return;
     }
 
@@ -262,6 +348,7 @@ export class GoalTrader {
     const { marketKey, side } = this.inferTrade(score, prevScore);
     if (!marketKey) {
       log.warn(`🏆 Could not infer trade direction | ${match} | ${score.home}-${score.away}`);
+      this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType, action: 'SKIP', reason: 'No trade direction' });
       return;
     }
 
@@ -270,9 +357,11 @@ export class GoalTrader {
     if (!tokenId) {
       // Try alternative ML keys before giving up
       const altKey = ML_KEYS.find(k => k !== marketKey && event._tokenIds[k]);
-      if (!altKey) return; // No tradeable market — skip silently
+      if (!altKey) {
+        this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType, action: 'SKIP', reason: 'No tokenId' });
+        return;
+      }
       log.warn(`🏆 No ${marketKey} on ${match}, using ${altKey} instead`);
-      // Recurse with the alternative key would be complex, just skip for now
       return;
     }
 
@@ -281,6 +370,7 @@ export class GoalTrader {
     if (!pmData) {
       const availableMarkets = Object.keys(event.markets).join(', ') || 'none';
       log.warn(`🏆 No PM price for ${marketKey} on ${match} — available markets: [${availableMarkets}]`);
+      this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType, action: 'SKIP', reason: 'No PM price' });
       return;
     }
 
@@ -288,6 +378,7 @@ export class GoalTrader {
     for (const pos of this.positions.values()) {
       if (pos.eventId === event.id) {
         log.info(`🏆 Already have position on ${match} — skipping`);
+        this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType, action: 'SKIP', reason: 'Already have position' });
         return;
       }
     }
@@ -297,6 +388,7 @@ export class GoalTrader {
     // Skip if price is too extreme — no room to profit
     if (entryPrice > 0.95 || entryPrice < 0.05) {
       log.warn(`🏆 SKIP price too extreme (${entryPrice.toFixed(3)}) | ${match}`);
+      this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType, action: 'SKIP', reason: `Price extreme (${(entryPrice*100).toFixed(0)}%)` });
       return;
     }
 
@@ -316,16 +408,18 @@ export class GoalTrader {
       ? Math.max(0.01, entryPrice - this.config.stopLossPp / 100)
       : Math.min(0.99, entryPrice + this.config.stopLossPp / 100);
 
-    const now = Date.now();
+    const fastest = getFastestSource();
+    const isFastest = source === fastest;
 
     log.warn(
       `🏆 TRADE | ${match} | ${score.home}-${score.away} | Type: ${goalType} | Sport: ${sport} | ` +
       `${side} ${marketKey} @ ${entryPrice.toFixed(3)} | Size: $${tradeSize} | ` +
-      `TP: ${takeProfitPrice.toFixed(3)} | SL: ${stopLossPrice.toFixed(3)} | Expected: +${expectedMove}pp`
+      `TP: ${takeProfitPrice.toFixed(3)} | SL: ${stopLossPrice.toFixed(3)} | Expected: +${expectedMove}pp | ` +
+      `Source: ${source}${isFastest ? ' ⚡FASTEST' : ''}`
     );
 
-    // Execute buy
-    this.executeBuy(event, tokenId, marketKey, side, entryPrice, tradeSize, goalType, score, expectedMove, takeProfitPrice, stopLossPrice, match, sport);
+    // Execute buy (FOK for immediate execution)
+    this.executeBuy(event, tokenId, marketKey, side, entryPrice, tradeSize, goalType, score, expectedMove, takeProfitPrice, stopLossPrice, match, sport, source);
   }
 
   private async executeBuy(
@@ -333,13 +427,14 @@ export class GoalTrader {
     side: 'YES' | 'NO', price: number, amount: number,
     goalType: GoalType, score: { home: number; away: number },
     expectedMovePp: number, takeProfitPrice: number, stopLossPrice: number,
-    match: string, sport: string,
+    match: string, sport: string, source: string,
   ): Promise<void> {
     const buyFn = side === 'YES' ? this.bot.buyYes.bind(this.bot) : this.bot.buyNo.bind(this.bot);
     const result = await buyFn(tokenId, amount, price, { eventName: match });
 
     if (!result.success) {
       log.error(`⚽ BUY FAILED: ${result.error} | ${match} ${marketKey}`);
+      this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${(event._prevScore?.home ?? '?')}-${(event._prevScore?.away ?? '?')}`, source, sport, goalType, action: 'SKIP', reason: `Buy failed: ${result.error}` });
       return;
     }
 
@@ -384,6 +479,15 @@ export class GoalTrader {
     });
 
     log.warn(`✅ BOUGHT ${side} ${marketKey} | ${match} | ${shares.toFixed(1)} shares @ ${price.toFixed(3)} | $${amount.toFixed(2)} | ${result.executionMs}ms`);
+
+    // Log activity
+    const isDry = result.orderId?.startsWith('DRY') || !this.bot.isArmed;
+    this.logActivity({
+      ts: now, match, score: `${score.home}-${score.away}`, prevScore: `${(event._prevScore?.home ?? '?')}-${(event._prevScore?.away ?? '?')}`,
+      source, sport, goalType,
+      action: isDry ? 'DRY_BUY' : 'BUY', reason: isDry ? 'Dry run' : 'Executed',
+      trade: { side, market: marketKey, price, size: amount, latencyMs: result.executionMs || 0 },
+    });
   }
 
   // --- Exit Monitoring ---
@@ -568,6 +672,11 @@ export class GoalTrader {
     }
   }
 
+  private logActivity(entry: GoalActivity): void {
+    this.goalLog.unshift(entry);
+    if (this.goalLog.length > 200) this.goalLog.length = 200;
+  }
+
   private matchName(event: UnifiedEvent): string {
     const home = event.home.aliases['polymarket'] || event.home.name || Object.values(event.home.aliases)[0] || '?';
     const away = event.away.aliases['polymarket'] || event.away.name || Object.values(event.away.aliases)[0] || '?';
@@ -584,6 +693,9 @@ export class GoalTrader {
       recentTrades: this.history.slice(0, 20),
       totalTrades: this.history.length,
       totalPnl,
+      fastestSource: getFastestSource(),
+      pendingGoals: this.pendingGoals.size,
+      goalLog: this.goalLog.slice(0, 100),
       config: {
         hardExitMs: this.config.hardExitMs,
         stabilizationQuietMs: this.config.stabilizationQuietMs,
@@ -594,6 +706,8 @@ export class GoalTrader {
         sizeLarge: this.config.sizeLarge,
         sizeMedium: this.config.sizeMedium,
         sizeSmall: this.config.sizeSmall,
+        preferFastestSource: this.config.preferFastestSource,
+        slowSourceDelayMs: this.config.slowSourceDelayMs,
       },
     };
   }

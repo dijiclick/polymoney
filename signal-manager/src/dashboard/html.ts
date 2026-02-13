@@ -61,6 +61,28 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .tab:hover{color:var(--text)}
 .tab.active{color:var(--red);border-bottom-color:var(--red)}
 .tab.active.tab-up{color:var(--blue);border-bottom-color:var(--blue)}
+.tab.active.tab-goals{color:var(--green);border-bottom-color:var(--green)}
+
+/* ─── GOALS TAB ─── */
+.goals-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.gs-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;text-align:center}
+.gs-card .gs-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.gs-card .gs-value{font-size:20px;font-weight:800;font-family:'SF Mono','Cascadia Code',monospace}
+.gs-card .gs-sub{font-size:10px;color:var(--text-muted);margin-top:2px}
+.goal-row{display:flex;align-items:stretch;gap:0;margin:2px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;transition:border-color .15s}
+.goal-row:hover{border-color:var(--border-h)}
+.goal-winner{width:4px;flex-shrink:0;border-radius:2px 0 0 2px}
+.goal-body{flex:1;padding:8px 12px;min-width:0}
+.goal-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.goal-match{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.goal-score-change{font-family:'SF Mono','Cascadia Code',monospace;font-size:12px;font-weight:700;color:var(--green)}
+.goal-time{font-size:10px;color:var(--text-muted);font-family:'SF Mono','Cascadia Code',monospace;white-space:nowrap}
+.goal-sources{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.goal-src{display:flex;align-items:center;gap:4px;font-size:11px;font-family:'SF Mono','Cascadia Code',monospace;padding:2px 8px;border-radius:4px;background:rgba(255,255,255,0.03);border:1px solid var(--border)}
+.goal-src.winner{border-color:var(--green);background:rgba(16,185,129,0.08)}
+.goal-src .src-name{font-weight:600;font-size:10px}
+.goal-src .src-ms{font-weight:700}
+.goal-src .src-delta{font-size:10px;color:var(--text-muted)}
 .tab-cnt{font-weight:400;font-size:10px;opacity:.7}
 
 /* ─── SCROLLABLE SECTIONS ─── */
@@ -105,7 +127,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 /* ─── ODDS TABLE ─── */
 .ev-odds{display:none;padding:6px 14px 10px;border-top:1px solid var(--border);background:var(--bg)}
 .ev.open .ev-odds{display:block}
-.odds-grid{display:grid;grid-template-columns:1fr 70px 70px 60px 70px;gap:0;font-size:11px}
+.odds-grid{display:grid;grid-template-columns:1fr 60px 60px 55px 55px 60px;gap:0;font-size:11px}
 .odds-hd{padding:4px 6px;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
 .odds-hd:nth-child(2){text-align:center;color:var(--blue)}
 .odds-hd:nth-child(3){text-align:center;color:var(--amber)}
@@ -123,44 +145,37 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .panel-right{background:var(--bg-card);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
 @media(max-width:1100px){.panel-right{border-left:none;border-top:1px solid var(--border)}}
 
-/* ─── SIGNALS SECTION ─── */
-.signals-area{flex:1;overflow-y:auto;padding:8px 12px}
-
-.sec-title.sig-title .sec-dot{background:var(--green)}
-.sec-title.sig-title{color:var(--green)}
-
-.opp{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px;transition:border-color .2s}
-.opp.good{border-left:3px solid var(--green)}
-.opp.medium{border-left:3px solid var(--amber)}
-.opp.suspect{border-left:3px solid var(--red);opacity:.55}
-.opp-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
-.opp-action{font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;letter-spacing:.3px}
-.opp-action.yes{background:rgba(16,185,129,.12);color:var(--green)}
-.opp-action.no{background:rgba(239,68,68,.12);color:var(--red)}
-.opp-edge-box{text-align:right}
-.opp-edge{font-family:'SF Mono','Cascadia Code',monospace;font-size:20px;font-weight:800;color:var(--green);line-height:1}
-.opp-trend{font-size:12px;margin-left:2px}
-.opp-match{font-size:13px;font-weight:600;margin-bottom:2px}
-.opp-market{font-size:11px;color:var(--blue);margin-bottom:8px}
-.opp-bar{display:flex;align-items:center;gap:6px;margin-bottom:8px}
-.opp-bar-label{font-size:10px;font-family:'SF Mono','Cascadia Code',monospace;min-width:62px;white-space:nowrap}
-.opp-bar-label.pm-l{color:var(--blue)}.opp-bar-label.xb-l{color:var(--amber);text-align:right}
-.opp-track{flex:1;height:4px;background:var(--bg-raised);border-radius:2px;position:relative;overflow:hidden}
-.opp-fill{position:absolute;top:0;left:0;height:100%;background:var(--blue);border-radius:2px;transition:width .3s}
-.opp-marker{position:absolute;top:-2px;width:2px;height:8px;background:var(--amber);border-radius:1px}
-.opp-foot{display:flex;gap:12px;font-size:10px;color:var(--text-muted)}
-.opp-foot .v{font-weight:600;color:var(--text-dim)}
-.q-badge{font-size:9px;font-weight:600;padding:2px 6px;border-radius:3px}
-.q-badge.good{background:rgba(16,185,129,.12);color:var(--green)}
-.q-badge.medium{background:rgba(245,158,11,.12);color:var(--amber)}
-.q-badge.suspect{background:rgba(239,68,68,.12);color:var(--red)}
+/* ─── RIGHT PANEL TABS ─── */
+.rp-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg)}
+.rp-tab{padding:10px 14px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;user-select:none}
+.rp-tab:hover{color:var(--text)}
+.rp-tab.active{color:var(--green);border-bottom-color:var(--green)}
+.rp-tab.active.rp-race{color:var(--amber);border-bottom-color:var(--amber)}
+.rp-tab.active.rp-trades{color:var(--blue);border-bottom-color:var(--blue)}
+.rp-content{flex:1;overflow-y:auto;display:none;padding:10px 14px}
+.rp-content.active{display:block}
 
 /* ─── SESSION STATS ─── */
-.session-area{border-top:1px solid var(--border);padding:12px 20px 16px}
 .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-top:8px}
 .stat-item{display:flex;justify-content:space-between;align-items:center;font-size:11px}
 .stat-item .stat-k{color:var(--text-muted)}
 .stat-item .stat-v{font-family:'SF Mono','Cascadia Code',monospace;font-weight:600;color:var(--text)}
+
+/* ─── RACE LOG ─── */
+.race-row{padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:11px;font-family:'SF Mono','Cascadia Code',monospace}
+.race-row .race-age{color:var(--text-muted);min-width:32px;display:inline-block}
+.race-row .race-winner{color:var(--green);font-weight:700}
+.race-row .race-match{color:var(--text)}
+.race-row .race-score{color:var(--amber);font-weight:600}
+.race-row .race-times{color:var(--text-muted);font-size:10px}
+
+/* ─── TRADE LOG ─── */
+.trade-row{padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:11px}
+.trade-row .trade-action{font-weight:700;font-size:10px;padding:2px 6px;border-radius:3px;letter-spacing:.3px}
+.trade-row .trade-action.buy{background:rgba(16,185,129,.12);color:var(--green)}
+.trade-row .trade-action.sell{background:rgba(239,68,68,.12);color:var(--red)}
+.trade-row .trade-match{font-weight:600;font-size:12px;margin-top:3px}
+.trade-row .trade-detail{color:var(--text-muted);font-size:10px;margin-top:2px;font-family:'SF Mono','Cascadia Code',monospace}
 
 /* ─── EMPTY STATES ─── */
 .empty{text-align:center;color:var(--text-muted);padding:32px 20px;font-size:12px}
@@ -183,9 +198,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div class="top-right">
     <div id="adapters" style="display:flex;gap:6px"></div>
     <div class="top-stats">
-      <span>Matched <b id="s-events">0</b></span>
+      <span>PM <b id="s-events">0</b></span>
+      <span>Dual <b id="s-dual">0</b></span>
       <span>Live <b id="s-live" class="live-count">0</b></span>
-      <span>Signals <b id="s-sigs">0</b></span>
+      <span>Goals <b id="s-goals">0</b></span>
     </div>
     <div class="top-time" id="s-time">--:--:--</div>
   </div>
@@ -198,22 +214,26 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="tab-bar" id="tab-bar">
       <div class="tab active" id="tab-live" onclick="setTab(&quot;live&quot;)"><span class="sec-dot" style="width:6px;height:6px;border-radius:50%;background:var(--red)"></span>LIVE <span class="tab-cnt" id="tab-live-cnt">0</span></div>
       <div class="tab tab-up" id="tab-up" onclick="setTab(&quot;upcoming&quot;)"><span class="sec-dot" style="width:6px;height:6px;border-radius:50%;background:var(--blue)"></span>UPCOMING <span class="tab-cnt" id="tab-up-cnt">0</span></div>
+      <div class="tab tab-goals" id="tab-goals" onclick="setTab(&quot;goals&quot;)"><span class="sec-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green)"></span>GOALS <span class="tab-cnt" id="tab-goals-cnt">0</span></div>
     </div>
     <div class="tab-content active" id="sec-live"></div>
     <div class="tab-content" id="sec-up"></div>
+    <div class="tab-content" id="sec-goals"></div>
   </div>
   <div class="panel-right">
-    <div class="sec-title sig-title"><div class="sec-dot"></div>SIGNALS<span class="sec-count" id="sig-cnt">0</span></div>
-    <div class="signals-area" id="signals"><div class="empty">Waiting for signals...</div></div>
-    <div class="session-area">
-      <div class="sec-title" style="padding:0 0 4px"><div class="sec-dot" style="background:var(--text-muted)"></div>SESSION</div>
-      <div class="stat-grid" id="stats"></div>
+    <div class="rp-tabs">
+      <div class="rp-tab active" id="rpt-stats" onclick="setRpTab(&quot;stats&quot;)">Stats</div>
+      <div class="rp-tab rp-race" id="rpt-race" onclick="setRpTab(&quot;race&quot;)">Race</div>
+      <div class="rp-tab rp-trades" id="rpt-trades" onclick="setRpTab(&quot;trades&quot;)">Trades</div>
     </div>
+    <div class="rp-content active" id="rpc-stats"></div>
+    <div class="rp-content" id="rpc-race"></div>
+    <div class="rp-content" id="rpc-trades"></div>
   </div>
 </div>
 
 <script>
-var ws, state=null, sportFilter='all', activeTab='live', openEvents=new Set(), closedGroups=new Set(), startedAt=0;
+var ws, state=null, sportFilter='all', activeTab='live', activeRpTab='stats', openEvents=new Set(), closedGroups=new Set(), startedAt=0;
 
 var SPORT_ICONS={
   soccer:'\\u26BD',football:'\\u26BD',basketball:'\\uD83C\\uDFC0',ice_hockey:'\\uD83C\\uDFD2',
@@ -314,13 +334,14 @@ function connect(){
 }
 
 /* ─── Helpers ─── */
+function hasPM(ev){return Object.keys(ev.markets).some(function(k){if(k.startsWith('__'))return false;var s=Object.keys(ev.markets[k]);return s.indexOf('polymarket')>=0;});}
 function hasMulti(ev){return Object.keys(ev.markets).some(function(k){if(k.startsWith('__'))return false;var s=Object.keys(ev.markets[k]);return s.indexOf('polymarket')>=0&&(s.indexOf('onexbet')>=0||s.indexOf('kambi')>=0||s.indexOf('pinnacle')>=0||s.indexOf('thesports')>=0);});}
 function getFiltered(){
   if(!state)return{live:[],upcoming:[]};
   var live=[],up=[];
   for(var i=0;i<state.events.length;i++){
     var ev=state.events[i];
-    if(!hasMulti(ev))continue;
+    if(!hasPM(ev))continue;
     var grp=sportGroup(ev.sport);
     if(sportFilter!=='all'&&grp!==sportFilter)continue;
     if(ev.status==='live')live.push(ev);
@@ -339,17 +360,23 @@ function groupBySport(arr){
 function render(){
   if(!state)return;
   var d=getFiltered();
-  var multiCount=d.live.length+(d.upcoming?d.upcoming.length:0);
-  document.getElementById('s-events').textContent=multiCount;
+  var pmCount=d.live.length+(d.upcoming?d.upcoming.length:0);
+  var dualCount=0;
+  for(var i=0;i<d.live.length;i++){if(hasMulti(d.live[i]))dualCount++;}
+  if(d.upcoming){for(var i=0;i<d.upcoming.length;i++){if(hasMulti(d.upcoming[i]))dualCount++;}}
+  document.getElementById('s-events').textContent=pmCount;
+  document.getElementById('s-dual').textContent=dualCount;
   document.getElementById('s-live').textContent=d.live.length;
-  document.getElementById('s-sigs').textContent=(state.tradeSignals||[]).length;
+  document.getElementById('s-goals').textContent=(state.speedLog||[]).length+(state.reactionLog||[]).length;
   document.getElementById('s-time').textContent=new Date().toLocaleTimeString();
   renderAdapters();
   renderSportPills();
   renderLive(d.live);
   renderUpcoming(d.upcoming);
-  renderSignals();
+  renderGoals();
   renderSession();
+  renderRace();
+  renderTrades();
 }
 
 function renderAdapters(){
@@ -369,14 +396,14 @@ function renderSportPills(){
   var counts={};
   for(var i=0;i<state.events.length;i++){
     var ev=state.events[i];
-    if(!hasMulti(ev))continue;
+    if(!hasPM(ev))continue;
     var grp=sportGroup(ev.sport);
     counts[grp]=(counts[grp]||0)+1;
   }
   var sorted=Object.entries(counts).sort(function(a,b){if(a[0]==='Soccer')return -1;if(b[0]==='Soccer')return 1;return b[1]-a[1];});
   var total=sorted.reduce(function(s,e){return s+e[1];},0);
   var el=document.getElementById('sport-bar');
-  if(total===0){el.innerHTML='<div class="pill active">No dual-source events yet</div>';return;}
+  if(total===0){el.innerHTML='<div class="pill active">No Polymarket events yet</div>';return;}
   var h='<div class="pill'+(sportFilter==='all'?' active':'')+'" onclick="setSport(this,\\'all\\')">All<span class="cnt">'+total+'</span></div>';
   for(var i=0;i<sorted.length;i++){
     var g=sorted[i][0],c=sorted[i][1];
@@ -389,8 +416,19 @@ function setTab(t){
   activeTab=t;
   document.getElementById('tab-live').className=t==='live'?'tab active':'tab';
   document.getElementById('tab-up').className=t==='upcoming'?'tab tab-up active':'tab tab-up';
+  document.getElementById('tab-goals').className=t==='goals'?'tab tab-goals active':'tab tab-goals';
   document.getElementById('sec-live').className=t==='live'?'tab-content active':'tab-content';
   document.getElementById('sec-up').className=t==='upcoming'?'tab-content active':'tab-content';
+  document.getElementById('sec-goals').className=t==='goals'?'tab-content active':'tab-content';
+}
+function setRpTab(t){
+  activeRpTab=t;
+  var tabs=['stats','race','trades'];
+  for(var i=0;i<tabs.length;i++){
+    var tid=tabs[i];
+    document.getElementById('rpt-'+tid).className=tid===t?'rp-tab'+(tid!=='stats'?' rp-'+tid:'')+' active':'rp-tab'+(tid!=='stats'?' rp-'+tid:'');
+    document.getElementById('rpc-'+tid).className=tid===t?'rp-content active':'rp-content';
+  }
 }
 
 /* ─── Live Events Section ─── */
@@ -471,140 +509,340 @@ function renderOdds(ev,mkeys){
     function o(k){if(k.startsWith('ml_home'))return 0;if(k.startsWith('ml_away'))return 1;if(k.startsWith('draw'))return 2;return 3;}
     var d=o(a)-o(b);if(d!==0)return d;return a<b?-1:a>b?1:0;
   });
-  var h='<div class="odds-grid"><div class="odds-hd">Market</div><div class="odds-hd">PM</div><div class="odds-hd">1xBet</div><div class="odds-hd">Kambi</div><div class="odds-hd">Edge</div>';
+  var h='<div class="odds-grid"><div class="odds-hd">Market</div><div class="odds-hd">PM</div><div class="odds-hd">1xBet</div><div class="odds-hd">Kambi</div><div class="odds-hd">Pinn</div><div class="odds-hd">Edge</div>';
   for(var i=0;i<Math.min(sorted.length,15);i++){
     var k=sorted[i],srcs=ev.markets[k];
-    var pm=srcs.polymarket,xb=srcs.onexbet,kb=srcs.kambi;
+    var pm=srcs.polymarket,xb=srcs.onexbet,kb=srcs.kambi,pn=srcs.pinnacle;
     var pmP=pm?(1/pm.value*100):null;
     var xbP=xb?(1/xb.value*100):null;
     var kbP=kb?(1/kb.value*100):null;
-    var edge=(pmP!==null&&xbP!==null)?xbP-pmP:null;
+    var pnP=pn?(1/pn.value*100):null;
+    // Edge: best secondary vs PM
+    var secBest=xbP||kbP||pnP||null;
+    if(xbP!==null&&kbP!==null)secBest=Math.max(xbP,kbP);
+    if(secBest!==null&&pnP!==null)secBest=Math.max(secBest,pnP);
+    var edge=(pmP!==null&&secBest!==null)?secBest-pmP:null;
     var edgeAbs=edge!==null?Math.abs(edge):0;
     var edgeCls=edgeAbs>=3?'hot':edge!==null&&edge>0?'pos':'neg';
     h+='<div class="odds-cell odds-lbl">'+fmtKey(k)+'</div>'
       +'<div class="odds-cell odds-pm">'+(pmP!==null?pmP.toFixed(1)+'%':'\\u2014')+'</div>'
       +'<div class="odds-cell odds-xb">'+(xbP!==null?xbP.toFixed(1)+'%':'\\u2014')+'</div>'
       +'<div class="odds-cell odds-kb">'+(kbP!==null?kbP.toFixed(1)+'%':'\\u2014')+'</div>'
+      +'<div class="odds-cell odds-pn">'+(pnP!==null?pnP.toFixed(1)+'%':'\\u2014')+'</div>'
       +'<div class="odds-cell odds-edge '+edgeCls+'">'+(edge!==null?(edge>0?'+':'')+edge.toFixed(1)+'%':'\\u2014')+'</div>';
   }
   h+='</div>';
   return h;
 }
 
-/* ─── Signals / Opportunities ─── */
-function renderSignals(){
-  var el=document.getElementById('signals');
-  var opps=state.tradeSignals||[];
-  document.getElementById('sig-cnt').textContent=opps.length;
-  if(opps.length===0){el.innerHTML='<div class="empty">No opportunities detected<br><span style="font-size:11px;margin-top:4px;display:block">Signals appear when PM & 1xBet diverge by 3%+</span></div>';return;}
-  var h='';
-  for(var i=0;i<opps.length;i++){
-    var o=opps[i];
-    var isYes=o.action==='BUY_YES';
-    var dur=Math.floor((Date.now()-o.firstSeen)/1000);
-    var durStr=dur<60?dur+'s':Math.floor(dur/60)+'m '+dur%60+'s';
-    var scoreTxt=o.score?o.score.home+'\\u2013'+o.score.away:'';
-    var liveBadge=o.eventStatus==='live'?'<span class="badge-live" style="display:inline-flex;margin-left:6px">LIVE</span>':'';
-    var trend='';
-    if(o.edgeHistory&&o.edgeHistory.length>=3){
-      var r=o.edgeHistory.slice(-3),avg1=(r[0]+r[1])/2,last=r[2];
-      if(last>avg1+0.5)trend='<span class="opp-trend" style="color:var(--green)">\\u25B2</span>';
-      else if(last<avg1-0.5)trend='<span class="opp-trend" style="color:var(--red)">\\u25BC</span>';
-      else trend='<span class="opp-trend" style="color:var(--text-muted)">\\u25B6</span>';
-    }
-    var pmP=Math.min(100,Math.max(0,o.polyProb));
-    var xbP=Math.min(100,Math.max(0,o.xbetProb));
-    var pmFr=o.polyAgeMs<5000?'<span class="v" style="color:var(--green)">&lt;5s</span>':o.polyAgeMs<30000?'<span class="v">'+Math.round(o.polyAgeMs/1000)+'s</span>':'<span class="v" style="color:var(--red)">'+Math.round(o.polyAgeMs/1000)+'s</span>';
-    var xbFr=o.xbetAgeMs<10000?'<span class="v" style="color:var(--green)">&lt;10s</span>':o.xbetAgeMs<60000?'<span class="v">'+Math.round(o.xbetAgeMs/1000)+'s</span>':'<span class="v" style="color:var(--red)">'+Math.round(o.xbetAgeMs/1000)+'s</span>';
+/* ─── Score Race Tab ─── */
+function renderRace(){
+  var el=document.getElementById('rpc-race');
+  var speedLog=state.speedLog||[];
+  if(speedLog.length===0){el.innerHTML='<div class="empty">No score races yet<br><span style="font-size:11px;margin-top:4px;display:block">Races appear when multiple sources detect the same score change</span></div>';return;}
 
-    var escHome=o.homeTeam.replace(/'/g,"\\\\'");
-    var escAway=o.awayTeam.replace(/'/g,"\\\\'");
-    h+='<div class="opp '+o.quality+'" style="cursor:pointer" onclick="openSignalEvent(\\''+escHome+'\\',\\''+escAway+'\\')">'
-      +'<div class="opp-header"><div><span class="opp-action '+(isYes?'yes':'no')+'">'+o.action.replace('_',' ')+'</span> <span class="q-badge '+o.quality+'">'+o.quality.toUpperCase()+'</span></div>'
-      +'<div class="opp-edge-box"><span class="opp-edge">'+o.edge.toFixed(1)+'<span style="font-size:12px;font-weight:600">%</span></span>'+trend+'</div></div>'
-      +'<div class="opp-match">'+o.homeTeam+' vs '+o.awayTeam+(scoreTxt?' <span style="color:var(--green);font-weight:700">'+scoreTxt+'</span>':'')+liveBadge+'</div>'
-      +'<div class="opp-market">'+fmtKey(o.market)+'</div>'
-      +'<div class="opp-bar"><span class="opp-bar-label pm-l">PM '+pmP.toFixed(1)+'%</span><div class="opp-track"><div class="opp-fill" style="width:'+pmP+'%"></div><div class="opp-marker" style="left:'+xbP+'%"></div></div><span class="opp-bar-label xb-l">'+xbP.toFixed(1)+'% 1xB</span></div>'
-      +'<div class="opp-foot"><span>'+durStr+'</span><span>PM '+pmFr+'</span><span>1xBet '+xbFr+'</span></div>'
-      +'</div>';
+  // Collect all sources seen across all races
+  var allSrcs={};
+  for(var i=0;i<speedLog.length;i++){var times=speedLog[i].times||[];for(var j=0;j<times.length;j++)allSrcs[times[j].src]=1;}
+  var srcList=Object.keys(allSrcs).sort();
+
+  var h='<table style="width:100%;border-collapse:collapse;font-size:11px;font-family:\\'SF Mono\\',\\'Cascadia Code\\',monospace">';
+  h+='<thead><tr style="border-bottom:1px solid var(--border)">';
+  h+='<th style="text-align:left;padding:4px 6px;color:var(--text-muted);font-size:10px">MATCH</th>';
+  h+='<th style="text-align:center;padding:4px 4px;color:var(--amber);font-size:10px">SCORE</th>';
+  for(var si=0;si<srcList.length;si++){
+    h+='<th style="text-align:center;padding:4px 3px;color:var(--text-muted);font-size:9px;min-width:44px">'+fmtSrcName(srcList[si])+'</th>';
+  }
+  h+='</tr></thead><tbody>';
+
+  for(var i=0;i<Math.min(speedLog.length,60);i++){
+    var sl=speedLog[i];
+    var age=Math.round((Date.now()-sl.ts)/1000);
+    var ageStr=age<60?age+'s':age<3600?Math.floor(age/60)+'m':Math.floor(age/3600)+'h';
+    var srcMs={},times=sl.times||[],minMs=Infinity;
+    for(var j=0;j<times.length;j++){srcMs[times[j].src]=times[j].ms;if(times[j].ms<minMs)minMs=times[j].ms;}
+
+    h+='<tr style="border-bottom:1px solid rgba(255,255,255,0.03)">';
+    h+='<td style="padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px"><span style="color:var(--text-muted);font-size:9px">'+ageStr+'</span> '+sl.match+'</td>';
+    h+='<td style="text-align:center;padding:4px 4px;color:var(--amber);font-weight:700">'+sl.score+'</td>';
+    for(var si=0;si<srcList.length;si++){
+      var ms=srcMs[srcList[si]];
+      if(ms===undefined){
+        h+='<td style="text-align:center;padding:4px 3px;color:var(--border-h)">\\u2014</td>';
+      } else {
+        var isWin=ms===minMs;
+        var delta=ms-minMs;
+        var col=isWin?'var(--green)':delta<500?'var(--text)':delta<2000?'var(--amber)':'var(--red)';
+        var txt=isWin?'\\u2714 0':'+'+delta;
+        h+='<td style="text-align:center;padding:4px 3px;color:'+col+';font-weight:'+(isWin?'700':'400')+'">'+txt+'<span style="font-size:8px;opacity:.6">ms</span></td>';
+      }
+    }
+    h+='</tr>';
+  }
+  h+='</tbody></table>';
+  el.innerHTML=h;
+}
+
+/* ─── Trades Tab ─── */
+function renderTrades(){
+  var el=document.getElementById('rpc-trades');
+  var trading=state.trading;
+  if(!trading){el.innerHTML='<div class="empty">Trading not configured<br><span style="font-size:11px;margin-top:4px;display:block">No POLY_PRIVATE_KEY in env</span></div>';return;}
+  var gt=trading.goalTrader||{};
+  var gtEnabled=gt.enabled;
+  var gtArmed=trading.armed;
+  var h='';
+
+  // Control buttons
+  h+='<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">';
+  h+='<button onclick="sendCmd(\\'goaltrader '+(gtEnabled?'off':'on')+'\\')" style="padding:5px 12px;border-radius:4px;border:1px solid '+(gtEnabled?'var(--red)':'var(--green)')+';background:'+(gtEnabled?'rgba(239,68,68,.1)':'rgba(16,185,129,.1)')+';color:'+(gtEnabled?'var(--red)':'var(--green)')+';font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.5px">'+(gtEnabled?'DISABLE GT':'ENABLE GT')+'</button>';
+  h+='<button onclick="sendCmd(\\''+(!gtArmed?'arm':'disarm')+'\\')" style="padding:5px 12px;border-radius:4px;border:1px solid '+(gtArmed?'var(--green)':'var(--red)')+';background:'+(gtArmed?'rgba(16,185,129,.1)':'rgba(239,68,68,.08)')+';color:'+(gtArmed?'var(--green)':'var(--red)')+';font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.5px">'+(gtArmed?'DISARM BOT':'ARM BOT')+'</button>';
+  if(state.fastestSource)h+='<span style="font-size:10px;font-weight:600;padding:5px 10px;border-radius:4px;background:rgba(245,158,11,.08);color:var(--amber);border:1px solid rgba(245,158,11,.2)">\\u26A1 '+fmtSrcName(state.fastestSource)+'</span>';
+  h+='</div>';
+
+  // Status badges
+  h+='<div style="display:flex;gap:6px;margin-bottom:10px">';
+  h+='<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;'+(gtEnabled?'background:rgba(16,185,129,.12);color:var(--green)':'background:rgba(239,68,68,.12);color:var(--red)')+'">GT '+(gtEnabled?'ON':'OFF')+'</span>';
+  h+='<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;'+(gtArmed?'background:rgba(239,68,68,.15);color:var(--red)':'background:rgba(100,116,139,.12);color:var(--text-muted)')+'">'+(gtArmed?'ARMED':'DRY RUN')+'</span>';
+  var tc=gt.totalTrades||0;
+  var totalPnl=gt.totalPnl||0;
+  h+='<span style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:4px;background:rgba(255,255,255,.04);color:var(--text-dim)">'+tc+' trades</span>';
+  if(tc>0)h+='<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;background:rgba(255,255,255,.04);color:'+(totalPnl>=0?'var(--green)':'var(--red)')+'">'+(totalPnl>=0?'+':'')+totalPnl.toFixed(3)+'</span>';
+  h+='</div>';
+
+  // Goal Activity Log
+  var goalLog=gt.goalLog||[];
+  h+='<div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px">Goal Activity <span style="font-weight:400">('+goalLog.length+')</span></div>';
+
+  if(goalLog.length===0){
+    h+='<div class="empty-sm">No goal events yet — '+(gtEnabled?'waiting for score changes':'enable GT to start')+'</div>';
+  } else {
+    for(var i=0;i<Math.min(goalLog.length,80);i++){
+      var g=goalLog[i];
+      var age=Math.round((Date.now()-g.ts)/1000);
+      var ageStr=age<60?age+'s':age<3600?Math.floor(age/60)+'m':Math.floor(age/3600)+'h';
+
+      var actionCol='var(--text-muted)';
+      var actionBg='rgba(100,116,139,.1)';
+      var actionLabel=g.action;
+      if(g.action==='BUY'){actionCol='var(--green)';actionBg='rgba(16,185,129,.12)';actionLabel='\\u2714 BOUGHT';}
+      else if(g.action==='DRY_BUY'){actionCol='var(--blue)';actionBg='rgba(59,130,246,.12)';actionLabel='DRY BUY';}
+      else if(g.action==='PENDING'){actionCol='var(--amber)';actionBg='rgba(245,158,11,.12)';actionLabel='\\u23F3 PENDING';}
+      else if(g.action==='SKIP'){actionCol='var(--text-muted)';actionBg='rgba(100,116,139,.08)';actionLabel='\\u2716 SKIP';}
+
+      h+='<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.03)">';
+      h+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">';
+      h+='<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;background:'+actionBg+';color:'+actionCol+'">'+actionLabel+'</span>';
+      h+='<span style="font-size:12px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+g.match+'</span>';
+      h+='<span style="font-size:10px;color:var(--text-muted);white-space:nowrap">'+ageStr+'</span>';
+      h+='</div>';
+
+      h+='<div style="display:flex;align-items:center;gap:8px;font-size:10px;font-family:\\'SF Mono\\',\\'Cascadia Code\\',monospace">';
+      h+='<span style="color:var(--amber);font-weight:600">'+(g.prevScore||'?')+' \\u2192 '+g.score+'</span>';
+      h+='<span style="color:var(--text-muted)">via '+fmtSrcName(g.source)+'</span>';
+      if(g.goalType)h+='<span style="color:var(--text-dim)">'+g.goalType+'</span>';
+      h+='</div>';
+
+      // Trade details or skip reason
+      if(g.trade){
+        h+='<div style="font-size:10px;font-family:\\'SF Mono\\',\\'Cascadia Code\\',monospace;margin-top:2px;color:var(--green)">';
+        h+=g.trade.side+' '+g.trade.market+' @ '+(g.trade.price*100).toFixed(1)+'% · $'+g.trade.size;
+        if(g.trade.latencyMs)h+=' · '+g.trade.latencyMs+'ms';
+        h+='</div>';
+      } else if(g.action==='SKIP'||g.action==='PENDING'){
+        h+='<div style="font-size:10px;color:var(--text-muted);margin-top:1px">'+g.reason+'</div>';
+      }
+      h+='</div>';
+    }
   }
   el.innerHTML=h;
 }
 
-/* ─── Session Stats ─── */
+function sendCmd(cmd){
+  fetch('/api/trading/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:cmd})})
+    .then(function(r){return r.json();})
+    .then(function(d){if(d.result)console.log('CMD:',d.result);if(d.error)console.error('CMD error:',d.error);})
+    .catch(function(e){console.error('CMD failed:',e);});
+}
+
+/* ─── Goals Tab ─── */
+function renderGoals(){
+  var speedLog=state.speedLog||[];
+  var reactions=state.reactionLog||[];
+  var el=document.getElementById('sec-goals');
+  var totalGoals=speedLog.length+reactions.length;
+  document.getElementById('tab-goals-cnt').textContent=totalGoals;
+  if(totalGoals===0){el.innerHTML='<div class="empty">No goals detected yet<br><span style="font-size:11px;margin-top:4px;display:block">Goals appear when score changes are detected across sources</span></div>';return;}
+
+  // Build source win stats from speedLog
+  var srcWins={},srcTimes={},srcCount={};
+  for(var i=0;i<speedLog.length;i++){
+    var sl=speedLog[i];
+    var w=sl.winner;
+    srcWins[w]=(srcWins[w]||0)+1;
+    var times=sl.times||[];
+    for(var j=0;j<times.length;j++){
+      var t=times[j];
+      if(!srcTimes[t.src])srcTimes[t.src]=[];
+      srcTimes[t.src].push(t.ms);
+      srcCount[t.src]=(srcCount[t.src]||0)+1;
+    }
+  }
+  // Also count from reaction log
+  for(var i=0;i<reactions.length;i++){
+    var r=reactions[i];
+    var detBy=r.detectedBy;
+    if(detBy){srcWins[detBy]=(srcWins[detBy]||0)+1;}
+  }
+
+  // Summary stats cards
+  var allSources=Object.keys(srcWins).sort(function(a,b){return (srcWins[b]||0)-(srcWins[a]||0);});
+  var fastestSrc=allSources[0]||'—';
+  var totalDetections=allSources.reduce(function(s,k){return s+srcWins[k];},0);
+
+  var h='<div class="goals-stats">';
+  h+='<div class="gs-card"><div class="gs-label">Total Goals</div><div class="gs-value" style="color:var(--green)">'+totalGoals+'</div></div>';
+  h+='<div class="gs-card"><div class="gs-label">Fastest Source</div><div class="gs-value" style="color:var(--amber);font-size:14px">'+fmtSrcName(fastestSrc)+'</div><div class="gs-sub">'+((srcWins[fastestSrc]||0)/Math.max(totalDetections,1)*100).toFixed(0)+'% first</div></div>';
+
+  // Per-source win cards
+  for(var si=0;si<Math.min(allSources.length,5);si++){
+    var sn=allSources[si];
+    var wins=srcWins[sn]||0;
+    var avgMs=0;
+    if(srcTimes[sn]&&srcTimes[sn].length>0){avgMs=Math.round(srcTimes[sn].reduce(function(a,b){return a+b;},0)/srcTimes[sn].length);}
+    var pct=(wins/Math.max(totalDetections,1)*100).toFixed(0);
+    var col=si===0?'var(--green)':si===1?'var(--amber)':'var(--text-dim)';
+    h+='<div class="gs-card"><div class="gs-label">'+fmtSrcName(sn)+'</div><div class="gs-value" style="color:'+col+'">'+wins+'<span style="font-size:11px;font-weight:400"> wins</span></div><div class="gs-sub">'+pct+'% · avg '+avgMs+'ms</div></div>';
+  }
+  h+='</div>';
+
+  // Goal log rows from speedLog (most detailed — has per-source times)
+  var allGoals=[];
+  for(var i=0;i<speedLog.length;i++){
+    var sl=speedLog[i];
+    allGoals.push({ts:sl.ts,match:sl.match,score:sl.score,winner:sl.winner,times:sl.times||[],type:'speed'});
+  }
+  // Add reaction log goals not already in speedLog
+  for(var i=0;i<reactions.length;i++){
+    var r=reactions[i];
+    var dup=false;
+    for(var k=0;k<allGoals.length;k++){if(Math.abs(allGoals[k].ts-r.timestamp)<5000&&allGoals[k].score===r.scoreAfter){dup=true;break;}}
+    if(!dup){
+      var times=[];
+      if(r.detectedBy)times.push({src:r.detectedBy,ms:0});
+      var trajs=r.trajectories||[];
+      for(var j=0;j<trajs.length;j++){
+        var already=times.find(function(x){return x.src===trajs[j].source;});
+        if(!already)times.push({src:trajs[j].source,ms:trajs[j].firstReactionMs||0});
+      }
+      allGoals.push({ts:r.timestamp,match:r.match,score:r.scoreAfter,winner:r.detectedBy||'?',times:times,type:'reaction'});
+    }
+  }
+  allGoals.sort(function(a,b){return b.ts-a.ts;});
+
+  for(var i=0;i<Math.min(allGoals.length,100);i++){
+    var g=allGoals[i];
+    var age=Math.round((Date.now()-g.ts)/1000);
+    var ageStr=age<60?age+'s':age<3600?Math.floor(age/60)+'m '+age%60+'s':Math.floor(age/3600)+'h '+Math.floor((age%3600)/60)+'m';
+    var timeStr=new Date(g.ts).toLocaleTimeString();
+
+    // Source colors
+    var srcColors={polymarket:'var(--blue)',onexbet:'var(--amber)',kambi:'var(--green)',sofascore:'#8b5cf6',thesports:'#ec4899',pinnacle:'#f59e0b','pm-sports-ws':'var(--blue)',flashscore:'#06b6d4'};
+    var winColor=srcColors[g.winner]||'var(--green)';
+
+    h+='<div class="goal-row"><div class="goal-winner" style="background:'+winColor+'"></div><div class="goal-body">';
+    h+='<div class="goal-top"><div class="goal-match">'+g.match+'</div><div style="display:flex;align-items:center;gap:8px"><div class="goal-score-change">'+g.score+'</div><div class="goal-time">'+timeStr+' ('+ageStr+' ago)</div></div></div>';
+    h+='<div class="goal-sources">';
+
+    // Sort by ms (winner first)
+    var sorted=g.times.slice().sort(function(a,b){return a.ms-b.ms;});
+    var winnerMs=sorted.length>0?sorted[0].ms:0;
+    for(var j=0;j<sorted.length;j++){
+      var t=sorted[j];
+      var isWin=t.ms===winnerMs;
+      var delta=t.ms-winnerMs;
+      var srcCol=srcColors[t.src]||'var(--text-dim)';
+      h+='<div class="goal-src'+(isWin?' winner':'')+'">';
+      h+='<span class="src-name" style="color:'+srcCol+'">'+fmtSrcName(t.src)+'</span> ';
+      h+='<span class="src-ms" style="color:'+(isWin?'var(--green)':'var(--text)')+'">'+t.ms+'ms</span>';
+      if(!isWin&&delta>0)h+=' <span class="src-delta">+'+delta+'ms</span>';
+      if(isWin)h+=' <span style="color:var(--green);font-size:10px">\\u2714</span>';
+      h+='</div>';
+    }
+    h+='</div></div></div>';
+  }
+
+  if(allGoals.length===0){h+='<div class="empty-sm">No goal timing data yet</div>';}
+  el.innerHTML=h;
+}
+
+function fmtSrcName(s){
+  if(s==='polymarket'||s==='pm-sports-ws')return 'PM';
+  if(s==='onexbet')return '1xBet';
+  if(s==='kambi')return 'Kambi';
+  if(s==='sofascore')return 'Sofa';
+  if(s==='thesports')return 'TSprt';
+  if(s==='pinnacle')return 'Pinn';
+  if(s==='flashscore')return 'Flash';
+  return s;
+}
+
+/* ─── Session Stats Tab ─── */
 function renderSession(){
-  var el=document.getElementById('stats');
+  var el=document.getElementById('rpc-stats');
   var upSec=state.uptime||0;
   var hh=Math.floor(upSec/3600),mm=Math.floor((upSec%3600)/60);
   var upStr=hh>0?hh+'h '+mm+'m':mm+'m';
-
   var reactions=state.reactionLog||[];
-  var pmR=[],xbR=[];
-  for(var i=0;i<reactions.length;i++){
-    var ts=reactions[i].trajectories||reactions[i].reactions||[];
-    for(var j=0;j<ts.length;j++){
-      var t=ts[j];
-      var ms=t.firstReactionMs||t.reactionMs||0;
-      if(ms>0){
-        if(t.source==='polymarket')pmR.push(ms);
-        else if(t.source==='onexbet')xbR.push(ms);
-      }
-    }
-  }
-  function avg(a){if(!a.length)return 0;return a.reduce(function(s,v){return s+v;},0)/a.length;}
+  var speedLog=state.speedLog||[];
+  var totalGoals=speedLog.length+reactions.length;
 
-  var closedN=state.closedOpportunityCount||0;
-  var activeN=(state.tradeSignals||[]).length;
+  var h='<div class="stat-grid">';
+  h+=stat('Uptime',upStr);
+  h+=stat('Events',''+state.eventCount);
+  h+=stat('Goals',''+totalGoals);
+  h+=stat('Races',''+speedLog.length);
+  h+='</div>';
 
   // Adapter latency boxes
   var latStats=state.adapterLatency||{};
-  var latHtml='';
   var latSrcs=Object.keys(latStats).sort();
   if(latSrcs.length>0){
-    latHtml='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:6px;margin-top:10px">';
+    h+='<div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.8px;margin:14px 0 6px">Adapter Latency</div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:6px">';
     for(var li=0;li<latSrcs.length;li++){
       var ls=latSrcs[li];
       var ld=latStats[ls];
-      var lbl=ls==='polymarket'?'PM':ls==='onexbet'?'1xBet':ls==='kambi'?'Kambi':ls==='thesports'?'TSprt':ls==='sofascore'?'Sofa':ls==='pinnacle'?'Pinn':ls;
+      var lbl=fmtSrcName(ls);
       var latC=ld.avg<200?'var(--green)':ld.avg<1000?'#ffd700':'var(--red)';
-      latHtml+='<div style="text-align:center;padding:4px;background:rgba(255,255,255,0.03);border-radius:4px">'
+      h+='<div style="text-align:center;padding:6px;background:rgba(255,255,255,0.03);border-radius:4px">'
         +'<div style="font-size:10px;color:var(--text-muted)">'+lbl+'</div>'
         +'<div style="font-size:16px;font-weight:700;color:'+latC+'">'+ld.avg+'<span style="font-size:9px">ms</span></div>'
         +'<div style="font-size:9px;color:var(--text-muted)">'+ld.count+' upd</div></div>';
     }
-    latHtml+='</div>';
+    h+='</div>';
   }
 
-  // Score Race log
-  var speedLog=state.speedLog||[];
-  var raceHtml='';
-  if(speedLog.length>0){
-    raceHtml='<div style="margin-top:12px"><div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:6px">\\u26A1 Score Race ('+speedLog.length+')</div>';
-    raceHtml+='<div style="font-size:11px;font-family:monospace;max-height:180px;overflow-y:auto">';
-    for(var si=0;si<Math.min(speedLog.length,25);si++){
-      var sl=speedLog[si];
-      var age=Math.round((Date.now()-sl.ts)/1000);
-      var ageStr=age<60?age+'s':Math.floor(age/60)+'m';
-      var timeParts=(sl.times||[]).map(function(t){
-        var c=t.src===sl.winner?'var(--green)':'var(--text-muted)';
-        return '<span style="color:'+c+'">'+t.src+':'+t.ms+'ms</span>';
-      }).join(' ');
-      raceHtml+='<div style="padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)">'
-        +'<span style="color:var(--text-muted);min-width:30px;display:inline-block">'+ageStr+'</span> '
-        +'<span style="color:var(--green);font-weight:700">\\u{1F3C6}'+sl.winner+'</span> '
-        +'<span>'+sl.match+'</span> '
-        +'<span style="color:var(--amber);font-weight:600">'+sl.score+'</span> '
-        +'<span style="color:var(--text-muted)">('+timeParts+')</span></div>';
+  // Source wins summary
+  var srcWins=state.sourceWins||{};
+  var winSrcs=Object.keys(srcWins).sort(function(a,b){return srcWins[b]-srcWins[a];});
+  if(winSrcs.length>0){
+    var totalWins=winSrcs.reduce(function(s,k){return s+srcWins[k];},0);
+    h+='<div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.8px;margin:14px 0 6px">Source Wins</div>';
+    for(var wi=0;wi<winSrcs.length;wi++){
+      var ws2=winSrcs[wi],wc=srcWins[ws2];
+      var pct=Math.round(wc/totalWins*100);
+      var barCol=wi===0?'var(--green)':wi===1?'var(--amber)':'var(--text-muted)';
+      h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px">';
+      h+='<span style="min-width:50px;font-weight:600;color:'+barCol+'">'+fmtSrcName(ws2)+'</span>';
+      h+='<div style="flex:1;height:6px;background:var(--bg);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+barCol+';border-radius:3px"></div></div>';
+      h+='<span style="font-family:monospace;font-weight:700;min-width:32px;text-align:right">'+wc+'</span>';
+      h+='<span style="color:var(--text-muted);font-size:10px;min-width:28px;text-align:right">'+pct+'%</span>';
+      h+='</div>';
     }
-    raceHtml+='</div></div>';
   }
 
-  el.innerHTML=''
-    +stat('Uptime',upStr)
-    +stat('Events',''+state.eventCount)
-    +stat('Goals',''+reactions.length)
-    +stat('Signals',activeN+' / '+closedN)
-    +latHtml+raceHtml;
+  el.innerHTML=h;
 }
 function stat(k,v){return '<div class="stat-item"><span class="stat-k">'+k+'</span><span class="stat-v">'+v+'</span></div>';}
 

@@ -7,6 +7,7 @@ import type { PinnacleAdapterConfig } from '../../types/config.js';
 import type { TargetEvent } from '../../types/target-event.js';
 import type { AdapterEventUpdate } from '../../types/adapter-update.js';
 import { TargetEventFilter } from '../../matching/target-filter.js';
+import { encodeThreshold } from '../../types/market-keys.js';
 import { createLogger } from '../../util/logger.js';
 
 const log = createLogger('pinnacle');
@@ -39,14 +40,22 @@ export class PinnacleAdapter implements IFilterableAdapter {
     log.info('Starting Pinnacle adapter...');
     await this.poll();
     this.status = 'connected';
-    this.pollTimer = setInterval(() => this.poll().catch(e => log.error('Poll error:', e.message)), this.config.pollIntervalMs);
-    log.info(`Pinnacle adapter running (${this.config.pollIntervalMs}ms poll)`);
+    this.scheduleNext();
+    log.info(`Pinnacle adapter running (${this.config.pollIntervalMs}ms poll, cache-bust via brandId=1)`);
   }
 
   async stop(): Promise<void> {
-    if (this.pollTimer) clearInterval(this.pollTimer);
+    if (this.pollTimer) clearTimeout(this.pollTimer);
+    this.pollTimer = null;
     this.status = 'stopped';
     log.info('Pinnacle adapter stopped');
+  }
+
+  private scheduleNext(): void {
+    this.pollTimer = setTimeout(async () => {
+      try { await this.poll(); } catch (e: any) { log.error('Poll error:', e.message); }
+      if (this.status !== 'stopped') this.scheduleNext();
+    }, this.config.pollIntervalMs);
   }
 
   private async poll(): Promise<void> {
@@ -59,7 +68,7 @@ export class PinnacleAdapter implements IFilterableAdapter {
   private async pollSport(sportId: number): Promise<void> {
     try {
       const resp = await fetch(
-        `${this.config.baseUrl}/sports/${sportId}/matchups/live?withSpecials=false&brandId=0`,
+        `${this.config.baseUrl}/sports/${sportId}/matchups/live?withSpecials=false&brandId=1`,
         { headers: { 'Accept': 'application/json', 'X-Api-Key': 'CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R' },
           signal: AbortSignal.timeout(this.config.timeoutMs || 5000) }
       );
@@ -76,7 +85,7 @@ export class PinnacleAdapter implements IFilterableAdapter {
         if (!home || !away) continue;
         const filterResult = this.targetFilter.check(home, away);
         if (!filterResult.matched) continue;
-        const matchupId = m.parent.id || m.id;
+        const matchupId = m.id;
         const league = m.league?.name || '';
         this.matchedEvents.set(matchupId, { home, away, sport, league });
 
@@ -108,7 +117,7 @@ export class PinnacleAdapter implements IFilterableAdapter {
     for (const sportId of this.config.sportIds) {
       try {
         const resp = await fetch(
-          `${this.config.baseUrl}/sports/${sportId}/markets/live/straight?primaryOnly=true&withSpecials=false`,
+          `${this.config.baseUrl}/sports/${sportId}/markets/live/straight?primaryOnly=true&withSpecials=false&brandId=1`,
           { headers: { 'Accept': 'application/json', 'X-Api-Key': 'CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R' },
             signal: AbortSignal.timeout(this.config.timeoutMs || 5000) }
         );
@@ -139,13 +148,19 @@ export class PinnacleAdapter implements IFilterableAdapter {
 
   private mapMarketKey(type: string, designation: string, points?: number): string | null {
     if (type === 'moneyline') {
-      if (designation === 'home') return 'home_ml_ft';
-      if (designation === 'away') return 'away_ml_ft';
+      if (designation === 'home') return 'ml_home_ft';
+      if (designation === 'away') return 'ml_away_ft';
       if (designation === 'draw') return 'draw_ft';
     }
     if (type === 'total' && points !== undefined) {
-      if (designation === 'over') return `over_${points}_ft`;
-      if (designation === 'under') return `under_${points}_ft`;
+      const t = encodeThreshold(points);
+      if (designation === 'over') return `o_${t}_ft`;
+      if (designation === 'under') return `u_${t}_ft`;
+    }
+    if (type === 'spread' && points !== undefined) {
+      const t = encodeThreshold(points);
+      if (designation === 'home') return `handicap_home_${t}_ft`;
+      if (designation === 'away') return `handicap_away_${t}_ft`;
     }
     return null;
   }
