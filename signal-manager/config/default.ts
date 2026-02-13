@@ -16,7 +16,7 @@ export const DEFAULT_CONFIG: Config = {
     },
     onexbet: {
       enabled: true,
-      liveFeedBaseUrl: 'https://1xlite-65169.pro',
+      liveFeedBaseUrl: 'https://1xlite-14395.pro',
       pollIntervalMs: 200,
       sportIds: [
         // Traditional sports
@@ -43,13 +43,6 @@ export const DEFAULT_CONFIG: Config = {
         298, // Overwatch
       ],
     },
-    bet365: {
-      enabled: true,
-      baseUrl: 'https://www.bet365.com',
-      wsUrl: 'wss://premws-pt1.365lpodds.com/zap/',
-      sportIds: [1, 13, 18, 17, 151],
-      cookieRefreshMs: 30 * 60 * 1000,
-    },
     flashscore: {
       enabled: false,
       pollIntervalMs: 15_000,
@@ -62,6 +55,32 @@ export const DEFAULT_CONFIG: Config = {
         { sport: 'soccer', fsPath: 'football/europe/champions-league', name: 'Champions League' },
         { sport: 'soccer', fsPath: 'football/europe/europa-league', name: 'Europa League' },
       ],
+    },
+    kambi: {
+      enabled: true,
+      baseUrl: 'https://eu-offering-api.kambicdn.com',
+      pollIntervalMs: 2000,
+      timeoutMs: 8000,
+    },
+    thesports: {
+      enabled: true,
+      mqttUrl: 'wss://www.thesports.com/mqtt',
+      sportIds: [1, 2, 3, 4, 102, 103, 104],
+      discoveryIntervalMs: 60_000,
+    },
+    sofascore: {
+      enabled: false,
+      wsUrl: 'wss://ws.sofascore.com:9222/',
+      sports: ['football', 'basketball', 'tennis', 'ice-hockey', 'esports'],
+      includeOdds: true,
+      discoveryIntervalMs: 60_000,
+    },
+    pinnacle: {
+      enabled: true,
+      baseUrl: 'https://guest.api.arcadia.pinnacle.com/0.1',
+      pollIntervalMs: 500,
+      timeoutMs: 5000,
+      sportIds: [29, 4, 33, 19, 12, 5, 15],
     },
   },
   dashboard: {

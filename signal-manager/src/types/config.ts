@@ -14,18 +14,40 @@ export interface OnexbetAdapterConfig {
   sportIds: number[];
 }
 
-export interface Bet365AdapterConfig {
-  enabled: boolean;
-  baseUrl: string;
-  wsUrl: string;
-  sportIds: number[];
-  cookieRefreshMs: number;
-}
-
 export interface FlashScoreAdapterConfig {
   enabled: boolean;
   pollIntervalMs: number;
   leagues: { sport: string; fsPath: string; name: string }[];
+}
+
+export interface KambiAdapterConfig {
+  enabled: boolean;
+  baseUrl: string;
+  pollIntervalMs: number;
+  timeoutMs: number;
+}
+
+export interface TheSportsAdapterConfig {
+  enabled: boolean;
+  mqttUrl: string;
+  sportIds: number[];
+  discoveryIntervalMs: number;
+}
+
+export interface SofaScoreAdapterConfig {
+  enabled: boolean;
+  wsUrl: string;
+  sports: string[];
+  includeOdds: boolean;
+  discoveryIntervalMs: number;
+}
+
+export interface PinnacleAdapterConfig {
+  enabled: boolean;
+  baseUrl: string;
+  pollIntervalMs: number;
+  timeoutMs: number;
+  sportIds: number[];
 }
 
 export interface DashboardConfig {
@@ -44,8 +66,11 @@ export interface Config {
   adapters: {
     polymarket: PolymarketAdapterConfig;
     onexbet: OnexbetAdapterConfig;
-    bet365: Bet365AdapterConfig;
     flashscore: FlashScoreAdapterConfig;
+    kambi: KambiAdapterConfig;
+    thesports: TheSportsAdapterConfig;
+    sofascore: SofaScoreAdapterConfig;
+    pinnacle: PinnacleAdapterConfig;
   };
   dashboard: DashboardConfig;
   matcher: MatcherConfig;
