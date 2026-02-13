@@ -127,16 +127,18 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 /* ─── ODDS TABLE ─── */
 .ev-odds{display:none;padding:6px 14px 10px;border-top:1px solid var(--border);background:var(--bg)}
 .ev.open .ev-odds{display:block}
-.odds-grid{display:grid;grid-template-columns:1fr 60px 60px 55px 55px 60px;gap:0;font-size:11px}
+.odds-grid{display:grid;grid-template-columns:1fr 55px 55px 50px 50px 50px 50px 58px;gap:0;font-size:11px}
 .odds-hd{padding:4px 6px;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
 .odds-hd:nth-child(2){text-align:center;color:var(--blue)}
 .odds-hd:nth-child(3){text-align:center;color:var(--amber)}
 .odds-hd:nth-child(4){text-align:center;color:var(--green)}
 .odds-hd:nth-child(5){text-align:center}
+.odds-hd:nth-child(6){text-align:center;color:#ec4899}
+.odds-hd:nth-child(7){text-align:center;color:#8b5cf6}
 .odds-cell{padding:4px 6px;border-bottom:1px solid rgba(30,41,59,.4)}
 .odds-lbl{color:var(--text-dim);font-weight:500}
-.odds-pm,.odds-xb,.odds-kb{text-align:center;font-family:'SF Mono','Cascadia Code',monospace;font-weight:500}
-.odds-pm{color:var(--blue)}.odds-xb{color:var(--amber)}.odds-kb{color:var(--green)}
+.odds-pm,.odds-xb,.odds-kb,.odds-pn,.odds-ts,.odds-sf{text-align:center;font-family:'SF Mono','Cascadia Code',monospace;font-weight:500}
+.odds-pm{color:var(--blue)}.odds-xb{color:var(--amber)}.odds-kb{color:var(--green)}.odds-pn{color:var(--text-muted)}.odds-ts{color:#ec4899}.odds-sf{color:#8b5cf6}
 .odds-edge{text-align:center;font-family:'SF Mono','Cascadia Code',monospace;font-weight:600}
 .odds-edge.pos{color:var(--green)}.odds-edge.neg{color:var(--red)}
 .odds-edge.hot{color:var(--green);background:rgba(16,185,129,.08);border-radius:3px}
@@ -335,7 +337,7 @@ function connect(){
 
 /* ─── Helpers ─── */
 function hasPM(ev){return Object.keys(ev.markets).some(function(k){if(k.startsWith('__'))return false;var s=Object.keys(ev.markets[k]);return s.indexOf('polymarket')>=0;});}
-function hasMulti(ev){return Object.keys(ev.markets).some(function(k){if(k.startsWith('__'))return false;var s=Object.keys(ev.markets[k]);return s.indexOf('polymarket')>=0&&(s.indexOf('onexbet')>=0||s.indexOf('kambi')>=0||s.indexOf('pinnacle')>=0||s.indexOf('thesports')>=0);});}
+function hasMulti(ev){return Object.keys(ev.markets).some(function(k){if(k.startsWith('__'))return false;var s=Object.keys(ev.markets[k]);return s.indexOf('polymarket')>=0&&(s.indexOf('onexbet')>=0||s.indexOf('kambi')>=0||s.indexOf('pinnacle')>=0||s.indexOf('thesports')>=0||s.indexOf('sofascore')>=0);});}
 function getFiltered(){
   if(!state)return{live:[],upcoming:[]};
   var live=[],up=[];
@@ -386,7 +388,7 @@ function renderAdapters(){
   for(var i=0;i<entries.length;i++){
     var id=entries[i][0],s=entries[i][1];
     var cls=s==='connected'?'ad-on':s==='error'?'ad-off':'ad-warn';
-    var label=id==='polymarket'?'PM':id==='onexbet'?'1xBet':id==='kambi'?'Kambi':id==='pinnacle'?'Pinn':id==='thesports'?'TSprt':id;
+    var label=id==='polymarket'?'PM':id==='onexbet'?'1xBet':id==='kambi'?'Kambi':id==='pinnacle'?'Pinn':id==='thesports'?'TSprt':id==='sofascore'?'Sofa':id;
     h+='<div class="adapter"><div class="ad '+cls+'"></div>'+label+'</div>';
   }
   el.innerHTML=h;
@@ -481,7 +483,7 @@ function renderEvent(ev,isLive){
     else countdown='starting';
   }
   var mkeys=Object.keys(ev.markets).filter(function(k){return !k.startsWith('__')&&ev.markets[k].polymarket;});
-  var srcMap={polymarket:{l:'PM',c:'pm'},onexbet:{l:'1xBet',c:'xbet'},kambi:{l:'Kambi',c:'kambi'},pinnacle:{l:'Pinn',c:'pinn'},thesports:{l:'TSprt',c:'thesports'}};
+  var srcMap={polymarket:{l:'PM',c:'pm'},onexbet:{l:'1xBet',c:'xbet'},kambi:{l:'Kambi',c:'kambi'},pinnacle:{l:'Pinn',c:'pinn'},thesports:{l:'TSprt',c:'thesports'},sofascore:{l:'Sofa',c:'sofascore'}};
   var badges='';
   if(ev.sources){for(var s=0;s<ev.sources.length;s++){var m=srcMap[ev.sources[s]];if(m)badges+='<span class="src-tag '+m.c+'">'+m.l+'</span> ';}}
   var pmLink=ev.pmSlug?'<a href="https://polymarket.com/event/'+ev.pmSlug+'" target="_blank" rel="noopener" class="pm-lnk" onclick="event.stopPropagation()" title="Polymarket">\\u2197</a>':'';
@@ -509,18 +511,19 @@ function renderOdds(ev,mkeys){
     function o(k){if(k.startsWith('ml_home'))return 0;if(k.startsWith('ml_away'))return 1;if(k.startsWith('draw'))return 2;return 3;}
     var d=o(a)-o(b);if(d!==0)return d;return a<b?-1:a>b?1:0;
   });
-  var h='<div class="odds-grid"><div class="odds-hd">Market</div><div class="odds-hd">PM</div><div class="odds-hd">1xBet</div><div class="odds-hd">Kambi</div><div class="odds-hd">Pinn</div><div class="odds-hd">Edge</div>';
+  var h='<div class="odds-grid"><div class="odds-hd">Market</div><div class="odds-hd">PM</div><div class="odds-hd">1xBet</div><div class="odds-hd">Kambi</div><div class="odds-hd">Pinn</div><div class="odds-hd">TSprt</div><div class="odds-hd">Sofa</div><div class="odds-hd">Edge</div>';
   for(var i=0;i<Math.min(sorted.length,15);i++){
     var k=sorted[i],srcs=ev.markets[k];
-    var pm=srcs.polymarket,xb=srcs.onexbet,kb=srcs.kambi,pn=srcs.pinnacle;
+    var pm=srcs.polymarket,xb=srcs.onexbet,kb=srcs.kambi,pn=srcs.pinnacle,ts=srcs.thesports,sf=srcs.sofascore;
     var pmP=pm?(1/pm.value*100):null;
     var xbP=xb?(1/xb.value*100):null;
     var kbP=kb?(1/kb.value*100):null;
     var pnP=pn?(1/pn.value*100):null;
+    var tsP=ts?(1/ts.value*100):null;
+    var sfP=sf?(1/sf.value*100):null;
     // Edge: best secondary vs PM
-    var secBest=xbP||kbP||pnP||null;
-    if(xbP!==null&&kbP!==null)secBest=Math.max(xbP,kbP);
-    if(secBest!==null&&pnP!==null)secBest=Math.max(secBest,pnP);
+    var allSec=[xbP,kbP,pnP,tsP,sfP].filter(function(v){return v!==null;});
+    var secBest=allSec.length>0?Math.max.apply(null,allSec):null;
     var edge=(pmP!==null&&secBest!==null)?secBest-pmP:null;
     var edgeAbs=edge!==null?Math.abs(edge):0;
     var edgeCls=edgeAbs>=3?'hot':edge!==null&&edge>0?'pos':'neg';
@@ -529,6 +532,8 @@ function renderOdds(ev,mkeys){
       +'<div class="odds-cell odds-xb">'+(xbP!==null?xbP.toFixed(1)+'%':'\\u2014')+'</div>'
       +'<div class="odds-cell odds-kb">'+(kbP!==null?kbP.toFixed(1)+'%':'\\u2014')+'</div>'
       +'<div class="odds-cell odds-pn">'+(pnP!==null?pnP.toFixed(1)+'%':'\\u2014')+'</div>'
+      +'<div class="odds-cell odds-ts">'+(tsP!==null?tsP.toFixed(1)+'%':'\\u2014')+'</div>'
+      +'<div class="odds-cell odds-sf">'+(sfP!==null?sfP.toFixed(1)+'%':'\\u2014')+'</div>'
       +'<div class="odds-cell odds-edge '+edgeCls+'">'+(edge!==null?(edge>0?'+':'')+edge.toFixed(1)+'%':'\\u2014')+'</div>';
   }
   h+='</div>';

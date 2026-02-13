@@ -156,7 +156,7 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
     if (!polyData) continue;
 
     // Find best secondary source (freshest data with closest agreement among sharp books)
-    const SECONDARY_SOURCES = ['onexbet', 'kambi', 'pinnacle'];
+    const SECONDARY_SOURCES = ['onexbet', 'kambi', 'pinnacle', 'thesports', 'sofascore'];
     let bestSecondary: { id: string; data: typeof polyData } | null = null;
     for (const sid of SECONDARY_SOURCES) {
       const d = sources[sid];
