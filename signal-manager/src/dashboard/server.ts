@@ -381,10 +381,16 @@ export class Dashboard {
       closedOpportunityCount: getClosedOpportunities().length,
       adapters,
       events: events.map(e => {
-        // Collect unique sources across ALL markets
+        // Collect unique sources across markets AND score-only adapters
         const sourceSet = new Set<string>();
         for (const sources of Object.values(e.markets)) {
           for (const src of Object.keys(sources)) {
+            sourceSet.add(src);
+          }
+        }
+        // Include score-only sources (thesports, sofascore, pm-sports-ws)
+        if (e._sourceEventIds) {
+          for (const src of Object.keys(e._sourceEventIds)) {
             sourceSet.add(src);
           }
         }

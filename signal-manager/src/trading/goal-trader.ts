@@ -51,7 +51,7 @@ export interface ManagedPosition {
 
 export interface GoalTraderConfig {
   enabled: boolean;
-  /** Hard exit after this many ms (default: 5 min) */
+  /** Hard exit after this many ms (default: 3 min) */
   hardExitMs: number;
   /** Price stabilized when no update for this many ms (default: 15s) */
   stabilizationQuietMs: number;
@@ -76,9 +76,9 @@ export interface GoalTraderConfig {
 
 const DEFAULT_CONFIG: GoalTraderConfig = {
   enabled: false,
-  hardExitMs: 30_000,            // 30s hard exit
-  stabilizationQuietMs: 10_000,  // 10s quiet = stabilized
-  minHoldMs: 5_000,              // hold at least 5s
+  hardExitMs: 180_000,           // 3min hard exit (auto-redeem)
+  stabilizationQuietMs: 15_000,  // 15s quiet = stabilized
+  minHoldMs: 10_000,             // hold at least 10s
   stopLossPp: 3,                 // 3pp stop loss
   takeProfitPct: 0.80,           // exit at 80% of expected move
   skipExtendingLead: true,

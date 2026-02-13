@@ -230,7 +230,7 @@ export class SofaScoreAdapter implements IFilterableAdapter {
       }
       log.info(`SofaScore discovery: ${this.matchMeta.size} matches cached`);
     } catch (err: any) {
-      log.error('SofaScore discovery failed:', err.message);
+      log.error(`SofaScore discovery failed: ${err.message}`);
     }
   }
 }
