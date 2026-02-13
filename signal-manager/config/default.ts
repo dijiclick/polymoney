@@ -69,7 +69,7 @@ export const DEFAULT_CONFIG: Config = {
       discoveryIntervalMs: 60_000,
     },
     sofascore: {
-      enabled: false,
+      enabled: true,
       wsUrl: 'wss://ws.sofascore.com:9222/',
       sports: ['football', 'basketball', 'tennis', 'ice-hockey', 'esports'],
       includeOdds: true,
