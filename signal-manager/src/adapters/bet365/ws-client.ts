@@ -2,7 +2,7 @@
  * bet365 WebSocket client — connects to the live data feed using harvested session tokens.
  *
  * Protocol:
- * 1. Connect to wss://premws-pt1.365lpodds.com/zap/?uid=<random>
+ * 1. Connect to wss://premws-pt{N}.365lpodds.com/zap/?uid=<random>
  * 2. Receive server hello: "101I<server_id>" or "100I<server_id>"
  * 3. Send auth: \x23\x03P\x01__time,P-ENDP,S_{SESSION_ID},A_{SST}\x00
  * 4. Receive ack: "100I<server_id>"
@@ -16,6 +16,13 @@ import type { Bet365Session } from './cookie-harvester.js';
 import { createLogger } from '../../util/logger.js';
 
 const log = createLogger('bet365-ws');
+
+// Multiple WS endpoints — bet365 uses regional/load-balanced servers
+const WS_ENDPOINTS = [
+  'wss://premws-pt3.365lpodds.com/zap/',
+  'wss://premws-pt2.365lpodds.com/zap/',
+  'wss://premws-pt1.365lpodds.com/zap/',
+];
 
 export type WsDataCallback = (topic: string, data: string) => void;
 
@@ -32,10 +39,12 @@ export class Bet365WsClient {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
   private serverId = '';
+  private endpointIndex = 0;
 
-  constructor(session: Bet365Session, wsUrl = 'wss://premws-pt1.365lpodds.com/zap/') {
+  constructor(session: Bet365Session, wsUrl = '') {
     this.session = session;
-    this.wsUrl = wsUrl;
+    // Use provided URL or start with first endpoint
+    this.wsUrl = wsUrl && !wsUrl.includes('premws-pt1') ? wsUrl : WS_ENDPOINTS[0];
   }
 
   onData(callback: WsDataCallback): void {
@@ -44,7 +53,6 @@ export class Bet365WsClient {
 
   updateSession(session: Bet365Session): void {
     this.session = session;
-    // If connected, we'll use new session on next reconnect
   }
 
   async connect(topics: string[]): Promise<void> {
@@ -57,7 +65,8 @@ export class Bet365WsClient {
     if (this.stopped) return;
 
     const uid = Math.floor(Math.random() * 1e15).toString();
-    const url = `${this.wsUrl}?uid=${uid}`;
+    const wsUrl = this.wsUrl;
+    const url = `${wsUrl}?uid=${uid}`;
 
     // Build cookie header from session
     const cookieStr = Object.entries(this.session.cookies)
@@ -65,22 +74,26 @@ export class Bet365WsClient {
       .join('; ');
 
     return new Promise<void>((resolve) => {
-      log.info(`Connecting to ${this.wsUrl}...`);
+      log.warn(`Connecting to ${wsUrl}...`);
 
       this.ws = new WebSocket(url, {
         headers: {
           'User-Agent': this.session.userAgent,
           'Cookie': cookieStr,
           'Origin': 'https://www.bet365.com',
-          'Host': new URL(this.wsUrl).host,
+          'Host': new URL(wsUrl).host,
+          'Accept-Language': 'en-GB,en;q=0.9',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
         },
+        handshakeTimeout: 10_000,
       });
 
       let authSent = false;
       let resolved = false;
 
       this.ws.on('open', () => {
-        log.info('WebSocket connected, waiting for server hello');
+        log.warn('WebSocket connected, waiting for server hello');
         this.reconnectAttempts = 0;
       });
 
@@ -103,7 +116,7 @@ export class Bet365WsClient {
           const authMsg = `\x23\x03P\x01${allTopics.join(',')}\x00`;
           this.ws!.send(authMsg);
           authSent = true;
-          log.debug('Auth message sent');
+          log.warn('Auth message sent');
 
           // Subscribe to topics after a short delay
           setTimeout(() => {
@@ -115,7 +128,7 @@ export class Bet365WsClient {
                 resolve();
               }
             }
-          }, 200);
+          }, 500);
 
           // Start heartbeat
           this._startHeartbeat();
@@ -124,7 +137,6 @@ export class Bet365WsClient {
 
         // Server ack after auth (another 100I...)
         if (msg.startsWith('100') && authSent) {
-          // Ack received, good
           return;
         }
 
@@ -134,12 +146,16 @@ export class Bet365WsClient {
 
       this.ws.on('error', (err) => {
         log.warn(`WebSocket error: ${err.message}`);
+        // On 403, try next endpoint
+        if (err.message.includes('403') && !resolved) {
+          this._tryNextEndpoint();
+        }
       });
 
       this.ws.on('close', (code, reason) => {
         this.connected = false;
         this._stopHeartbeat();
-        log.info(`WebSocket closed: ${code} ${reason?.toString() || ''}`);
+        log.warn(`WebSocket closed: ${code} ${reason?.toString() || ''}`);
 
         if (!resolved) {
           resolved = true;
@@ -157,15 +173,22 @@ export class Bet365WsClient {
           resolved = true;
           resolve();
         }
-      }, 10_000);
+      }, 12_000);
     });
+  }
+
+  /** Try the next WS endpoint when current one returns 403 */
+  private _tryNextEndpoint(): void {
+    this.endpointIndex = (this.endpointIndex + 1) % WS_ENDPOINTS.length;
+    this.wsUrl = WS_ENDPOINTS[this.endpointIndex];
+    log.warn(`Switching to endpoint: ${this.wsUrl}`);
   }
 
   private _subscribe(topics: string[]): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || topics.length === 0) return;
     const msg = `\x16\x00${topics.join(',')}\x01`;
     this.ws.send(msg);
-    log.info(`Subscribed to ${topics.length} topics: ${topics.join(', ')}`);
+    log.warn(`Subscribed to ${topics.length} topics: ${topics.join(', ')}`);
   }
 
   private _handleDataMessage(msg: string): void {
@@ -224,16 +247,19 @@ export class Bet365WsClient {
       return;
     }
 
+    // On each reconnect, try next endpoint
+    this._tryNextEndpoint();
+
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30_000);
     this.reconnectAttempts++;
-    log.info(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    log.warn(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}) → ${this.wsUrl}`);
 
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
       try {
         await this._connect();
       } catch (err) {
-        log.warn('Reconnect failed', err);
+        log.warn('Reconnect failed');
       }
     }, delay);
   }
@@ -254,6 +280,6 @@ export class Bet365WsClient {
       this.ws = null;
     }
     this.connected = false;
-    log.info('Disconnected');
+    log.warn('Disconnected');
   }
 }

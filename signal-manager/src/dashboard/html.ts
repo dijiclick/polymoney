@@ -103,15 +103,16 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 /* ─── ODDS TABLE ─── */
 .ev-odds{display:none;padding:6px 14px 10px;border-top:1px solid var(--border);background:var(--bg)}
 .ev.open .ev-odds{display:block}
-.odds-grid{display:grid;grid-template-columns:1fr 80px 80px 70px;gap:0;font-size:11px}
+.odds-grid{display:grid;grid-template-columns:1fr 70px 70px 60px 70px;gap:0;font-size:11px}
 .odds-hd{padding:4px 6px;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
 .odds-hd:nth-child(2){text-align:center;color:var(--blue)}
 .odds-hd:nth-child(3){text-align:center;color:var(--amber)}
-.odds-hd:last-child{text-align:center}
+.odds-hd:nth-child(4){text-align:center;color:var(--green)}
+.odds-hd:nth-child(5){text-align:center}
 .odds-cell{padding:4px 6px;border-bottom:1px solid rgba(30,41,59,.4)}
 .odds-lbl{color:var(--text-dim);font-weight:500}
-.odds-pm,.odds-xb{text-align:center;font-family:'SF Mono','Cascadia Code',monospace;font-weight:500}
-.odds-pm{color:var(--blue)}.odds-xb{color:var(--amber)}
+.odds-pm,.odds-xb,.odds-b3{text-align:center;font-family:'SF Mono','Cascadia Code',monospace;font-weight:500}
+.odds-pm{color:var(--blue)}.odds-xb{color:var(--amber)}.odds-b3{color:var(--green)}
 .odds-edge{text-align:center;font-family:'SF Mono','Cascadia Code',monospace;font-weight:600}
 .odds-edge.pos{color:var(--green)}.odds-edge.neg{color:var(--red)}
 .odds-edge.hot{color:var(--green);background:rgba(16,185,129,.08);border-radius:3px}
