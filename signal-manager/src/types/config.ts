@@ -14,6 +14,14 @@ export interface OnexbetAdapterConfig {
   sportIds: number[];
 }
 
+export interface Bet365AdapterConfig {
+  enabled: boolean;
+  baseUrl: string;
+  wsUrl: string;
+  sportIds: number[];
+  cookieRefreshMs: number;
+}
+
 export interface FlashScoreAdapterConfig {
   enabled: boolean;
   pollIntervalMs: number;
@@ -36,6 +44,7 @@ export interface Config {
   adapters: {
     polymarket: PolymarketAdapterConfig;
     onexbet: OnexbetAdapterConfig;
+    bet365: Bet365AdapterConfig;
     flashscore: FlashScoreAdapterConfig;
   };
   dashboard: DashboardConfig;

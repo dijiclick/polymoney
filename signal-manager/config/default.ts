@@ -43,6 +43,13 @@ export const DEFAULT_CONFIG: Config = {
         298, // Overwatch
       ],
     },
+    bet365: {
+      enabled: true,
+      baseUrl: 'https://www.bet365.com',
+      wsUrl: 'wss://premws-pt1.365lpodds.com/zap/',
+      sportIds: [1, 13, 18, 17, 151],
+      cookieRefreshMs: 30 * 60 * 1000,
+    },
     flashscore: {
       enabled: false,
       pollIntervalMs: 15_000,
