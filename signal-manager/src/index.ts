@@ -5,6 +5,7 @@ import { Engine } from './core/engine.js';
 import { PolymarketAdapter } from './adapters/polymarket/index.js';
 import { OnexbetAdapter } from './adapters/onexbet/index.js';
 import { FlashScoreAdapter } from './adapters/flashscore/index.js';
+import { Bet365Adapter } from './adapters/bet365/index.js';
 import { PmSportsWsAdapter } from './adapters/pm-sports-ws/index.js';
 import { Dashboard } from './dashboard/server.js';
 import { DEFAULT_CONFIG } from '../config/default.js';
@@ -41,7 +42,7 @@ async function main() {
   setLogLevel(config.logLevel);
 
   log.info('Signal Manager v2 starting...');
-  log.info(`Adapters: Polymarket=${config.adapters.polymarket.enabled}, 1xBet=${config.adapters.onexbet.enabled}, FlashScore=${config.adapters.flashscore.enabled}`);
+  log.info(`Adapters: Polymarket=${config.adapters.polymarket.enabled}, 1xBet=${config.adapters.onexbet.enabled}, bet365=${config.adapters.bet365.enabled}, FlashScore=${config.adapters.flashscore.enabled}`);
 
   // Create engine
   const engine = new Engine(config);
@@ -60,6 +61,9 @@ async function main() {
   }
   if (config.adapters.onexbet.enabled) {
     engine.registerAdapter(new OnexbetAdapter(config.adapters.onexbet));
+  }
+  if (config.adapters.bet365.enabled) {
+    engine.registerAdapter(new Bet365Adapter(config.adapters.bet365));
   }
   if (config.adapters.flashscore.enabled) {
     engine.registerAdapter(new FlashScoreAdapter(config.adapters.flashscore));
@@ -167,6 +171,7 @@ export { Engine } from './core/engine.js';
 export { PolymarketAdapter } from './adapters/polymarket/index.js';
 export { OnexbetAdapter } from './adapters/onexbet/index.js';
 export { FlashScoreAdapter } from './adapters/flashscore/index.js';
+export { Bet365Adapter } from './adapters/bet365/index.js';
 export { Dashboard } from './dashboard/server.js';
 export type { SignalFunction } from './core/signal-dispatcher.js';
 export type { UnifiedEvent } from './types/unified-event.js';
