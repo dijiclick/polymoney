@@ -41,7 +41,7 @@ export class PinnacleAdapter implements IFilterableAdapter {
     await this.poll();
     this.status = 'connected';
     this.scheduleNext();
-    log.info(`Pinnacle adapter running (${this.config.pollIntervalMs}ms poll, cache-bust via brandId=1)`);
+    log.info(`Pinnacle adapter running (${this.config.pollIntervalMs}ms poll, rotating brandId cache-bust)`);
   }
 
   async stop(): Promise<void> {
@@ -65,10 +65,12 @@ export class PinnacleAdapter implements IFilterableAdapter {
     if (this.matchedEvents.size > 0) await this.pollOdds();
   }
 
+  private randBrandId(): number { return Math.floor(Math.random() * 1000) + 1; }
+
   private async pollSport(sportId: number): Promise<void> {
     try {
       const resp = await fetch(
-        `${this.config.baseUrl}/sports/${sportId}/matchups/live?withSpecials=false&brandId=1`,
+        `${this.config.baseUrl}/sports/${sportId}/matchups/live?withSpecials=false&brandId=${this.randBrandId()}`,
         { headers: { 'Accept': 'application/json', 'X-Api-Key': 'CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R' },
           signal: AbortSignal.timeout(this.config.timeoutMs || 5000) }
       );
@@ -117,7 +119,7 @@ export class PinnacleAdapter implements IFilterableAdapter {
     for (const sportId of this.config.sportIds) {
       try {
         const resp = await fetch(
-          `${this.config.baseUrl}/sports/${sportId}/markets/live/straight?primaryOnly=true&withSpecials=false&brandId=1`,
+          `${this.config.baseUrl}/sports/${sportId}/markets/live/straight?primaryOnly=true&withSpecials=false&brandId=${this.randBrandId()}`,
           { headers: { 'Accept': 'application/json', 'X-Api-Key': 'CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R' },
             signal: AbortSignal.timeout(this.config.timeoutMs || 5000) }
         );

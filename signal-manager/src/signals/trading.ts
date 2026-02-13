@@ -153,18 +153,30 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
     if (!sources) continue;
 
     const polyData = sources['polymarket'];
-    const xbetData = sources['onexbet'];
+    if (!polyData) continue;
 
-    // Need both sources
-    if (!polyData || !xbetData) continue;
+    // Find best secondary source (freshest data with closest agreement among sharp books)
+    const SECONDARY_SOURCES = ['onexbet', 'kambi', 'pinnacle'];
+    let bestSecondary: { id: string; data: typeof polyData } | null = null;
+    for (const sid of SECONDARY_SOURCES) {
+      const d = sources[sid];
+      if (!d) continue;
+      if (!bestSecondary || d.timestamp > bestSecondary.data.timestamp) {
+        bestSecondary = { id: sid, data: d };
+      }
+    }
+
+    // Need Polymarket + at least one secondary
+    if (!bestSecondary) continue;
+    const secData = bestSecondary.data;
 
     const polyProb = toProb(polyData.value);
-    const xbetProb = toProb(xbetData.value);
+    const xbetProb = toProb(secData.value);
     const edgeDirection = xbetProb - polyProb; // positive = PM underpriced
     const absEdge = Math.abs(edgeDirection);
 
     const polyAge = now - polyData.timestamp;
-    const xbetAge = now - xbetData.timestamp;
+    const xbetAge = now - secData.timestamp;
 
     const oppKey = `${event.id}:${key}`;
     const existing = opportunities.get(oppKey);
@@ -184,7 +196,7 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
       qualityNote = `PM data stale (${Math.round(polyAge / 1000)}s old)`;
     } else if (xbetAge > staleThreshold) {
       quality = isLive ? 'suspect' : 'medium';
-      qualityNote = `1xBet data ${Math.round(xbetAge / 1000)}s old`;
+      qualityNote = `${bestSecondary.id} data ${Math.round(xbetAge / 1000)}s old`;
     } else if (absEdge > 20) {
       quality = 'medium';
       qualityNote = 'Very large edge — verify manually';
@@ -203,7 +215,7 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
         existing.polyProb = polyProb;
         existing.xbetProb = xbetProb;
         existing.polyOdds = polyData.value;
-        existing.xbetOdds = xbetData.value;
+        existing.xbetOdds = secData.value;
         existing.polyAgeMs = polyAge;
         existing.xbetAgeMs = xbetAge;
         existing.quality = quality;
@@ -233,7 +245,7 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
       existing.polyProb = polyProb;
       existing.xbetProb = xbetProb;
       existing.polyOdds = polyData.value;
-      existing.xbetOdds = xbetData.value;
+      existing.xbetOdds = secData.value;
       existing.polyAgeMs = polyAge;
       existing.xbetAgeMs = xbetAge;
       existing.quality = quality;
@@ -261,7 +273,7 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
         polyProb,
         xbetProb,
         polyOdds: polyData.value,
-        xbetOdds: xbetData.value,
+        xbetOdds: secData.value,
         polyAgeMs: polyAge,
         xbetAgeMs: xbetAge,
         quality,
@@ -280,7 +292,7 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
       if (quality !== 'suspect') {
         log.warn(
           `📊 NEW ${action} | ${homeName} vs ${awayName} | ${key.replace(/_ft$/, '')} | ` +
-          `PM:${polyProb.toFixed(1)}% vs 1xBet:${xbetProb.toFixed(1)}% | Edge:${absEdge.toFixed(1)}pp [${quality}]`
+          `PM:${polyProb.toFixed(1)}% vs ${bestSecondary.id}:${xbetProb.toFixed(1)}% | Edge:${absEdge.toFixed(1)}pp [${quality}]`
         );
         // Fire auto-trade callback for new tradeable opportunities
         if (opportunityCallback) {

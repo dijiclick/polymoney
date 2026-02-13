@@ -76,9 +76,9 @@ export interface GoalTraderConfig {
 
 const DEFAULT_CONFIG: GoalTraderConfig = {
   enabled: false,
-  hardExitMs: 300_000,           // 5 min
-  stabilizationQuietMs: 15_000,  // 15s quiet = stabilized
-  minHoldMs: 60_000,             // hold at least 60s
+  hardExitMs: 30_000,            // 30s hard exit
+  stabilizationQuietMs: 10_000,  // 10s quiet = stabilized
+  minHoldMs: 5_000,              // hold at least 5s
   stopLossPp: 3,                 // 3pp stop loss
   takeProfitPct: 0.80,           // exit at 80% of expected move
   skipExtendingLead: true,

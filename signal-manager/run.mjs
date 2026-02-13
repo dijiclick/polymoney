@@ -153,16 +153,9 @@ async function main() {
     process.exit(1);
   }
 
-  const answer = await ask('  Enable auto trading? (y/n): ');
-  const enableAutoTrade = answer.trim().toLowerCase().startsWith('y');
-
-  log('');
-  if (enableAutoTrade) {
-    log('  Mode: AUTO TRADING — bot will arm + ScoreTrader ON');
-    log('  Bot will auto-buy on score changes and auto-sell on exit signals');
-  } else {
-    log('  Mode: MONITOR ONLY — signals will fire but no trades');
-  }
+  // Auto-enable trading (buy from fastest signal, sell after 30s)
+  const enableAutoTrade = true;
+  log('  Mode: AUTO TRADING — buy fastest signal, sell after 30s');
   log('');
 
   rl.close();
@@ -240,11 +233,11 @@ async function main() {
     log('');
     log('  ============================================');
     log('  AUTO TRADING ACTIVE — ALL SPORTS');
-    log('  - Monitoring 1xBet for score changes');
+    log('  - Buy from fastest signal source');
     log('  - Soccer/Hockey: every goal triggers trade');
     log('  - Basketball/NFL: lead changes only');
     log('  - Auto-buy ML outcomes on Polymarket');
-    log('  - Exit: stabilization / TP / SL / 5min max');
+    log('  - Exit: TP / SL / stabilization / 30s max');
     log('  ============================================');
     log('');
     log('  Press Ctrl+C to stop');
