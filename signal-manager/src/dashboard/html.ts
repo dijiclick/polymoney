@@ -17,12 +17,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;overflow:hidden;height:100vh;line-height:1.5}
 
 /* ─── TOP BAR ─── */
-.top-bar{display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:48px;background:var(--bg-card);border-bottom:1px solid var(--border)}
+.top-bar{display:flex;align-items:center;padding:0 20px;height:48px;background:var(--bg-card);border-bottom:1px solid var(--border)}
 .brand{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:700;letter-spacing:.5px}
 .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--green);flex-shrink:0}
 .brand .dot.off{background:var(--red)}
 .brand .p{color:var(--blue)}.brand .m{color:var(--green)}
-.top-right{display:flex;align-items:center;gap:16px}
+.top-right{display:flex;align-items:center;gap:16px;margin-left:auto}
 .adapter{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-dim);padding:4px 10px;background:var(--bg);border-radius:20px}
 .adapter .ad{width:5px;height:5px;border-radius:50%}
 .ad-on{background:var(--green)}.ad-off{background:var(--red)}.ad-warn{background:var(--amber)}
@@ -39,29 +39,30 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .pill.active{background:var(--blue);color:#fff;border-color:var(--blue)}
 .pill .cnt{opacity:.6;margin-left:3px;font-weight:400}
 
+/* ─── MAIN NAV ─── */
+.main-nav{display:flex;align-items:center;gap:2px;margin-left:24px}
+.nav-tab{padding:12px 16px;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;user-select:none;letter-spacing:.3px}
+.nav-tab:hover{color:var(--text)}
+.nav-tab.active{color:var(--text);border-bottom-color:var(--blue)}
+.nav-tab .nav-cnt{font-size:10px;font-weight:400;opacity:.6;margin-left:4px}
+
 /* ─── LAYOUT ─── */
-.layout{display:grid;grid-template-columns:1fr 380px;height:calc(100vh - 88px)}
-@media(max-width:1100px){.layout{grid-template-columns:1fr}}
+.main-wrap{height:calc(100vh - 48px);display:flex;flex-direction:column;overflow:hidden}
+.main-panel{flex:1;overflow-y:auto;display:none;padding:10px 16px}
+.main-panel.active{display:block}
+#page-events{padding:0}
+#page-events.active{display:flex;flex-direction:column;overflow:hidden}
 
-/* ─── LEFT PANEL ─── */
-.panel-left{display:flex;flex-direction:column;overflow:hidden}
+/* ─── EVENT SUB-TABS ─── */
+.ev-sub-bar{display:flex;align-items:center;gap:0;border-bottom:1px solid var(--border);padding:0 16px;background:var(--bg)}
+.ev-sub{padding:10px 16px 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;user-select:none;display:flex;align-items:center;gap:6px}
+.ev-sub:hover{color:var(--text)}
+.ev-sub.active{color:var(--red);border-bottom-color:var(--red)}
+.ev-sub.active.sub-up{color:var(--blue);border-bottom-color:var(--blue)}
 
-/* ─── SECTION TITLES ─── */
-.sec-title{display:flex;align-items:center;gap:8px;padding:12px 20px 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-muted);position:sticky;top:0;z-index:2;background:var(--bg)}
-.sec-title .sec-dot{width:6px;height:6px;border-radius:50%}
-.sec-title .sec-count{font-weight:400;color:var(--text-muted);margin-left:auto;font-size:10px;letter-spacing:0}
-.sec-title.live-title .sec-dot{background:var(--red)}
-.sec-title.live-title{color:var(--red)}
-.sec-title.upcoming-title .sec-dot{background:var(--blue)}
-.sec-title.upcoming-title{color:var(--blue)}
-
-/* ─── TABS ─── */
-.tab-bar{display:flex;align-items:center;gap:0;border-bottom:1px solid var(--border);padding:0 16px;background:var(--bg)}
-.tab{padding:10px 16px 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;user-select:none;display:flex;align-items:center;gap:6px}
-.tab:hover{color:var(--text)}
-.tab.active{color:var(--red);border-bottom-color:var(--red)}
-.tab.active.tab-up{color:var(--blue);border-bottom-color:var(--blue)}
-.tab.active.tab-goals{color:var(--green);border-bottom-color:var(--green)}
+/* ─── SCROLLABLE SECTIONS ─── */
+.ev-content{flex:1;overflow-y:auto;display:none}
+.ev-content.active{display:block}
 
 /* ─── GOALS TAB ─── */
 .goals-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)}
@@ -83,11 +84,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .goal-src .src-name{font-weight:600;font-size:10px}
 .goal-src .src-ms{font-weight:700}
 .goal-src .src-delta{font-size:10px;color:var(--text-muted)}
-.tab-cnt{font-weight:400;font-size:10px;opacity:.7}
-
-/* ─── SCROLLABLE SECTIONS ─── */
-.tab-content{flex:1;overflow-y:auto;display:none}
-.tab-content.active{display:block}
 
 /* ─── SPORT GROUP HEADER ─── */
 .sport-hd{display:flex;align-items:center;gap:6px;padding:8px 20px 4px;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;cursor:pointer;user-select:none;transition:color .15s}
@@ -143,19 +139,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .odds-edge.pos{color:var(--green)}.odds-edge.neg{color:var(--red)}
 .odds-edge.hot{color:var(--green);background:rgba(16,185,129,.08);border-radius:3px}
 
-/* ─── RIGHT PANEL ─── */
-.panel-right{background:var(--bg-card);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
-@media(max-width:1100px){.panel-right{border-left:none;border-top:1px solid var(--border)}}
-
-/* ─── RIGHT PANEL TABS ─── */
-.rp-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg)}
-.rp-tab{padding:10px 14px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;user-select:none}
-.rp-tab:hover{color:var(--text)}
-.rp-tab.active{color:var(--green);border-bottom-color:var(--green)}
-.rp-tab.active.rp-race{color:var(--amber);border-bottom-color:var(--amber)}
-.rp-tab.active.rp-trades{color:var(--blue);border-bottom-color:var(--blue)}
-.rp-content{flex:1;overflow-y:auto;display:none;padding:10px 14px}
-.rp-content.active{display:block}
 
 /* ─── SESSION STATS ─── */
 .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-top:8px}
@@ -197,6 +180,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="dot" id="ws-dot"></div>
     <span><span class="p">POLY</span><span class="m">MONEY</span></span>
   </div>
+  <nav class="main-nav" id="main-nav">
+    <div class="nav-tab active" onclick="setPage(&quot;events&quot;)">EVENTS <span class="nav-cnt" id="nav-ev-cnt"></span></div>
+    <div class="nav-tab" onclick="setPage(&quot;goals&quot;)">GOALS <span class="nav-cnt" id="nav-goals-cnt"></span></div>
+    <div class="nav-tab" onclick="setPage(&quot;race&quot;)">RACE</div>
+    <div class="nav-tab" onclick="setPage(&quot;trades&quot;)">TRADES</div>
+    <div class="nav-tab" onclick="setPage(&quot;stats&quot;)">STATS</div>
+  </nav>
   <div class="top-right">
     <div id="adapters" style="display:flex;gap:6px"></div>
     <div class="top-stats">
@@ -209,33 +199,24 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
 </div>
 
-<div class="sport-bar" id="sport-bar"></div>
-
-<div class="layout">
-  <div class="panel-left">
-    <div class="tab-bar" id="tab-bar">
-      <div class="tab active" id="tab-live" onclick="setTab(&quot;live&quot;)"><span class="sec-dot" style="width:6px;height:6px;border-radius:50%;background:var(--red)"></span>LIVE <span class="tab-cnt" id="tab-live-cnt">0</span></div>
-      <div class="tab tab-up" id="tab-up" onclick="setTab(&quot;upcoming&quot;)"><span class="sec-dot" style="width:6px;height:6px;border-radius:50%;background:var(--blue)"></span>UPCOMING <span class="tab-cnt" id="tab-up-cnt">0</span></div>
-      <div class="tab tab-goals" id="tab-goals" onclick="setTab(&quot;goals&quot;)"><span class="sec-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green)"></span>GOALS <span class="tab-cnt" id="tab-goals-cnt">0</span></div>
+<div class="main-wrap">
+  <div class="main-panel active" id="page-events">
+    <div class="sport-bar" id="sport-bar"></div>
+    <div class="ev-sub-bar">
+      <div class="ev-sub active" id="evsub-live" onclick="setEvSub(&quot;live&quot;)">LIVE <span style="font-weight:400;font-size:10px;opacity:.7" id="evsub-live-cnt">0</span></div>
+      <div class="ev-sub sub-up" id="evsub-up" onclick="setEvSub(&quot;upcoming&quot;)">UPCOMING <span style="font-weight:400;font-size:10px;opacity:.7" id="evsub-up-cnt">0</span></div>
     </div>
-    <div class="tab-content active" id="sec-live"></div>
-    <div class="tab-content" id="sec-up"></div>
-    <div class="tab-content" id="sec-goals"></div>
+    <div class="ev-content active" id="sec-live"></div>
+    <div class="ev-content" id="sec-up"></div>
   </div>
-  <div class="panel-right">
-    <div class="rp-tabs">
-      <div class="rp-tab active" id="rpt-stats" onclick="setRpTab(&quot;stats&quot;)">Stats</div>
-      <div class="rp-tab rp-race" id="rpt-race" onclick="setRpTab(&quot;race&quot;)">Race</div>
-      <div class="rp-tab rp-trades" id="rpt-trades" onclick="setRpTab(&quot;trades&quot;)">Trades</div>
-    </div>
-    <div class="rp-content active" id="rpc-stats"></div>
-    <div class="rp-content" id="rpc-race"></div>
-    <div class="rp-content" id="rpc-trades"></div>
-  </div>
+  <div class="main-panel" id="page-goals"><div id="sec-goals"></div></div>
+  <div class="main-panel" id="page-race"><div id="rpc-race"></div></div>
+  <div class="main-panel" id="page-trades"><div id="rpc-trades"></div></div>
+  <div class="main-panel" id="page-stats"><div id="rpc-stats"></div></div>
 </div>
 
 <script>
-var ws, state=null, sportFilter='all', activeTab='live', activeRpTab='stats', openEvents=new Set(), closedGroups=new Set(), startedAt=0;
+var ws, state=null, sportFilter='all', activePage='events', evSub='live', openEvents=new Set(), closedGroups=new Set(), startedAt=0;
 
 var SPORT_ICONS={
   soccer:'\\u26BD',football:'\\u26BD',basketball:'\\uD83C\\uDFC0',ice_hockey:'\\uD83C\\uDFD2',
@@ -370,6 +351,7 @@ function render(){
   document.getElementById('s-dual').textContent=dualCount;
   document.getElementById('s-live').textContent=d.live.length;
   document.getElementById('s-goals').textContent=(state.speedLog||[]).length+(state.reactionLog||[]).length;
+  document.getElementById('nav-ev-cnt').textContent=pmCount;
   document.getElementById('s-time').textContent=new Date().toLocaleTimeString();
   renderAdapters();
   renderSportPills();
@@ -414,28 +396,26 @@ function renderSportPills(){
   el.innerHTML=h;
 }
 function setSport(el,s){sportFilter=s;render();}
-function setTab(t){
-  activeTab=t;
-  document.getElementById('tab-live').className=t==='live'?'tab active':'tab';
-  document.getElementById('tab-up').className=t==='upcoming'?'tab tab-up active':'tab tab-up';
-  document.getElementById('tab-goals').className=t==='goals'?'tab tab-goals active':'tab tab-goals';
-  document.getElementById('sec-live').className=t==='live'?'tab-content active':'tab-content';
-  document.getElementById('sec-up').className=t==='upcoming'?'tab-content active':'tab-content';
-  document.getElementById('sec-goals').className=t==='goals'?'tab-content active':'tab-content';
-}
-function setRpTab(t){
-  activeRpTab=t;
-  var tabs=['stats','race','trades'];
-  for(var i=0;i<tabs.length;i++){
-    var tid=tabs[i];
-    document.getElementById('rpt-'+tid).className=tid===t?'rp-tab'+(tid!=='stats'?' rp-'+tid:'')+' active':'rp-tab'+(tid!=='stats'?' rp-'+tid:'');
-    document.getElementById('rpc-'+tid).className=tid===t?'rp-content active':'rp-content';
+function setPage(p){
+  activePage=p;
+  var pages=['events','goals','race','trades','stats'];
+  var navTabs=document.getElementById('main-nav').children;
+  for(var i=0;i<pages.length;i++){
+    navTabs[i].className=pages[i]===p?'nav-tab active':'nav-tab';
+    document.getElementById('page-'+pages[i]).className=pages[i]===p?'main-panel active':'main-panel';
   }
+}
+function setEvSub(t){
+  evSub=t;
+  document.getElementById('evsub-live').className=t==='live'?'ev-sub active':'ev-sub';
+  document.getElementById('evsub-up').className=t==='upcoming'?'ev-sub sub-up active':'ev-sub sub-up';
+  document.getElementById('sec-live').className=t==='live'?'ev-content active':'ev-content';
+  document.getElementById('sec-up').className=t==='upcoming'?'ev-content active':'ev-content';
 }
 
 /* ─── Live Events Section ─── */
 function renderLive(evs){
-  document.getElementById('tab-live-cnt').textContent=evs.length;
+  document.getElementById('evsub-live-cnt').textContent=evs.length;
   var el=document.getElementById('sec-live');
   if(evs.length===0){
     el.innerHTML='<div class="empty-sm">No live events</div>';
@@ -454,7 +434,7 @@ function renderLive(evs){
 
 /* ─── Upcoming Events Section ─── */
 function renderUpcoming(evs){
-  document.getElementById('tab-up-cnt').textContent=evs.length;
+  document.getElementById('evsub-up-cnt').textContent=evs.length;
   var el=document.getElementById('sec-up');
   if(evs.length===0){
     el.innerHTML='<div class="empty-sm">No upcoming events</div>';
@@ -578,8 +558,8 @@ function renderRace(){
         var isWin=ms===minMs;
         var delta=ms-minMs;
         var col=isWin?'var(--green)':delta<500?'var(--text)':delta<2000?'var(--amber)':'var(--red)';
-        var txt=isWin?'\\u2714 0':'+'+delta;
-        h+='<td style="text-align:center;padding:4px 3px;color:'+col+';font-weight:'+(isWin?'700':'400')+'">'+txt+'<span style="font-size:8px;opacity:.6">ms</span></td>';
+        var txt=isWin?'\\u2714 0s':'+'+( delta<1000?(delta/1000).toFixed(1):(delta/1000).toFixed(0) )+'s';
+        h+='<td style="text-align:center;padding:4px 3px;color:'+col+';font-weight:'+(isWin?'700':'400')+'">'+txt+'</td>';
       }
     }
     h+='</tr>';
@@ -676,7 +656,7 @@ function renderGoals(){
   var reactions=state.reactionLog||[];
   var el=document.getElementById('sec-goals');
   var totalGoals=speedLog.length+reactions.length;
-  document.getElementById('tab-goals-cnt').textContent=totalGoals;
+  document.getElementById('nav-goals-cnt').textContent=totalGoals;
   if(totalGoals===0){el.innerHTML='<div class="empty">No goals detected yet<br><span style="font-size:11px;margin-top:4px;display:block">Goals appear when score changes are detected across sources</span></div>';return;}
 
   // Build source win stats from speedLog
@@ -717,7 +697,7 @@ function renderGoals(){
     if(srcTimes[sn]&&srcTimes[sn].length>0){avgMs=Math.round(srcTimes[sn].reduce(function(a,b){return a+b;},0)/srcTimes[sn].length);}
     var pct=(wins/Math.max(totalDetections,1)*100).toFixed(0);
     var col=si===0?'var(--green)':si===1?'var(--amber)':'var(--text-dim)';
-    h+='<div class="gs-card"><div class="gs-label">'+fmtSrcName(sn)+'</div><div class="gs-value" style="color:'+col+'">'+wins+'<span style="font-size:11px;font-weight:400"> wins</span></div><div class="gs-sub">'+pct+'% · avg '+avgMs+'ms</div></div>';
+    h+='<div class="gs-card"><div class="gs-label">'+fmtSrcName(sn)+'</div><div class="gs-value" style="color:'+col+'">'+wins+'<span style="font-size:11px;font-weight:400"> wins</span></div><div class="gs-sub">'+pct+'% · avg '+(avgMs/1000).toFixed(1)+'s</div></div>';
   }
   h+='</div>';
 
@@ -769,8 +749,8 @@ function renderGoals(){
       var srcCol=srcColors[t.src]||'var(--text-dim)';
       h+='<div class="goal-src'+(isWin?' winner':'')+'">';
       h+='<span class="src-name" style="color:'+srcCol+'">'+fmtSrcName(t.src)+'</span> ';
-      h+='<span class="src-ms" style="color:'+(isWin?'var(--green)':'var(--text)')+'">'+t.ms+'ms</span>';
-      if(!isWin&&delta>0)h+=' <span class="src-delta">+'+delta+'ms</span>';
+      h+='<span class="src-ms" style="color:'+(isWin?'var(--green)':'var(--text))+'">'+(t.ms/1000).toFixed(1)+'s</span>';
+      if(!isWin&&delta>0)h+=' <span class="src-delta">+'+(delta/1000).toFixed(1)+'s</span>';
       if(isWin)h+=' <span style="color:var(--green);font-size:10px">\\u2714</span>';
       h+='</div>';
     }
