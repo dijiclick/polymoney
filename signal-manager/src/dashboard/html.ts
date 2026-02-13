@@ -556,13 +556,55 @@ function renderSession(){
   var closedN=state.closedOpportunityCount||0;
   var activeN=(state.tradeSignals||[]).length;
 
+  // Adapter latency boxes
+  var latStats=state.adapterLatency||{};
+  var latHtml='';
+  var latSrcs=Object.keys(latStats).sort();
+  if(latSrcs.length>0){
+    latHtml='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:6px;margin-top:10px">';
+    for(var li=0;li<latSrcs.length;li++){
+      var ls=latSrcs[li];
+      var ld=latStats[ls];
+      var lbl=ls==='polymarket'?'PM':ls==='onexbet'?'1xBet':ls==='kambi'?'Kambi':ls==='thesports'?'TSprt':ls==='sofascore'?'Sofa':ls==='pinnacle'?'Pinn':ls;
+      var latC=ld.avg<200?'var(--green)':ld.avg<1000?'#ffd700':'var(--red)';
+      latHtml+='<div style="text-align:center;padding:4px;background:rgba(255,255,255,0.03);border-radius:4px">'
+        +'<div style="font-size:10px;color:var(--text-muted)">'+lbl+'</div>'
+        +'<div style="font-size:16px;font-weight:700;color:'+latC+'">'+ld.avg+'<span style="font-size:9px">ms</span></div>'
+        +'<div style="font-size:9px;color:var(--text-muted)">'+ld.count+' upd</div></div>';
+    }
+    latHtml+='</div>';
+  }
+
+  // Score Race log
+  var speedLog=state.speedLog||[];
+  var raceHtml='';
+  if(speedLog.length>0){
+    raceHtml='<div style="margin-top:12px"><div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:6px">\\u26A1 Score Race ('+speedLog.length+')</div>';
+    raceHtml+='<div style="font-size:11px;font-family:monospace;max-height:180px;overflow-y:auto">';
+    for(var si=0;si<Math.min(speedLog.length,25);si++){
+      var sl=speedLog[si];
+      var age=Math.round((Date.now()-sl.ts)/1000);
+      var ageStr=age<60?age+'s':Math.floor(age/60)+'m';
+      var timeParts=(sl.times||[]).map(function(t){
+        var c=t.src===sl.winner?'var(--green)':'var(--text-muted)';
+        return '<span style="color:'+c+'">'+t.src+':'+t.ms+'ms</span>';
+      }).join(' ');
+      raceHtml+='<div style="padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)">'
+        +'<span style="color:var(--text-muted);min-width:30px;display:inline-block">'+ageStr+'</span> '
+        +'<span style="color:var(--green);font-weight:700">\\u{1F3C6}'+sl.winner+'</span> '
+        +'<span>'+sl.match+'</span> '
+        +'<span style="color:var(--amber);font-weight:600">'+sl.score+'</span> '
+        +'<span style="color:var(--text-muted)">('+timeParts+')</span></div>';
+    }
+    raceHtml+='</div></div>';
+  }
+
   el.innerHTML=''
     +stat('Uptime',upStr)
     +stat('Events',''+state.eventCount)
     +stat('Goals',''+reactions.length)
     +stat('Signals',activeN+' / '+closedN)
-    +stat('PM React',pmR.length?((avg(pmR)/1000).toFixed(1)+'s'):'\\u2014')
-    +stat('1xBet React',xbR.length?((avg(xbR)/1000).toFixed(1)+'s'):'\\u2014');
+    +latHtml+raceHtml;
 }
 function stat(k,v){return '<div class="stat-item"><span class="stat-k">'+k+'</span><span class="stat-v">'+v+'</span></div>';}
 

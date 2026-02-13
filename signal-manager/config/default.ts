@@ -59,7 +59,7 @@ export const DEFAULT_CONFIG: Config = {
     kambi: {
       enabled: true,
       baseUrl: 'https://eu-offering-api.kambicdn.com',
-      pollIntervalMs: 2000,
+      pollIntervalMs: 1000,   // 1s poll — response ~400-600ms, fastest HTTP source
       timeoutMs: 8000,
     },
     thesports: {
