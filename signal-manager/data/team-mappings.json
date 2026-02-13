@@ -83,5 +83,26 @@
     "polymarket:Boston Celtics": true,
     "polymarket:Celtics": true,
     "polymarket:BOS": true
+  },
+  "athletic": {
+    "polymarket:Athletic Club": true,
+    "pinnacle:Athletic Bilbao": true,
+    "kambi:Athletic Bilbao": true,
+    "onexbet:Athletic Bilbao": true,
+    "sofascore:Athletic Club": true
+  },
+  "internazionale": {
+    "polymarket:FC Internazionale Milano": true,
+    "pinnacle:Inter Milan": true,
+    "kambi:Inter Milan": true,
+    "onexbet:Inter": true,
+    "sofascore:Inter": true
+  },
+  "atletico_madrid": {
+    "polymarket:Club Atlético de Madrid": true,
+    "polymarket:Atlético de Madrid": true,
+    "pinnacle:Atletico Madrid": true,
+    "kambi:Atletico Madrid": true,
+    "onexbet:Atletico Madrid": true
   }
 }

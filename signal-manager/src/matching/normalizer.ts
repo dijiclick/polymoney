@@ -2,7 +2,7 @@
 // input → lowercase → NFD decompose → strip diacritics → strip punctuation
 //       → collapse whitespace → strip common suffixes → trim
 
-const COMMON_SUFFIXES = /\b(fc|cf|sc|ac|as|ss|bk|fk|sk|united|utd|city|town|county|athletic|ath|sporting|sport|esports|esport|gaming|club|team)\b/g;
+const COMMON_SUFFIXES = /\b(fc|cf|sc|ac|as|ss|bk|fk|sk|rcd|cd|ud|sd|rc|afc|ssc|bsc|tsv|vfb|vfl|sv|if|bv|us|og|nk|pk|ik|united|utd|city|town|county|sporting|sport|esports|esport|gaming|club|team|deportivo|balompie|calcio|juniors|de)\b/g;
 
 export function normalizeTeamName(name: string): string {
   return name

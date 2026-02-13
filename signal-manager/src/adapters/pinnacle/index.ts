@@ -24,7 +24,8 @@ export class PinnacleAdapter implements IFilterableAdapter {
   private status: AdapterStatus = 'idle';
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private targetFilter: TargetEventFilter;
-  private matchedEvents: Map<number, { home: string; away: string; sport: string; league: string }> = new Map();
+  private matchedEvents: Map<number, { home: string; away: string; sport: string; league: string; isLive: boolean }> = new Map();
+  private discoveryTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: PinnacleAdapterConfig) {
     this.config = config;
@@ -38,15 +39,19 @@ export class PinnacleAdapter implements IFilterableAdapter {
   async start(): Promise<void> {
     this.status = 'connecting';
     log.info('Starting Pinnacle adapter...');
+    await this.discover();
     await this.poll();
     this.status = 'connected';
     this.scheduleNext();
-    log.info(`Pinnacle adapter running (${this.config.pollIntervalMs}ms poll, rotating brandId cache-bust)`);
+    this.discoveryTimer = setInterval(() => this.discover().catch(e => log.error('Discovery error:', e.message)), 60_000);
+    log.info(`Pinnacle adapter running (${this.config.pollIntervalMs}ms live poll + 60s pre-match discovery)`);
   }
 
   async stop(): Promise<void> {
     if (this.pollTimer) clearTimeout(this.pollTimer);
+    if (this.discoveryTimer) clearInterval(this.discoveryTimer);
     this.pollTimer = null;
+    this.discoveryTimer = null;
     this.status = 'stopped';
     log.info('Pinnacle adapter stopped');
   }
@@ -89,7 +94,7 @@ export class PinnacleAdapter implements IFilterableAdapter {
         if (!filterResult.matched) continue;
         const matchupId = m.id;
         const league = m.league?.name || '';
-        this.matchedEvents.set(matchupId, { home, away, sport, league });
+        this.matchedEvents.set(matchupId, { home, away, sport, league, isLive: true });
 
         const p0 = m.parent.participants[0];
         const p1 = m.parent.participants[1];
@@ -116,6 +121,7 @@ export class PinnacleAdapter implements IFilterableAdapter {
   }
 
   private async pollOdds(): Promise<void> {
+    // Live odds — bulk fetch per sport
     for (const sportId of this.config.sportIds) {
       try {
         const resp = await fetch(
@@ -128,23 +134,53 @@ export class PinnacleAdapter implements IFilterableAdapter {
         if (!Array.isArray(markets)) continue;
 
         for (const market of markets) {
-          const meta = this.matchedEvents.get(market.matchupId);
-          if (!meta || !market.prices) continue;
-          const odds: AdapterEventUpdate['markets'] = [];
-          for (const price of market.prices) {
-            const key = this.mapMarketKey(market.type, price.designation, price.points);
-            if (key && price.price) odds.push({ key, value: this.americanToDecimal(price.price) });
-          }
-          if (odds.length > 0 && this.callback) {
-            this.callback({
-              sourceId: this.sourceId, sourceEventId: `pinnacle_${market.matchupId}`,
-              sport: meta.sport, league: meta.league, startTime: 0,
-              homeTeam: meta.home, awayTeam: meta.away, status: 'live',
-              stats: {}, markets: odds, timestamp: Date.now(),
-            });
-          }
+          this.emitOdds(market);
         }
       } catch { /* skip */ }
+    }
+  }
+
+  /** Fetch odds for pre-match matched events (per-matchup API) */
+  private async pollPreMatchOdds(): Promise<void> {
+    const preMatchIds = Array.from(this.matchedEvents.entries())
+      .filter(([, meta]) => !meta.isLive)
+      .map(([id]) => id);
+    if (preMatchIds.length === 0) return;
+
+    // Batch: fetch up to 20 per cycle to avoid hammering
+    const batch = preMatchIds.slice(0, 20);
+    for (const matchupId of batch) {
+      try {
+        const resp = await fetch(
+          `${this.config.baseUrl}/matchups/${matchupId}/markets/related/straight?brandId=${this.randBrandId()}`,
+          { headers: { 'Accept': 'application/json', 'X-Api-Key': 'CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R' },
+            signal: AbortSignal.timeout(5000) }
+        );
+        if (!resp.ok) continue;
+        const markets = await resp.json() as any[];
+        if (!Array.isArray(markets)) continue;
+        for (const market of markets) {
+          this.emitOdds(market);
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  private emitOdds(market: any): void {
+    const meta = this.matchedEvents.get(market.matchupId);
+    if (!meta || !market.prices) return;
+    const odds: AdapterEventUpdate['markets'] = [];
+    for (const price of market.prices) {
+      const key = this.mapMarketKey(market.type, price.designation, price.points);
+      if (key && price.price) odds.push({ key, value: this.americanToDecimal(price.price) });
+    }
+    if (odds.length > 0 && this.callback) {
+      this.callback({
+        sourceId: this.sourceId, sourceEventId: `pinnacle_${market.matchupId}`,
+        sport: meta.sport, league: meta.league, startTime: 0,
+        homeTeam: meta.home, awayTeam: meta.away, status: meta.isLive ? 'live' : 'scheduled',
+        stats: {}, markets: odds, timestamp: Date.now(),
+      });
     }
   }
 
@@ -171,5 +207,58 @@ export class PinnacleAdapter implements IFilterableAdapter {
     if (american > 0) return (american / 100) + 1;
     if (american < 0) return (100 / Math.abs(american)) + 1;
     return 1;
+  }
+
+  /** Pre-match discovery — polls all matchups (live+upcoming) at 60s interval, then fetches their odds */
+  private async discover(): Promise<void> {
+    try {
+      let total = 0;
+      for (const sportId of this.config.sportIds) {
+        try {
+          const resp = await fetch(
+            `${this.config.baseUrl}/sports/${sportId}/matchups?withSpecials=false&brandId=${this.randBrandId()}`,
+            { headers: { 'Accept': 'application/json', 'X-Api-Key': 'CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R' },
+              signal: AbortSignal.timeout(15000) }
+          );
+          if (!resp.ok) continue;
+          const matchups = await resp.json() as any[];
+          if (!Array.isArray(matchups)) continue;
+          const sport = SPORT_MAP[sportId] || 'unknown';
+
+          for (const m of matchups) {
+            if (!m.parent?.participants || m.parent.participants.length < 2 || m.type !== 'matchup') continue;
+            const home = m.parent.participants[0]?.name || '';
+            const away = m.parent.participants[1]?.name || '';
+            if (!home || !away) continue;
+            if (this.matchedEvents.has(m.id)) continue; // Already tracked
+            const filterResult = this.targetFilter.check(home, away);
+            if (!filterResult.matched) continue;
+            const league = m.league?.name || '';
+            const isLive = !!m.isLive;
+            this.matchedEvents.set(m.id, { home, away, sport, league, isLive });
+            total++;
+
+            if (this.callback) {
+              this.callback({
+                sourceId: this.sourceId,
+                sourceEventId: `pinnacle_${m.id}`,
+                sport, league,
+                startTime: m.startTime ? new Date(m.startTime).getTime() : 0,
+                homeTeam: home, awayTeam: away,
+                status: isLive ? 'live' : 'scheduled',
+                stats: {}, markets: [],
+                timestamp: Date.now(),
+              });
+            }
+          }
+        } catch { /* skip sport */ }
+      }
+      log.info(`Pinnacle discovery: ${total} new matches, ${this.matchedEvents.size} total tracked`);
+
+      // Fetch odds for pre-match events
+      await this.pollPreMatchOdds();
+    } catch (err: any) {
+      log.error('Pinnacle discovery failed:', err.message);
+    }
   }
 }

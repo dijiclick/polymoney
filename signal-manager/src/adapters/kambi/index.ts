@@ -26,6 +26,7 @@ export class KambiAdapter implements IFilterableAdapter {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private targetFilter: TargetEventFilter;
   private knownEvents: Map<number, string> = new Map();
+  private discoveryTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: KambiAdapterConfig) {
     this.config = config;
@@ -39,15 +40,19 @@ export class KambiAdapter implements IFilterableAdapter {
   async start(): Promise<void> {
     this.status = 'connecting';
     log.info('Starting Kambi adapter...');
+    await this.discover();
     await this.poll();
     this.status = 'connected';
     this.scheduleNext();
-    log.info(`Kambi adapter running (${this.config.pollIntervalMs}ms poll)`);
+    this.discoveryTimer = setInterval(() => this.discover().catch(e => log.error('Discovery error:', e.message)), 60_000);
+    log.info(`Kambi adapter running (${this.config.pollIntervalMs}ms live poll + 60s pre-match discovery)`);
   }
 
   async stop(): Promise<void> {
     if (this.pollTimer) clearTimeout(this.pollTimer);
+    if (this.discoveryTimer) clearInterval(this.discoveryTimer);
     this.pollTimer = null;
+    this.discoveryTimer = null;
     this.status = 'stopped';
     log.info('Kambi adapter stopped');
   }
@@ -176,5 +181,34 @@ export class KambiAdapter implements IFilterableAdapter {
     }
 
     return `kambi_${type}_${label}`.replace(/[^a-z0-9_]/g, '_');
+  }
+
+  /** Pre-match discovery — polls all events (live+upcoming) at 60s interval */
+  private async discover(): Promise<void> {
+    try {
+      const sports = ['football', 'basketball', 'tennis', 'ice_hockey', 'esports'];
+      let total = 0;
+      for (const sport of sports) {
+        try {
+          const resp = await fetch(
+            `${this.config.baseUrl}/offering/v2018/ub/listView/${sport}.json?lang=en_GB&market=GB&ncid=${Date.now()}`,
+            { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(15000) }
+          );
+          if (!resp.ok) continue;
+          const data = await resp.json() as any;
+          if (!data?.events) continue;
+          for (const ev of data.events) {
+            const update = this.parseEvent(ev);
+            if (update && this.callback) {
+              total++;
+              this.callback(update);
+            }
+          }
+        } catch { /* skip sport */ }
+      }
+      log.info(`Kambi discovery: ${total} matched events (live+pre-match)`);
+    } catch (err: any) {
+      log.error('Kambi discovery failed:', err.message);
+    }
   }
 }
