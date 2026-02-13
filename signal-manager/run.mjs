@@ -1,20 +1,21 @@
 #!/usr/bin/env node
 /**
- * Signal Manager — Interactive Launcher with Session Logging
+ * Polymarket — Unified Launcher
  *
- * Starts the signal manager and optionally enables auto goal trading.
+ * Starts both the Signal Manager (trading engine) and the Next.js Dashboard.
+ * Auto-enables trading (buy from fastest signal, sell after 30s).
  * All output is logged to data/sessions/session-YYYY-MM-DD_HH-MM-SS.log
  *
  * Usage: node run.mjs
  */
 
 import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline';
-import { readFileSync, createWriteStream, mkdirSync } from 'node:fs';
+import { readFileSync, createWriteStream, mkdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const DASHBOARD_DIR = resolve(__dirname, '..', 'dashboard');
 
 // Load .env
 try {
@@ -30,6 +31,22 @@ try {
   }
 } catch { /* */ }
 
+// Load dashboard .env.local
+for (const envFile of ['.env.local', '.env']) {
+  try {
+    const content = readFileSync(resolve(DASHBOARD_DIR, envFile), 'utf-8');
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx === -1) continue;
+      const key = trimmed.slice(0, eqIdx);
+      const val = trimmed.slice(eqIdx + 1);
+      if (!process.env[key]) process.env[key] = val;
+    }
+  } catch { /* */ }
+}
+
 // --- Session Logger ---
 const SESSION_DIR = resolve(__dirname, 'data', 'sessions');
 mkdirSync(SESSION_DIR, { recursive: true });
@@ -38,42 +55,33 @@ const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const LOG_FILE = resolve(SESSION_DIR, `session-${ts}.log`);
 const logStream = createWriteStream(LOG_FILE, { flags: 'a' });
 
-/** Write to both console and log file */
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}`;
   console.log(msg);
   logStream.write(line + '\n');
 }
 
-/** Write raw line from child process to both console and log */
 function logRaw(data) {
   const text = data.toString();
   process.stdout.write(text);
   logStream.write(text);
 }
 
-const PORT = 3847;
-const rl = createInterface({ input: process.stdin, output: process.stdout });
-
-function ask(question) {
-  return new Promise((resolve) => rl.question(question, resolve));
-}
+const SM_PORT = 3847;
+const DASH_PORT = 3000;
 
 function banner() {
   const lines = [
     '',
     '  ╔══════════════════════════════════════════════════╗',
-    '  ║     POLYMARKET SIGNAL MANAGER v3                 ║',
-    '  ║     Multi-Sport Score Detection + Auto Trading   ║',
+    '  ║     POLYMARKET — UNIFIED LAUNCHER                ║',
+    '  ║     Signal Manager + Dashboard                    ║',
     '  ╚══════════════════════════════════════════════════╝',
     '',
-    '  Sports: Soccer, Basketball, Hockey, Tennis, Baseball,',
-    '          Football, Cricket, MMA/UFC, Esports (CS2,',
-    '          LoL, Dota 2, RL, CoD, SC2, OW, EA FC)',
-    '',
-    `  Wallet: ${process.env.POLY_FUNDER_ADDRESS || 'NOT SET'}`,
-    `  Trading key: ${process.env.POLY_PRIVATE_KEY ? 'loaded' : 'MISSING'}`,
-    `  Log file: ${LOG_FILE}`,
+    `  Wallet:  ${process.env.POLY_FUNDER_ADDRESS || 'NOT SET'}`,
+    `  Trading: ${process.env.POLY_PRIVATE_KEY ? 'key loaded' : 'MISSING'}`,
+    `  Supabase: ${process.env.NEXT_PUBLIC_SUPABASE_URL ? 'configured' : 'not set'}`,
+    `  Log:     ${LOG_FILE}`,
     '',
   ];
   for (const l of lines) log(l);
@@ -81,7 +89,7 @@ function banner() {
 
 async function sendCommand(cmd) {
   try {
-    const r = await fetch(`http://localhost:${PORT}/api/trading/command`, {
+    const r = await fetch(`http://localhost:${SM_PORT}/api/trading/command`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command: cmd }),
@@ -93,36 +101,33 @@ async function sendCommand(cmd) {
   }
 }
 
-async function waitForServer(maxWaitMs = 30000) {
+async function waitForServer(port, path = '/health', maxWaitMs = 30000) {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
     try {
-      const r = await fetch(`http://localhost:${PORT}/health`);
-      if (r.ok) return true;
+      const r = await fetch(`http://localhost:${port}${path}`);
+      if (r.ok || r.status === 404) return true;
     } catch { /* not ready yet */ }
     await new Promise(r => setTimeout(r, 500));
   }
   return false;
 }
 
-/** Periodically snapshot trading state to log */
 function startStateLogger() {
   return setInterval(async () => {
     try {
-      const r = await fetch(`http://localhost:${PORT}/api/goal-trader`);
+      const r = await fetch(`http://localhost:${SM_PORT}/api/goal-trader`);
       if (!r.ok) return;
       const state = await r.json();
       if (!state.enabled) return;
 
       const summary = {
         time: new Date().toISOString(),
-        enabled: state.enabled,
         openPositions: state.openPositions?.length || 0,
         totalTrades: state.totalTrades,
         totalPnl: state.totalPnl,
       };
 
-      // Log open positions
       if (state.openPositions?.length > 0) {
         const posLines = state.openPositions.map(p => {
           const hold = ((Date.now() - p.entryTime) / 1000).toFixed(0);
@@ -132,16 +137,58 @@ function startStateLogger() {
         for (const l of posLines) logStream.write(l + '\n');
       }
 
-      // Log recent trades summary
       if (state.recentTrades?.length > 0) {
         const last = state.recentTrades[0];
         if (last.exitTime && Date.now() - last.exitTime < 65000) {
-          // Trade closed in the last minute — log it prominently
           logStream.write(`[${summary.time}] [TRADE_CLOSED] ${last.match} | ${last.side} ${last.marketKey} | Entry: ${last.entryPrice.toFixed(3)} → Exit: ${last.exitPrice.toFixed(3)} | P&L: $${last.pnl?.toFixed(3)} | Reason: ${last.exitReason} | Hold: ${((last.exitTime - last.entryTime) / 1000).toFixed(0)}s\n`);
         }
       }
     } catch { /* server not ready */ }
-  }, 60_000); // Every 60s
+  }, 60_000);
+}
+
+// --- Start Dashboard (Next.js) ---
+function startDashboard() {
+  if (!existsSync(DASHBOARD_DIR)) {
+    log('  Dashboard directory not found — skipping');
+    return null;
+  }
+
+  const nextBuild = resolve(DASHBOARD_DIR, '.next');
+  if (!existsSync(nextBuild)) {
+    log('  Dashboard: no .next build found — run "npm run build" in dashboard/ first');
+    log('  Skipping dashboard...');
+    return null;
+  }
+
+  log(`  Starting dashboard on port ${DASH_PORT}...`);
+  const child = spawn('npx', ['next', 'start', '-p', String(DASH_PORT)], {
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: DASHBOARD_DIR,
+    shell: true,
+  });
+
+  child.stdout.on('data', (data) => {
+    const text = data.toString().trim();
+    if (text) logStream.write(`[DASH] ${text}\n`);
+  });
+  child.stderr.on('data', (data) => {
+    const text = data.toString().trim();
+    if (text) logStream.write(`[DASH] ${text}\n`);
+  });
+
+  child.on('error', (err) => {
+    log(`  Dashboard failed to start: ${err.message}`);
+  });
+
+  child.on('exit', (code) => {
+    if (code !== 0 && code !== null) {
+      log(`  Dashboard exited (code ${code})`);
+    }
+  });
+
+  return child;
 }
 
 async function main() {
@@ -153,16 +200,15 @@ async function main() {
     process.exit(1);
   }
 
-  // Auto-enable trading (buy from fastest signal, sell after 30s)
-  const enableAutoTrade = true;
   log('  Mode: AUTO TRADING — buy fastest signal, sell after 30s');
   log('');
 
-  rl.close();
+  // 1. Start dashboard (Next.js)
+  const dashChild = startDashboard();
 
-  // Start the signal manager as a child process (pipe stdout/stderr for logging)
+  // 2. Start signal manager
   log('  Starting signal manager...');
-  const child = spawn('node', [
+  const smChild = spawn('node', [
     '--max-old-space-size=4096',
     '--max-semi-space-size=64',
     resolve(__dirname, 'dist', 'src', 'index.js'),
@@ -172,84 +218,89 @@ async function main() {
     cwd: __dirname,
   });
 
-  // Pipe child output to both console and log file
-  child.stdout.on('data', logRaw);
-  child.stderr.on('data', logRaw);
+  smChild.stdout.on('data', logRaw);
+  smChild.stderr.on('data', logRaw);
 
-  child.on('error', (err) => {
-    log(`  Failed to start: ${err.message}`);
+  smChild.on('error', (err) => {
+    log(`  Signal manager failed to start: ${err.message}`);
     process.exit(1);
   });
 
-  child.on('exit', (code) => {
+  smChild.on('exit', (code) => {
     log(`\n  Signal manager exited (code ${code})`);
+    if (dashChild) dashChild.kill('SIGINT');
     logStream.write(`\n=== SESSION ENDED ${new Date().toISOString()} ===\n`);
     logStream.end();
     process.exit(code || 0);
   });
 
-  // Forward SIGINT/SIGTERM to child
+  // Graceful shutdown — kill both processes
   let stopping = false;
   const gracefulStop = () => {
     if (stopping) return;
     stopping = true;
     log('\n  Shutting down...');
     logStream.write(`\n=== SHUTDOWN REQUESTED ${new Date().toISOString()} ===\n`);
-    child.kill('SIGINT');
-    // Force kill after 10s
+    smChild.kill('SIGINT');
+    if (dashChild) dashChild.kill('SIGINT');
     setTimeout(() => {
       log('  Force killing...');
-      child.kill('SIGKILL');
+      smChild.kill('SIGKILL');
+      if (dashChild) dashChild.kill('SIGKILL');
     }, 10000);
   };
   process.on('SIGINT', gracefulStop);
   process.on('SIGTERM', gracefulStop);
 
-  // Wait for server to be ready, then send commands
-  log('  Waiting for dashboard to start...');
-  const ready = await waitForServer();
+  // Wait for signal manager to be ready
+  log('  Waiting for signal manager...');
+  const smReady = await waitForServer(SM_PORT, '/health');
 
-  if (!ready) {
-    log('  Dashboard did not start in time');
+  if (!smReady) {
+    log('  Signal manager did not start in time');
     return;
   }
 
-  log(`  Dashboard ready at http://localhost:${PORT}`);
+  log(`  Signal manager ready at http://localhost:${SM_PORT}`);
+
+  // Check dashboard
+  if (dashChild) {
+    const dashReady = await waitForServer(DASH_PORT, '/', 15000);
+    if (dashReady) {
+      log(`  Dashboard ready at http://localhost:${DASH_PORT}`);
+    } else {
+      log('  Dashboard still starting (check log for status)');
+    }
+  }
 
   // Start periodic state logger
   const stateTimer = startStateLogger();
-  child.on('exit', () => clearInterval(stateTimer));
+  smChild.on('exit', () => clearInterval(stateTimer));
 
-  if (enableAutoTrade) {
-    log('');
-    log('  Arming bot...');
-    const armResult = await sendCommand('arm');
-    log(`  > ${armResult}`);
+  // Arm bot and enable GoalTrader
+  log('');
+  log('  Arming bot...');
+  const armResult = await sendCommand('arm');
+  log(`  > ${armResult}`);
 
-    log('  Enabling GoalTrader...');
-    const gtResult = await sendCommand('goaltrader on');
-    log(`  > ${gtResult}`);
+  log('  Enabling GoalTrader...');
+  const gtResult = await sendCommand('goaltrader on');
+  log(`  > ${gtResult}`);
 
-    log('');
-    log('  ============================================');
-    log('  AUTO TRADING ACTIVE — ALL SPORTS');
-    log('  - Buy from fastest signal source');
-    log('  - Soccer/Hockey: every goal triggers trade');
-    log('  - Basketball/NFL: lead changes only');
-    log('  - Auto-buy ML outcomes on Polymarket');
-    log('  - Exit: TP / SL / stabilization / 30s max');
-    log('  ============================================');
-    log('');
-    log('  Press Ctrl+C to stop');
-    log('');
-  } else {
-    log('');
-    log('  Monitor mode active. To enable trading later:');
-    log(`    curl -X POST http://localhost:${PORT}/api/trading/command -d '{"command":"arm"}'`);
-    log(`    curl -X POST http://localhost:${PORT}/api/trading/command -d '{"command":"goaltrader on"}'`);
-    log('');
-    log('  Press Ctrl+C to stop');
-  }
+  log('');
+  log('  ============================================');
+  log('  AUTO TRADING ACTIVE — ALL SPORTS');
+  log('  - Buy from fastest signal source');
+  log('  - Soccer/Hockey: every goal triggers trade');
+  log('  - Basketball/NFL: lead changes only');
+  log('  - Auto-buy ML outcomes on Polymarket');
+  log('  - Exit: TP / SL / stabilization / 30s max');
+  log('  ============================================');
+  log('');
+  log(`  Signal Manager: http://localhost:${SM_PORT}`);
+  if (dashChild) log(`  Dashboard:      http://localhost:${DASH_PORT}`);
+  log('');
+  log('  Press Ctrl+C to stop');
 }
 
 main().catch((err) => {

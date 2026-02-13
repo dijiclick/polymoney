@@ -51,6 +51,12 @@ logs/
 temp_*/
 tmp/
 nul
+*.png
+*.jpg
+*.jpeg
+
+# Playwright MCP
+.playwright-mcp/
 
 # OS files
 .DS_Store
