@@ -8,6 +8,7 @@ import { EventMatcher } from '../matching/event-matcher.js';
 import { StateStore } from './state-store.js';
 import { SignalDispatcher, type SignalFunction } from './signal-dispatcher.js';
 import { createLogger } from '../util/logger.js';
+import { recordAdapterUpdate, recordScoreChange } from '../dashboard/server.js';
 
 const log = createLogger('engine');
 
@@ -30,6 +31,8 @@ export class Engine {
 
   registerAdapter(adapter: IAdapter): void {
     adapter.onUpdate((update) => {
+      // Track adapter latency
+      recordAdapterUpdate(update.sourceId, Date.now() - update.timestamp);
       // Hot path: match → update → signal
       const eventId = this.matcher.match(update);
       const { event, changedKeys } = this.store.update(eventId, update);
@@ -42,6 +45,11 @@ export class Engine {
         // Polymarket is authoritative — override display names
         event.home.name = update.homeTeam;
         event.away.name = update.awayTeam;
+      }
+
+      // Track score changes for speed comparison
+      if (changedKeys.includes('__score') && event.stats.score) {
+        recordScoreChange(update.sourceId, eventId, event.home.name || update.homeTeam, event.away.name || update.awayTeam, event.stats.score.home, event.stats.score.away);
       }
 
       if (changedKeys.length > 0) {

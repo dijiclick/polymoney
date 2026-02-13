@@ -13,6 +13,43 @@ import { DASHBOARD_HTML } from './html.js';
 
 const log = createLogger('dashboard');
 
+// === Speed & Latency Tracking ===
+interface LatencyStats { samples: number[]; avg: number; count: number; }
+const adapterLatency: Map<string, LatencyStats> = new Map();
+const speedLog: { ts: number; match: string; score: string; winner: string; times: { src: string; ms: number }[] }[] = [];
+const scoreFirstSeen: Map<string, { ts: number; source: string }> = new Map();
+
+export function recordAdapterUpdate(sourceId: string, latencyMs: number): void {
+  let stats = adapterLatency.get(sourceId);
+  if (!stats) { stats = { samples: [], avg: 0, count: 0 }; adapterLatency.set(sourceId, stats); }
+  stats.samples.push(latencyMs);
+  if (stats.samples.length > 100) stats.samples.shift();
+  stats.avg = Math.round(stats.samples.reduce((a, b) => a + b, 0) / stats.samples.length);
+  stats.count++;
+}
+
+export function recordScoreChange(sourceId: string, eventId: string, homeTeam: string, awayTeam: string, home: number, away: number): void {
+  const key = `${eventId}_${home}-${away}`;
+  const now = Date.now();
+  if (!scoreFirstSeen.has(key)) {
+    scoreFirstSeen.set(key, { ts: now, source: sourceId });
+    if (scoreFirstSeen.size > 500) {
+      const entries = Array.from(scoreFirstSeen.entries()).sort((a, b) => a[1].ts - b[1].ts);
+      for (let i = 0; i < entries.length - 200; i++) scoreFirstSeen.delete(entries[i][0]);
+    }
+  } else {
+    const first = scoreFirstSeen.get(key)!;
+    const delay = now - first.ts;
+    let entry = speedLog.find(e => e.ts === first.ts && e.score === `${home}-${away}`);
+    if (!entry) {
+      entry = { ts: first.ts, match: `${homeTeam} vs ${awayTeam}`, score: `${home}-${away}`, winner: first.source, times: [{ src: first.source, ms: 0 }] };
+      speedLog.unshift(entry);
+      if (speedLog.length > 100) speedLog.length = 100;
+    }
+    if (!entry.times.find(t => t.src === sourceId)) entry.times.push({ src: sourceId, ms: delay });
+  }
+}
+
 export class Dashboard {
   private httpServer: ReturnType<typeof createServer> | null = null;
   private wss: WebSocketServer | null = null;
@@ -376,6 +413,8 @@ export class Dashboard {
       tradeSignals: getTradeSignals().slice(0, 100),
       trading: this.tradingController?.getState() || null,
       reactionLog: getReactionLog().slice(0, 50),
+      adapterLatency: Object.fromEntries(Array.from(adapterLatency.entries()).map(([k, v]) => [k, { avg: v.avg, count: v.count }])),
+      speedLog: speedLog.slice(0, 20),
     };
   }
 }

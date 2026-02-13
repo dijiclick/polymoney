@@ -175,7 +175,8 @@ export const reactionTimerSignal: SignalFunction = (event, changedKeys, source) 
   }
 
   // === STEP 2: Track ALL odds changes on pending goals ===
-  if (source !== 'polymarket' && source !== 'onexbet') return;
+  const TRACKED_SOURCES = ['polymarket', 'onexbet', 'kambi', 'thesports', 'sofascore', 'pinnacle'];
+  if (!TRACKED_SOURCES.includes(source)) return;
 
   // Accept any changed market key (not just ML)
   const relevantKeys = changedKeys.filter(k => !k.startsWith('__'));

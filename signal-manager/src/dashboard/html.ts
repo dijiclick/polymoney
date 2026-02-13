@@ -93,7 +93,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .src-tag{font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;letter-spacing:.3px}
 .src-tag.pm{background:rgba(59,130,246,.12);color:var(--blue)}
 .src-tag.xbet{background:rgba(245,158,11,.12);color:var(--amber)}
-.src-tag.b365{background:rgba(16,185,129,.12);color:var(--green)}
+.src-tag.kambi{background:rgba(16,185,129,.12);color:var(--green)}
+.src-tag.pinn{background:rgba(245,158,11,.12);color:#f59e0b}
+.src-tag.thesports{background:rgba(139,92,246,.12);color:#8b5cf6}
 .pm-lnk,.xb-lnk{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;text-decoration:none;font-size:11px;transition:background .15s}
 .pm-lnk{background:rgba(59,130,246,.1);color:var(--blue)}
 .pm-lnk:hover{background:rgba(59,130,246,.25)}
@@ -111,8 +113,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .odds-hd:nth-child(5){text-align:center}
 .odds-cell{padding:4px 6px;border-bottom:1px solid rgba(30,41,59,.4)}
 .odds-lbl{color:var(--text-dim);font-weight:500}
-.odds-pm,.odds-xb,.odds-b3{text-align:center;font-family:'SF Mono','Cascadia Code',monospace;font-weight:500}
-.odds-pm{color:var(--blue)}.odds-xb{color:var(--amber)}.odds-b3{color:var(--green)}
+.odds-pm,.odds-xb,.odds-kb{text-align:center;font-family:'SF Mono','Cascadia Code',monospace;font-weight:500}
+.odds-pm{color:var(--blue)}.odds-xb{color:var(--amber)}.odds-kb{color:var(--green)}
 .odds-edge{text-align:center;font-family:'SF Mono','Cascadia Code',monospace;font-weight:600}
 .odds-edge.pos{color:var(--green)}.odds-edge.neg{color:var(--red)}
 .odds-edge.hot{color:var(--green);background:rgba(16,185,129,.08);border-radius:3px}
@@ -312,7 +314,7 @@ function connect(){
 }
 
 /* ─── Helpers ─── */
-function hasMulti(ev){return Object.keys(ev.markets).some(function(k){if(k.startsWith('__'))return false;var s=Object.keys(ev.markets[k]);return (s.indexOf('polymarket')>=0&&s.indexOf('onexbet')>=0)||(s.indexOf('polymarket')>=0&&s.indexOf('bet365')>=0);});}
+function hasMulti(ev){return Object.keys(ev.markets).some(function(k){if(k.startsWith('__'))return false;var s=Object.keys(ev.markets[k]);return s.indexOf('polymarket')>=0&&(s.indexOf('onexbet')>=0||s.indexOf('kambi')>=0||s.indexOf('pinnacle')>=0||s.indexOf('thesports')>=0);});}
 function getFiltered(){
   if(!state)return{live:[],upcoming:[]};
   var live=[],up=[];
@@ -357,7 +359,7 @@ function renderAdapters(){
   for(var i=0;i<entries.length;i++){
     var id=entries[i][0],s=entries[i][1];
     var cls=s==='connected'?'ad-on':s==='error'?'ad-off':'ad-warn';
-    var label=id==='polymarket'?'PM':id==='onexbet'?'1xBet':id==='bet365'?'b365':id;
+    var label=id==='polymarket'?'PM':id==='onexbet'?'1xBet':id==='kambi'?'Kambi':id==='pinnacle'?'Pinn':id==='thesports'?'TSprt':id;
     h+='<div class="adapter"><div class="ad '+cls+'"></div>'+label+'</div>';
   }
   el.innerHTML=h;
@@ -441,7 +443,7 @@ function renderEvent(ev,isLive){
     else countdown='starting';
   }
   var mkeys=Object.keys(ev.markets).filter(function(k){return !k.startsWith('__')&&ev.markets[k].polymarket;});
-  var srcMap={polymarket:{l:'PM',c:'pm'},onexbet:{l:'1xBet',c:'xbet'},bet365:{l:'b365',c:'b365'}};
+  var srcMap={polymarket:{l:'PM',c:'pm'},onexbet:{l:'1xBet',c:'xbet'},kambi:{l:'Kambi',c:'kambi'},pinnacle:{l:'Pinn',c:'pinn'},thesports:{l:'TSprt',c:'thesports'}};
   var badges='';
   if(ev.sources){for(var s=0;s<ev.sources.length;s++){var m=srcMap[ev.sources[s]];if(m)badges+='<span class="src-tag '+m.c+'">'+m.l+'</span> ';}}
   var pmLink=ev.pmSlug?'<a href="https://polymarket.com/event/'+ev.pmSlug+'" target="_blank" rel="noopener" class="pm-lnk" onclick="event.stopPropagation()" title="Polymarket">\\u2197</a>':'';
@@ -469,20 +471,20 @@ function renderOdds(ev,mkeys){
     function o(k){if(k.startsWith('ml_home'))return 0;if(k.startsWith('ml_away'))return 1;if(k.startsWith('draw'))return 2;return 3;}
     var d=o(a)-o(b);if(d!==0)return d;return a<b?-1:a>b?1:0;
   });
-  var h='<div class="odds-grid"><div class="odds-hd">Market</div><div class="odds-hd">PM</div><div class="odds-hd">1xBet</div><div class="odds-hd">b365</div><div class="odds-hd">Edge</div>';
+  var h='<div class="odds-grid"><div class="odds-hd">Market</div><div class="odds-hd">PM</div><div class="odds-hd">1xBet</div><div class="odds-hd">Kambi</div><div class="odds-hd">Edge</div>';
   for(var i=0;i<Math.min(sorted.length,15);i++){
     var k=sorted[i],srcs=ev.markets[k];
-    var pm=srcs.polymarket,xb=srcs.onexbet,b3=srcs.bet365;
+    var pm=srcs.polymarket,xb=srcs.onexbet,kb=srcs.kambi;
     var pmP=pm?(1/pm.value*100):null;
     var xbP=xb?(1/xb.value*100):null;
-    var b3P=b3?(1/b3.value*100):null;
+    var kbP=kb?(1/kb.value*100):null;
     var edge=(pmP!==null&&xbP!==null)?xbP-pmP:null;
     var edgeAbs=edge!==null?Math.abs(edge):0;
     var edgeCls=edgeAbs>=3?'hot':edge!==null&&edge>0?'pos':'neg';
     h+='<div class="odds-cell odds-lbl">'+fmtKey(k)+'</div>'
       +'<div class="odds-cell odds-pm">'+(pmP!==null?pmP.toFixed(1)+'%':'\\u2014')+'</div>'
       +'<div class="odds-cell odds-xb">'+(xbP!==null?xbP.toFixed(1)+'%':'\\u2014')+'</div>'
-      +'<div class="odds-cell odds-b3">'+(b3P!==null?b3P.toFixed(1)+'%':'\\u2014')+'</div>'
+      +'<div class="odds-cell odds-kb">'+(kbP!==null?kbP.toFixed(1)+'%':'\\u2014')+'</div>'
       +'<div class="odds-cell odds-edge '+edgeCls+'">'+(edge!==null?(edge>0?'+':'')+edge.toFixed(1)+'%':'\\u2014')+'</div>';
   }
   h+='</div>';
