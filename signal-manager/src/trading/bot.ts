@@ -97,6 +97,7 @@ export class TradingBot extends EventEmitter {
   private tradeHistory: TradeResult[] = [];
   private lastTradeTime: Map<string, number> = new Map();
   private totalPnL = 0;
+  private marketInfoCache: Map<string, { tickSize: string; negRisk: boolean }> = new Map();
 
   constructor(config: Partial<TradingConfig> = {}) {
     super();
@@ -218,35 +219,27 @@ export class TradingBot extends EventEmitter {
 
     try {
       const side = req.side === 'BUY' ? Side.BUY : Side.SELL;
-      const size = req.amount / req.price; // Convert USDC amount to shares
+      const size = req.side === 'BUY'
+        ? Math.floor(req.amount / req.price)  // shares from USDC amount
+        : req.amount / req.price;              // for sells, amount already computed
 
-      if (req.orderType === 'FOK') {
-        // Market order (FOK) — fastest execution
-        const signed = await this.client.createMarketOrder({
+      // Use createAndPostOrder for all order types (explicit price control)
+      const orderType = req.orderType === 'GTD' ? OrderType.GTD
+        : req.orderType === 'GTC' ? OrderType.GTC
+        : 'FOK' as any;
+
+      const resp = await this.client.createAndPostOrder(
+        {
           tokenID: req.tokenId,
-          amount: req.amount,
+          price: req.price,
           side,
-          orderType: OrderType.FOK,
-        });
-        const resp = await this.client.postOrder(signed, OrderType.FOK);
-        result.success = resp?.success ?? !!resp?.orderID;
-        result.orderId = resp?.orderID;
-      } else {
-        // Limit order (GTC/GTD)
-        const orderType = req.orderType === 'GTD' ? OrderType.GTD : OrderType.GTC;
-        const resp = await this.client.createAndPostOrder(
-          {
-            tokenID: req.tokenId,
-            price: req.price,
-            side,
-            size,
-          },
-          { tickSize: req.tickSize, negRisk: req.negRisk },
-          orderType
-        );
-        result.success = resp?.success ?? !!resp?.orderID;
-        result.orderId = resp?.orderID;
-      }
+          size,
+        },
+        { tickSize: req.tickSize, negRisk: req.negRisk },
+        orderType
+      );
+      result.success = resp?.success ?? !!resp?.orderID;
+      result.orderId = resp?.orderID;
 
       // Track position
       if (result.success && req.side === 'BUY') {
@@ -265,7 +258,11 @@ export class TradingBot extends EventEmitter {
       this.lastTradeTime.set(req.tokenId, Date.now());
       result.executionMs = Date.now() - start;
 
-      this.log('INFO', `✅ ${req.side} ${req.outcome} $${req.amount} @ ${req.price} — ${result.executionMs}ms — ${req.eventName || req.tokenId}`);
+      if (result.success) {
+        this.log('WARN', `✅ ${req.side} ${req.outcome} $${req.amount} @ ${req.price} — ${result.executionMs}ms — ${req.eventName || req.tokenId} [${result.orderId?.slice(0, 8)}]`);
+      } else {
+        this.log('INFO', `⚪ ${req.side} ${req.outcome} NOT FILLED @ ${req.price} — ${result.executionMs}ms — ${req.eventName || req.tokenId}`);
+      }
     } catch (err: any) {
       result.error = err.message;
       result.executionMs = Date.now() - start;
@@ -277,49 +274,157 @@ export class TradingBot extends EventEmitter {
     return result;
   }
 
-  /** Quick buy YES shares at market price */
-  async buyYes(tokenId: string, amount: number, price: number, opts: { tickSize?: '0.01' | '0.001'; negRisk?: boolean; eventName?: string } = {}): Promise<TradeResult> {
+  /** Quick buy YES shares at best ask (FOK) */
+  async buyYes(tokenId: string, amount: number, price: number, opts: { tickSize?: '0.01' | '0.001'; negRisk?: boolean; eventName?: string; orderType?: 'FOK' | 'GTC' } = {}): Promise<TradeResult> {
+    return this.buyOutcome(tokenId, 'YES', amount, price, opts);
+  }
+
+  /** Quick buy NO shares at best ask (FOK) */
+  async buyNo(tokenId: string, amount: number, price: number, opts: { tickSize?: '0.01' | '0.001'; negRisk?: boolean; eventName?: string; orderType?: 'FOK' | 'GTC' } = {}): Promise<TradeResult> {
+    return this.buyOutcome(tokenId, 'NO', amount, price, opts);
+  }
+
+  /** Buy at market — reads orderbook for best ask (FOK) */
+  async buyAtMarket(tokenId: string, outcome: 'YES' | 'NO', amount: number, opts: { eventName?: string } = {}): Promise<TradeResult> {
+    return this.buyOutcome(tokenId, outcome, amount, 0, { ...opts, orderType: 'FOK' });
+  }
+
+  /** Internal: buy with orderbook best-ask detection and auto tickSize/negRisk */
+  private async buyOutcome(tokenId: string, outcome: 'YES' | 'NO', amount: number, price: number, opts: { tickSize?: '0.01' | '0.001'; negRisk?: boolean; eventName?: string; orderType?: 'FOK' | 'GTC' } = {}): Promise<TradeResult> {
+    const start = Date.now();
+
+    if (!this.initialized || !this.client) {
+      return { success: false, error: 'Bot not initialized', request: { tokenId, side: 'BUY', outcome, amount, price, orderType: 'FOK', tickSize: '0.01', negRisk: false, eventName: opts.eventName }, timestamp: start, executionMs: 0 };
+    }
+
+    // Auto-detect tickSize and negRisk (cached + parallel for speed)
+    let tickSize: string = opts.tickSize || '0.01';
+    let negRisk = opts.negRisk ?? false;
+    const needTickSize = !opts.tickSize;
+    const needNegRisk = opts.negRisk === undefined;
+    if (needTickSize || needNegRisk) {
+      const cached = this.marketInfoCache.get(tokenId);
+      if (cached) {
+        if (needTickSize) tickSize = cached.tickSize;
+        if (needNegRisk) negRisk = cached.negRisk;
+      } else {
+        const [ts, nr] = await Promise.all([
+          needTickSize ? this.client!.getTickSize(tokenId).catch(() => '0.01') : tickSize,
+          needNegRisk ? this.client!.getNegRisk(tokenId).catch(() => false) : negRisk,
+        ]);
+        if (needTickSize) tickSize = String(ts) || '0.01';
+        if (needNegRisk) negRisk = !!nr;
+        this.marketInfoCache.set(tokenId, { tickSize, negRisk: !!negRisk });
+      }
+    }
+
+    // Read orderbook for best ask if no price provided
+    let buyPrice = price;
+    if (!buyPrice || buyPrice <= 0) {
+      try {
+        const bookRes = await this.client.getOrderBook(tokenId);
+        const asks = bookRes?.asks || [];
+        if (asks.length === 0) {
+          return { success: false, error: 'no_asks_in_orderbook', request: { tokenId, side: 'BUY', outcome, amount, price: 0, orderType: 'FOK', tickSize: tickSize as any, negRisk, eventName: opts.eventName }, timestamp: start, executionMs: Date.now() - start };
+        }
+        buyPrice = Math.min(...asks.map((a: any) => Number(a.price)));
+      } catch (err: any) {
+        return { success: false, error: `orderbook_error: ${err.message}`, request: { tokenId, side: 'BUY', outcome, amount, price: 0, orderType: 'FOK', tickSize: tickSize as any, negRisk, eventName: opts.eventName }, timestamp: start, executionMs: Date.now() - start };
+      }
+    }
+
+    if (buyPrice <= 0 || buyPrice >= 1) {
+      return { success: false, error: `invalid_price_${buyPrice}`, request: { tokenId, side: 'BUY', outcome, amount, price: buyPrice, orderType: 'FOK', tickSize: tickSize as any, negRisk, eventName: opts.eventName }, timestamp: start, executionMs: Date.now() - start };
+    }
+
+    // Polymarket requires $1 minimum order value
+    let shares = Math.floor(amount / buyPrice);
+    if (shares * buyPrice < 1) {
+      shares = Math.ceil(1 / buyPrice);
+    }
+    if (shares < 1) {
+      return { success: false, error: 'order_too_small', request: { tokenId, side: 'BUY', outcome, amount, price: buyPrice, orderType: 'FOK', tickSize: tickSize as any, negRisk, eventName: opts.eventName }, timestamp: start, executionMs: Date.now() - start };
+    }
+
     return this.trade({
       tokenId,
       side: 'BUY',
-      outcome: 'YES',
-      amount,
-      price,
-      orderType: 'FOK',
-      tickSize: opts.tickSize || '0.01',
-      negRisk: opts.negRisk ?? false,
+      outcome,
+      amount: shares * buyPrice,
+      price: buyPrice,
+      orderType: opts.orderType || 'FOK',
+      tickSize: tickSize as any,
+      negRisk,
       eventName: opts.eventName,
     });
   }
 
-  /** Quick buy NO shares at market price */
-  async buyNo(tokenId: string, amount: number, price: number, opts: { tickSize?: '0.01' | '0.001'; negRisk?: boolean; eventName?: string } = {}): Promise<TradeResult> {
-    return this.trade({
-      tokenId,
-      side: 'BUY',
-      outcome: 'NO',
-      amount,
-      price,
-      orderType: 'FOK',
-      tickSize: opts.tickSize || '0.01',
-      negRisk: opts.negRisk ?? false,
-      eventName: opts.eventName,
-    });
+  /** Get orderbook summary (best bid/ask, spread, depth) */
+  async getOrderBookSummary(tokenId: string): Promise<{ bestBid: number | null; bestAsk: number | null; spread: number | null; bidDepth: number; askDepth: number } | null> {
+    if (!this.client) return null;
+    try {
+      const bookRes = await this.client.getOrderBook(tokenId);
+      const bids = bookRes?.bids || [];
+      const asks = bookRes?.asks || [];
+      const bestBid = bids.length > 0 ? Math.max(...bids.map((b: any) => Number(b.price))) : null;
+      const bestAsk = asks.length > 0 ? Math.min(...asks.map((a: any) => Number(a.price))) : null;
+      const spread = bestBid && bestAsk ? bestAsk - bestBid : null;
+      const bidDepth = bids.reduce((sum: number, b: any) => sum + Number(b.size) * Number(b.price), 0);
+      const askDepth = asks.reduce((sum: number, a: any) => sum + Number(a.size) * Number(a.price), 0);
+      return { bestBid, bestAsk, spread, bidDepth, askDepth };
+    } catch { return null; }
   }
 
-  /** Sell an existing position at market (FOK) */
+  /** Sell an existing position at best bid (FOK) */
   async sellPosition(tokenId: string, shares: number, price: number, opts: { eventName?: string } = {}): Promise<TradeResult> {
+    const start = Date.now();
     const pos = this.positions.get(tokenId);
     const outcome = pos?.side || 'YES';
+
+    if (!this.initialized || !this.client) {
+      return { success: false, error: 'Bot not initialized', request: { tokenId, side: 'SELL', outcome, amount: shares * price, price, orderType: 'FOK', tickSize: '0.01', negRisk: false, eventName: opts.eventName }, timestamp: start, executionMs: 0 };
+    }
+
+    // Get tick size and negRisk for this market
+    let tickSize: string = '0.01';
+    let negRisk = false;
+    try {
+      const ts = await this.client.getTickSize(tokenId);
+      if (ts) tickSize = String(ts);
+    } catch { /* default 0.01 */ }
+    try {
+      const nr = await this.client.getNegRisk(tokenId);
+      negRisk = !!nr;
+    } catch { /* default false */ }
+
+    // Read orderbook to find best bid
+    let bestBid = price; // fallback to provided price
+    try {
+      const bookRes = await this.client.getOrderBook(tokenId);
+      const bids = bookRes?.bids || [];
+      if (bids.length > 0) {
+        bestBid = Math.max(...bids.map((b: any) => Number(b.price)));
+      }
+    } catch { /* use provided price */ }
+
+    if (bestBid <= 0.01) {
+      return { success: false, error: `best_bid_too_low_${(bestBid * 100).toFixed(1)}c`, request: { tokenId, side: 'SELL', outcome, amount: shares * bestBid, price: bestBid, orderType: 'FOK', tickSize: tickSize as any, negRisk, eventName: opts.eventName }, timestamp: start, executionMs: Date.now() - start };
+    }
+
+    const sellShares = Math.floor(shares * 100) / 100;
+    if (sellShares < 0.01) {
+      return { success: false, error: 'shares_too_small', request: { tokenId, side: 'SELL', outcome, amount: sellShares * bestBid, price: bestBid, orderType: 'FOK', tickSize: tickSize as any, negRisk, eventName: opts.eventName }, timestamp: start, executionMs: Date.now() - start };
+    }
+
     return this.trade({
       tokenId,
       side: 'SELL',
       outcome,
-      amount: shares * price, // USDC value
-      price,
+      amount: sellShares * bestBid,
+      price: bestBid,
       orderType: 'FOK',
-      tickSize: '0.01',
-      negRisk: false,
+      tickSize: tickSize as any,
+      negRisk,
       eventName: opts.eventName,
     });
   }

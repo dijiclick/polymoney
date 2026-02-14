@@ -50,6 +50,10 @@ export class Engine {
       // Track score changes for speed comparison
       if (changedKeys.includes('__score') && event.stats.score) {
         recordScoreChange(update.sourceId, eventId, event.home.name || update.homeTeam, event.away.name || update.awayTeam, event.stats.score.home, event.stats.score.away);
+        // Diagnostic: log score-only adapter score reports
+        if (update.markets.length === 0) {
+          log.warn(`⚡ Score: ${update.sourceId} | ${event.home.name || update.homeTeam} vs ${event.away.name || update.awayTeam} | ${event.stats.score.home}-${event.stats.score.away}`);
+        }
       }
 
       if (changedKeys.length > 0) {
@@ -111,7 +115,7 @@ export class Engine {
     });
 
     // Phase 4: Start remaining adapters (they now have target filters set)
-    log.info('Phase 3: Starting secondary adapters...');
+    log.info('Phase 4: Starting secondary adapters...');
     await this.registry.startAllExcept('polymarket');
 
     log.info('Engine started (Polymarket-first funnel active)');

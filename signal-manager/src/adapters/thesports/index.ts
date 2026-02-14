@@ -77,7 +77,7 @@ export class TheSportsAdapter implements IFilterableAdapter {
     this.client.on('message', (_topic, payload) => {
       let data: any;
       try { data = JSON.parse(payload.toString()); } catch {
-        if (msgpackDecode) { try { data = msgpackDecode(payload); } catch { return; } } else return;
+        if (msgpackDecode) { try { data = msgpackDecode(payload); } catch { log.debug('MQTT msgpack decode failed'); return; } } else { log.debug('MQTT payload not JSON, no msgpack decoder'); return; }
       }
       if (!data || !data.match_id) return;
       this.processUpdate(data);
@@ -123,9 +123,19 @@ export class TheSportsAdapter implements IFilterableAdapter {
   private async discover(): Promise<void> {
     try {
       for (const sportId of (this.config.sportIds || [1, 2, 3])) {
-        const resp = await fetch(`https://www.thesports.com/portal_api/www/match/live?sport_id=${sportId}&lang=en`,
-          { headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
-        if (!resp.ok) continue;
+        let resp: Response | null = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            resp = await fetch(`https://www.thesports.com/portal_api/www/match/live?sport_id=${sportId}&lang=en`,
+              { headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20000) });
+            if (resp.ok) break;
+            resp = null;
+          } catch (e: any) {
+            log.warn(`TheSports discovery sport=${sportId} attempt ${attempt + 1} failed: ${e.message}`);
+            if (attempt === 0) await new Promise(r => setTimeout(r, 5000));
+          }
+        }
+        if (!resp || !resp.ok) continue;
         const data = await resp.json() as any;
         const groups = data?.data || [];
         if (!Array.isArray(groups)) continue;
@@ -147,7 +157,7 @@ export class TheSportsAdapter implements IFilterableAdapter {
           }
         }
       }
-      log.info(`TheSports discovery: ${this.matchMeta.size} matches cached`);
+      log.warn(`TheSports discovery: ${this.matchMeta.size} matches cached`);
     } catch (err: any) { log.error('Discovery failed:', err.message); }
   }
 }

@@ -148,6 +148,34 @@ export class OnexbetAdapter implements IFilterableAdapter {
             this.liveFeed.startPolling(this.gameIds);
             this.status = 'connected';
             log.warn(`1xbet adapter recovered: ${this.gameIds.length} games`);
+            // Switch from error-recovery to normal discovery loop
+            if (this.discoveryTimer) clearInterval(this.discoveryTimer);
+            this.discoveryTimer = setInterval(async () => {
+              try {
+                const [liveGames, preMatchGames] = await Promise.all([
+                  this.discovery.discoverLiveEvents(),
+                  this.discovery.discoverPreMatchEvents(),
+                ]);
+                const liveFiltered = this.filterGames(liveGames);
+                const preMatchFiltered = this.filterGames(preMatchGames);
+                const newLiveIds = liveFiltered.map(g => g.I);
+                const newPreMatchIds = preMatchFiltered.map(g => g.I);
+                const newGameIds = [...newLiveIds, ...newPreMatchIds];
+                const added = newGameIds.filter(id => !this.gameIds.includes(id));
+                if (added.length > 0) {
+                  log.info(`New PM-matched games: +${added.length} (live=${newLiveIds.length}, pre=${newPreMatchIds.length})`);
+                }
+                this.gameIds = newGameIds;
+                this.liveFeed.setPreMatchIds(newPreMatchIds);
+                this.liveFeed.updateGameList(newGameIds);
+                if (!this.liveFeed.isPolling && newGameIds.length > 0) {
+                  this.liveFeed.startPolling(newGameIds);
+                }
+              } catch (err) {
+                log.warn('Discovery refresh failed', err);
+              }
+            }, 30_000);
+            return;
           }
         } catch { /* still failing, keep retrying */ }
       }, 30_000);

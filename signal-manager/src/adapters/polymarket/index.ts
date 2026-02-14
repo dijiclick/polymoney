@@ -72,12 +72,32 @@ export class PolymarketAdapter implements IAdapter {
     this.scoresWs.onScoreUpdate((scoreUpdate) => {
       if (!this.callback) return;
 
-      // Try to find matching event in our token map by team names
-      // This is a simple linear scan — acceptable since score updates are infrequent
       const eventMapping = this.findEventByTeams(scoreUpdate.homeTeam, scoreUpdate.awayTeam);
       const update = normalizeScoreUpdate(scoreUpdate, eventMapping);
       if (update) {
         this.callback(update);
+      } else {
+        // Fallback: send raw score even without internal mapping
+        // The engine's EventMatcher handles cross-source matching
+        const scoreParts = scoreUpdate.score?.split('-');
+        const score = scoreParts?.length === 2
+          ? { home: parseInt(scoreParts[0], 10), away: parseInt(scoreParts[1], 10) }
+          : undefined;
+        if (score) {
+          this.callback({
+            sourceId: 'polymarket',
+            sourceEventId: `pm-score-${scoreUpdate.gameId}`,
+            sport: scoreUpdate.leagueAbbreviation || 'unknown',
+            league: scoreUpdate.leagueAbbreviation || '',
+            startTime: 0,
+            homeTeam: scoreUpdate.homeTeam,
+            awayTeam: scoreUpdate.awayTeam,
+            status: scoreUpdate.ended ? 'ended' : scoreUpdate.live ? 'live' : 'scheduled',
+            stats: { score, period: scoreUpdate.period },
+            markets: [],
+            timestamp: Date.now(),
+          });
+        }
       }
     });
 

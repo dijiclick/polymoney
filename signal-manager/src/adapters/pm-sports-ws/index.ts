@@ -118,19 +118,24 @@ export class PmSportsWsAdapter implements IAdapter {
 
       this.ws.on('message', (raw: Buffer) => {
         const data = raw.toString();
-        
+
         if (data === 'ping') {
           this.ws?.send('pong');
           return;
         }
-        
+
         this.msgCount++;
-        
+        if (this.msgCount <= 3) {
+          log.warn(`📨 PM Sports WS msg #${this.msgCount}: ${data.substring(0, 200)}`);
+        } else if (this.msgCount % 500 === 0) {
+          log.warn(`📨 PM Sports WS total: ${this.msgCount} msgs, ${this.scoreCount} scores`);
+        }
+
         try {
           const msg: SportResult = JSON.parse(data);
           this.handleSportResult(msg);
         } catch {
-          // Ignore non-JSON messages
+          log.debug(`PM Sports WS non-JSON: ${data.substring(0, 100)}`);
         }
       });
 

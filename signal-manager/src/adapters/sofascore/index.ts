@@ -34,6 +34,9 @@ export class SofaScoreAdapter implements IFilterableAdapter {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempt = 0;
   private subscribed = false;
+  private natsMessageCount = 0;
+  private payloadCount = 0;
+  private matchedCount = 0;
 
   constructor(config: SofaScoreAdapterConfig) {
     this.config = config;
@@ -102,7 +105,7 @@ export class SofaScoreAdapter implements IFilterableAdapter {
 
   private scheduleReconnect(): void {
     if (this.status === 'stopped') return;
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000);
+    const delay = Math.min(1000 * Math.pow(2, Math.min(this.reconnectAttempt, 15)), 30000);
     this.reconnectAttempt++;
     log.info(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`);
     this.reconnectTimer = setTimeout(() => this.connectWs(), delay);
@@ -115,31 +118,38 @@ export class SofaScoreAdapter implements IFilterableAdapter {
 
       if (line.startsWith('INFO ')) {
         // Respond with CONNECT using user=none, pass=none (discovered from browser)
-        log.info('Got NATS INFO, authenticating...');
+        log.warn('Got NATS INFO, sending CONNECT...');
         this.ws?.send('CONNECT {"protocol":1,"version":"3.1.0","lang":"nats.ws","verbose":false,"pedantic":false,"user":"none","pass":"none","headers":true,"no_responders":true}\r\n');
 
-        if (!this.subscribed) {
-          this.subscribed = true;
-          let subId = 1;
-          const sports = this.config.sports || ['football'];
-          for (const sport of sports) {
-            this.ws?.send(`SUB sport.${sport} ${subId}\r\n`);
-            log.info(`Subscribed to sport.${sport} (sid=${subId})`);
-            subId++;
-          }
+        // Always (re-)subscribe on INFO — NATS server sends INFO periodically
+        this.subscribed = true;
+        let subId = 1;
+        const sports = this.config.sports || ['football'];
+        for (const sport of sports) {
+          this.ws?.send(`SUB sport.${sport} ${subId}\r\n`);
+          subId++;
         }
+        log.warn(`Subscribed to ${sports.length} sport topics`);
         continue;
       }
 
       if (line === 'PING') { this.ws?.send('PONG\r\n'); continue; }
       if (line === '+OK' || line === '' || line === 'PONG') continue;
-      if (line.startsWith('-ERR')) { log.warn('NATS error:', line); continue; }
+      if (line.startsWith('-ERR')) {
+        log.warn('NATS error:', line);
+        if (line.includes('Authentication Timeout') && this.ws) {
+          this.ws.close(); // triggers close handler → reconnect
+        }
+        continue;
+      }
 
       if (line.startsWith('MSG ') || line.startsWith('HMSG ')) {
-        // MSG <subject> <sid> [reply] <bytes> or HMSG with headers
+        this.natsMessageCount++;
+        if (this.natsMessageCount <= 3 || this.natsMessageCount % 500 === 0) {
+          log.warn(`NATS msg #${this.natsMessageCount}: ${line.substring(0, 80)} | payloads=${this.payloadCount}, matched=${this.matchedCount}`);
+        }
         const parts = line.split(' ');
         const numBytes = parseInt(parts[parts.length - 1]);
-        // Payload is on next line(s)
         const payload = lines[i + 1];
         if (payload) {
           this.processPayload(payload);
@@ -151,6 +161,7 @@ export class SofaScoreAdapter implements IFilterableAdapter {
 
   private processPayload(payload: string): void {
     if (!this.callback) return;
+    this.payloadCount++;
     try {
       // SofaScore sends partial event updates as JSON
       const data = JSON.parse(payload) as any;
@@ -164,6 +175,7 @@ export class SofaScoreAdapter implements IFilterableAdapter {
       // Filter to Polymarket events only
       const filterResult = this.targetFilter.check(homeTeam, awayTeam);
       if (!filterResult.matched) return;
+      this.matchedCount++;
 
       // Extract scores — can be nested or flat
       const homeScore = data.homeScore?.current ?? data['homeScore.current'];
@@ -188,6 +200,9 @@ export class SofaScoreAdapter implements IFilterableAdapter {
         timestamp: Date.now(),
       };
 
+      if (this.matchedCount <= 5 || this.matchedCount % 100 === 0) {
+        log.warn(`✅ SofaScore match #${this.matchedCount}: ${homeTeam} vs ${awayTeam} | score=${hasScore ? `${homeScore}-${awayScore}` : 'none'} | ${sport}`);
+      }
       this.callback(update);
     } catch {
       // Try base64 decode

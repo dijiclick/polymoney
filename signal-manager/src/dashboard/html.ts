@@ -261,7 +261,7 @@ function renderEvents(evs,containerId,isLive){
   for(var g=0;g<groups.length;g++){
     var grp=groups[g][0],items=groups[g][1];
     var gk=(isLive?'l_':'u_')+grp;
-    var isOpen=openGroups.has(gk);
+    var isOpen=isLive?!openGroups.has(gk):openGroups.has(gk);
     h+='<div class="grp"><div class="grp-hd'+(isOpen?' open':'')+'" onclick="tg(\\''+gk.replace(/'/g,"\\\\'")+'\\')"><span class="arrow">\\u25B6</span>'+gi(grp)+' '+grp+' <span class="cnt">'+items.length+'</span></div>';
     h+='<div class="grp-body">';
     if(isOpen){for(var i=0;i<items.length;i++)h+=renderEv(items[i],isLive);}
@@ -329,9 +329,7 @@ function renderLogs(){
   var el=document.getElementById('p-logs');
   var sl=state.speedLog||[];
   if(sl.length===0){el.innerHTML='<div class="empty">No source races yet — waiting for score changes across multiple sources</div>';return;}
-  var allSrcs={};
-  for(var i=0;i<sl.length;i++){var times=sl[i].times||[];for(var j=0;j<times.length;j++)allSrcs[times[j].src]=1;}
-  var srcList=Object.keys(allSrcs).sort();
+  var srcList=['kambi','onexbet','pinnacle','pm-sports-ws','sofascore','thesports'];
   var h='<table class="log-tbl"><thead><tr><th>Match</th><th>Score</th>';
   for(var si=0;si<srcList.length;si++)h+='<th>'+srcN(srcList[si])+'</th>';
   h+='</tr></thead><tbody>';

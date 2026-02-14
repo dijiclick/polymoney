@@ -2,12 +2,19 @@
  * Close All Positions & Redeem
  *
  * 1. Cancel all open orders
- * 2. Sell all active positions at market (FOK)
- * 3. Report any redeemable positions
+ * 2. Sell all active positions at best bid (FOK)
+ * 3. Redeem resolved positions (gasless relay → on-chain proxy → CLOB sell)
+ *
+ * Usage:
+ *   npx tsc && node dist/src/scripts/close-all.js               # sell + redeem redeemable
+ *   npx tsc && node dist/src/scripts/close-all.js --force        # force-redeem ALL active
+ *   npx tsc && node dist/src/scripts/close-all.js --dry-run      # preview only
  */
 
 import { ClobClient, Side, OrderType } from '@polymarket/clob-client';
 import { Wallet } from '@ethersproject/wallet';
+import { Contract } from '@ethersproject/contracts';
+import { JsonRpcProvider } from '@ethersproject/providers';
 import * as dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
@@ -15,17 +22,22 @@ import { dirname, resolve } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load .env from signal-manager root (cwd)
 dotenv.config({ path: resolve(process.cwd(), '.env') });
 
 const CLOB_HOST = 'https://clob.polymarket.com';
 const DATA_API = 'https://data-api.polymarket.com';
 const CHAIN_ID = 137;
+const POLYGON_RPC = 'https://polygon-rpc.com';
+const CT_ADDRESS = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+const CT_ABI = ['function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external'];
+const PROXY_ABI = ['function exec(address to, uint256 value, bytes data) external returns (bool, bytes memory)'];
+const ZERO_BYTES32 = '0x' + '0'.repeat(64);
 
 interface Position {
-  asset: string;       // tokenId
+  asset: string;
   title: string;
-  size: number;        // shares
+  size: number;
   currentPrice: number;
   currentValue: number;
   avgPrice: number;
@@ -42,13 +54,26 @@ function log(msg: string) {
 }
 
 async function fetchPositions(address: string): Promise<Position[]> {
-  const url = `${DATA_API}/positions?user=${address}&limit=100&offset=0`;
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`Data API error: ${resp.status}`);
-  const data = await resp.json();
-  if (!Array.isArray(data)) return [];
+  // Fetch both active and redeemable positions
+  const [activeResp, redeemResp] = await Promise.all([
+    fetch(`${DATA_API}/positions?user=${address}&limit=100&offset=0`),
+    fetch(`${DATA_API}/positions?user=${address}&redeemable=true&sizeThreshold=0`),
+  ]);
 
-  return data.map((p: any) => ({
+  const activeData = activeResp.ok ? await activeResp.json() : [];
+  const redeemData = redeemResp.ok ? await redeemResp.json() : [];
+
+  // Merge, dedup by asset
+  const seen = new Set<string>();
+  const all: any[] = [];
+  for (const p of [...(Array.isArray(activeData) ? activeData : []), ...(Array.isArray(redeemData) ? redeemData : [])]) {
+    if (p.asset && !seen.has(p.asset)) {
+      seen.add(p.asset);
+      all.push(p);
+    }
+  }
+
+  return all.map((p: any) => ({
     asset: p.asset,
     title: p.title || p.market?.question || 'Unknown',
     size: parseFloat(p.size || '0'),
@@ -64,10 +89,89 @@ async function fetchPositions(address: string): Promise<Position[]> {
   }));
 }
 
+async function sellAtBestBid(client: ClobClient, tokenId: string, shares: number): Promise<{ success: boolean; orderId?: string; sellPrice?: number; proceeds?: number; error?: string }> {
+  const tickSize = await client.getTickSize(tokenId).catch(() => '0.01');
+  const negRisk = await client.getNegRisk(tokenId).catch(() => false);
+  const tick = Number(tickSize) || 0.01;
+
+  const bookRes = await client.getOrderBook(tokenId);
+  const bids = (bookRes as any)?.bids || [];
+
+  if (bids.length === 0) {
+    return { success: false, error: 'no_bids_in_orderbook' };
+  }
+
+  const bestBid = Math.max(...bids.map((b: any) => Number(b.price)));
+  if (bestBid <= 0.01) {
+    return { success: false, error: `best_bid_too_low_${(bestBid * 100).toFixed(1)}c` };
+  }
+
+  const sellShares = Math.floor(shares * 100) / 100;
+  if (sellShares < 0.01) {
+    return { success: false, error: 'shares_too_small' };
+  }
+
+  const response = await client.createAndPostOrder(
+    { tokenID: tokenId, price: bestBid, size: sellShares, side: Side.SELL },
+    { tickSize: String(tick) as any, negRisk: !!negRisk },
+    'FOK' as any
+  );
+
+  const orderId = (response as any)?.orderID || (response as any)?.id || null;
+  if (orderId) {
+    return { success: true, orderId, sellPrice: bestBid, proceeds: sellShares * bestBid };
+  }
+  return { success: false, error: 'fok_not_filled' };
+}
+
+async function redeemByConditionId(
+  conditionId: string,
+  funderAddress: string,
+  connectedWallet: any,
+  relayClient: any
+): Promise<{ success: boolean; txHash?: string; method?: string; error?: string }> {
+  const ct = new Contract(CT_ADDRESS, CT_ABI);
+  const calldata = ct.interface.encodeFunctionData('redeemPositions', [
+    USDC_ADDRESS, ZERO_BYTES32, conditionId, [1, 2]
+  ]);
+
+  // Method 1: Gasless relay
+  if (relayClient) {
+    try {
+      const response = await relayClient.execute(
+        [{ to: CT_ADDRESS, data: calldata, value: '0' }],
+        'redeem'
+      );
+      const result = await response.wait();
+      if (result) {
+        return { success: true, txHash: result.transactionHash, method: 'relay' };
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
+  // Method 2: On-chain proxy
+  if (connectedWallet) {
+    try {
+      const proxy = new Contract(funderAddress, PROXY_ABI, connectedWallet);
+      const tx = await proxy.exec(CT_ADDRESS, 0, calldata);
+      const receipt = await tx.wait();
+      return { success: true, txHash: receipt.transactionHash, method: 'onchain' };
+    } catch (err: any) {
+      return { success: false, error: err.message?.slice(0, 120) };
+    }
+  }
+
+  return { success: false, error: 'no_redemption_method' };
+}
+
 async function main() {
   const privateKey = process.env.POLY_PRIVATE_KEY;
   const funderAddress = process.env.POLY_FUNDER_ADDRESS;
   const sigType = parseInt(process.env.POLY_SIGNATURE_TYPE || '0') as 0 | 1 | 2;
+  const dryRun = process.argv.includes('--dry-run');
+  const force = process.argv.includes('--force');
 
   if (!privateKey || !funderAddress) {
     console.error('Missing POLY_PRIVATE_KEY or POLY_FUNDER_ADDRESS in .env');
@@ -75,17 +179,38 @@ async function main() {
   }
 
   log(`Wallet: ${funderAddress}`);
-  log(`Signature type: ${sigType}`);
+  log(`Mode: ${dryRun ? 'DRY RUN' : force ? 'FORCE REDEEM ALL' : 'LIVE'}`);
 
   // --- Initialize CLOB client ---
   log('Initializing CLOB client...');
   const signer = new Wallet(privateKey);
-
   const tempClient = new ClobClient(CLOB_HOST, CHAIN_ID, signer, undefined, sigType, funderAddress);
   const creds = await tempClient.createOrDeriveApiKey();
-
   const client = new ClobClient(CLOB_HOST, CHAIN_ID, signer, creds, sigType, funderAddress);
   log('CLOB client ready');
+
+  // --- Initialize on-chain wallet ---
+  const provider = new JsonRpcProvider(POLYGON_RPC);
+  const connectedWallet = signer.connect(provider);
+
+  // --- Initialize builder relay (optional) ---
+  let relayClient: any = null;
+  const builderKey = process.env.POLY_BUILDER_KEY;
+  const builderSecret = process.env.POLY_BUILDER_SECRET;
+  const builderPassphrase = process.env.POLY_BUILDER_PASSPHRASE;
+
+  if (builderKey && builderSecret && builderPassphrase) {
+    try {
+      const relayPkg = await import('@polymarket/builder-relayer-client');
+      const { BuilderConfig } = await import('@polymarket/builder-signing-sdk');
+      const builderConfig = new BuilderConfig({ localBuilderCreds: { key: builderKey, secret: builderSecret, passphrase: builderPassphrase } });
+      const relayTxType = sigType === 1 ? relayPkg.RelayerTxType.PROXY : relayPkg.RelayerTxType.SAFE;
+      relayClient = new relayPkg.RelayClient('https://relayer-v2.polymarket.com', 137, connectedWallet, builderConfig, relayTxType);
+      log('Builder relay ready (gasless redemption)');
+    } catch (err: any) {
+      log(`Builder relay unavailable: ${err.message}`);
+    }
+  }
 
   // --- Step 1: Cancel all open orders ---
   log('\n=== STEP 1: Cancel all open orders ===');
@@ -93,8 +218,8 @@ async function main() {
     const openOrders = await client.getOpenOrders();
     if (Array.isArray(openOrders) && openOrders.length > 0) {
       log(`Found ${openOrders.length} open orders — cancelling...`);
-      await client.cancelAll();
-      log('All orders cancelled');
+      if (!dryRun) await client.cancelAll();
+      log(dryRun ? 'Would cancel all orders' : 'All orders cancelled');
     } else {
       log('No open orders found');
     }
@@ -130,64 +255,75 @@ async function main() {
     }
   }
 
-  // --- Step 3: Sell active positions ---
-  log(`\n=== STEP 3: Sell ${active.length} active positions ===`);
+  // --- Step 3: Sell active positions at best bid ---
+  const toSell = force ? [...active, ...redeemable] : active;
+  log(`\n=== STEP 3: Sell ${toSell.length} positions at best bid ===`);
 
   let totalSold = 0;
   let totalFailed = 0;
+  let totalProceeds = 0;
 
-  for (const pos of active) {
+  for (const pos of toSell) {
+    if (pos.currentPrice <= 0.01) {
+      log(`  ⚠️ ${pos.title} — worthless (${pos.currentPrice}), skipping sell`);
+      continue;
+    }
+
     log(`\nSelling: ${pos.title} (${pos.size.toFixed(4)} shares @ ~${pos.currentPrice})...`);
 
+    if (dryRun) {
+      const est = pos.size * pos.currentPrice;
+      log(`  [DRY RUN] Would sell — estimated $${est.toFixed(2)}`);
+      totalProceeds += est;
+      totalSold++;
+      continue;
+    }
+
     try {
-      // Get tick size and negRisk for this market
-      let tickSize = '0.01';
-      let negRisk = false;
-      try {
-        const ts = await client.getTickSize(pos.asset);
-        if (ts) tickSize = String(ts);
-      } catch { /* default 0.01 */ }
-      try {
-        const nr = await client.getNegRisk(pos.asset);
-        negRisk = !!nr;
-      } catch { /* default false */ }
-
-      // Create market sell order (FOK)
-      const signedOrder = await client.createMarketOrder(
-        {
-          tokenID: pos.asset,
-          amount: pos.size,  // For SELL: amount = shares
-          side: Side.SELL,
-          feeRateBps: 0,
-        },
-        { tickSize: tickSize as any, negRisk }
-      );
-
-      const result = await client.postOrder(signedOrder, OrderType.FOK);
-
-      if (result?.success || result?.orderID) {
-        log(`  ✅ SOLD — Order ID: ${result.orderID || 'ok'}`);
+      const result = await sellAtBestBid(client, pos.asset, pos.size);
+      if (result.success) {
+        log(`  ✅ SOLD at ${((result.sellPrice || 0) * 100).toFixed(0)}¢ — $${(result.proceeds || 0).toFixed(2)} — Order: ${result.orderId}`);
         totalSold++;
+        totalProceeds += result.proceeds || 0;
       } else {
-        log(`  ⚠️  Order submitted but unclear result: ${JSON.stringify(result)}`);
-        totalSold++;
+        log(`  ⚠️ Sell failed: ${result.error}`);
+        totalFailed++;
       }
     } catch (err: any) {
       log(`  ❌ FAILED: ${err.message}`);
       totalFailed++;
 
-      // If market is closed/resolved, note it
       if (err.message?.includes('closed') || err.message?.includes('resolved') || err.message?.includes('not active')) {
-        log(`  → Market may be resolved. Check Polymarket UI to redeem.`);
+        log(`  → Market may be resolved — trying on-chain redeem`);
       }
     }
   }
 
-  // --- Step 4: Report redeemable ---
-  if (redeemable.length > 0) {
-    log(`\n=== STEP 4: Redeemable positions (${redeemable.length}) ===`);
-    log('Note: Redemption requires smart contract interaction.');
-    log('Visit https://polymarket.com/portfolio to redeem in the UI.\n');
+  // --- Step 4: Redeem resolved positions on-chain ---
+  if (redeemable.length > 0 && !dryRun) {
+    log(`\n=== STEP 4: Redeem ${redeemable.length} resolved positions ===`);
+
+    const seen = new Set<string>();
+    for (const pos of redeemable) {
+      const conditionId = pos.conditionId;
+      if (!conditionId || seen.has(conditionId)) continue;
+      seen.add(conditionId);
+
+      log(`\nRedeeming: ${pos.title} (conditionId: ${conditionId?.slice(0, 10)}...)...`);
+
+      try {
+        const result = await redeemByConditionId(conditionId, funderAddress, connectedWallet, relayClient);
+        if (result.success) {
+          log(`  ✅ REDEEMED (${result.method}) | tx: ${result.txHash}`);
+        } else {
+          log(`  ❌ Redeem failed: ${result.error}`);
+        }
+      } catch (err: any) {
+        log(`  ❌ Redeem error: ${err.message}`);
+      }
+    }
+  } else if (redeemable.length > 0 && dryRun) {
+    log(`\n=== STEP 4: Would redeem ${redeemable.length} resolved positions ===`);
     for (const pos of redeemable) {
       log(`  🔄 ${pos.title} — ${pos.size.toFixed(4)} shares — PnL: $${pos.cashPnl.toFixed(4)}`);
     }
@@ -196,20 +332,20 @@ async function main() {
   // --- Summary ---
   log('\n=== SUMMARY ===');
   log(`Positions found: ${positions.length}`);
-  log(`Sold successfully: ${totalSold}`);
-  log(`Failed to sell: ${totalFailed}`);
-  log(`Redeemable (visit UI): ${redeemable.length}`);
+  log(`Sold: ${totalSold} | Failed: ${totalFailed} | Proceeds: $${totalProceeds.toFixed(2)}`);
+  log(`Redeemable: ${redeemable.length}`);
 
-  // Check remaining
-  log('\nChecking remaining positions...');
-  const remaining = await fetchPositions(funderAddress);
-  const activeRemaining = remaining.filter(p => p.size > 0 && !p.redeemable);
-  if (activeRemaining.length === 0) {
-    log('✅ All active positions closed!');
-  } else {
-    log(`⚠️  ${activeRemaining.length} positions still open (may need manual closing)`);
-    for (const p of activeRemaining) {
-      log(`  - ${p.title}: ${p.size.toFixed(4)} shares`);
+  if (!dryRun) {
+    log('\nChecking remaining positions...');
+    const remaining = await fetchPositions(funderAddress);
+    const activeRemaining = remaining.filter(p => p.size > 0 && !p.redeemable);
+    if (activeRemaining.length === 0) {
+      log('✅ All active positions closed!');
+    } else {
+      log(`⚠️  ${activeRemaining.length} positions still open`);
+      for (const p of activeRemaining) {
+        log(`  - ${p.title}: ${p.size.toFixed(4)} shares`);
+      }
     }
   }
 }

@@ -76,17 +76,17 @@ export interface GoalTraderConfig {
 
 const DEFAULT_CONFIG: GoalTraderConfig = {
   enabled: false,
-  hardExitMs: 180_000,           // 3min hard exit (auto-redeem)
-  stabilizationQuietMs: 15_000,  // 15s quiet = stabilized
-  minHoldMs: 10_000,             // hold at least 10s
-  stopLossPp: 3,                 // 3pp stop loss
-  takeProfitPct: 0.80,           // exit at 80% of expected move
-  skipExtendingLead: true,
-  sizeLarge: 5.0,
-  sizeMedium: 3.0,
-  sizeSmall: 1.0,
-  preferFastestSource: true,     // Use dynamically tracked fastest source
-  slowSourceDelayMs: 500,        // Wait 500ms for fastest source before accepting slow source
+  hardExitMs: 60_000,            // 1 min → sell
+  stabilizationQuietMs: 999_999, // disabled — just use hard exit
+  minHoldMs: 60_000,             // hold full 1 min
+  stopLossPp: 99,                // disabled
+  takeProfitPct: 99,             // disabled
+  skipExtendingLead: true,       // don't buy extending leads
+  sizeLarge: 1.0,                // $1 flat
+  sizeMedium: 1.0,               // $1 flat
+  sizeSmall: 1.0,                // $1 flat
+  preferFastestSource: false,    // buy on first source
+  slowSourceDelayMs: 0,          // no delay
 };
 
 const ML_KEYS = ['ml_home_ft', 'ml_away_ft', 'draw_ft'];
@@ -232,6 +232,9 @@ export class GoalTrader {
       }
       return;
     }
+
+    // Only auto-trade goals in soccer matches
+    if (sport !== 'soccer') return;
     if (!event.stats.score) {
       return;
     }
@@ -385,8 +388,8 @@ export class GoalTrader {
 
     const entryPrice = 1 / pmData.value; // Convert decimal odds to probability
 
-    // Skip if price is too extreme — no room to profit
-    if (entryPrice > 0.95 || entryPrice < 0.05) {
+    // Skip if price is too extreme — thin orderbook, hard to exit
+    if (entryPrice > 0.90 || entryPrice < 0.08) {
       log.warn(`🏆 SKIP price too extreme (${entryPrice.toFixed(3)}) | ${match}`);
       this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType, action: 'SKIP', reason: `Price extreme (${(entryPrice*100).toFixed(0)}%)` });
       return;
@@ -429,8 +432,8 @@ export class GoalTrader {
     expectedMovePp: number, takeProfitPrice: number, stopLossPrice: number,
     match: string, sport: string, source: string,
   ): Promise<void> {
-    const buyFn = side === 'YES' ? this.bot.buyYes.bind(this.bot) : this.bot.buyNo.bind(this.bot);
-    const result = await buyFn(tokenId, amount, price, { eventName: match });
+    // Use buyAtMarket for real orderbook best ask — reliable FOK fill
+    const result = await this.bot.buyAtMarket(tokenId, side, amount, { eventName: match });
 
     if (!result.success) {
       log.error(`⚽ BUY FAILED: ${result.error} | ${match} ${marketKey}`);

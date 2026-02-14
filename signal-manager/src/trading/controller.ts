@@ -18,6 +18,9 @@ export class TradingController {
   private engine: Engine;
   private autoTradeEnabled = false;
   private goalTrader: GoalTrader | null = null;
+  private startTime = Date.now();
+  private tradedEvents: Set<string> = new Set();  // One trade per event
+  private tradeQueue: Promise<void> = Promise.resolve();  // Serial execution
 
   constructor(bot: TradingBot, engine: Engine) {
     this.bot = bot;
@@ -132,41 +135,72 @@ export class TradingController {
     if (opp.quality !== 'good') return;
     if (opp.edge < 3) return;
 
+    // Auto-trade only soccer events
+    if (opp.sport !== 'soccer') return;
+
+    // One trade per event — avoid buying both sides or multiple markets
+    if (this.tradedEvents.has(opp.eventId)) return;
+
     // Look up tokenId from the engine
     const event = this.engine.getAllEvents().find(e => e.id === opp.eventId);
-    if (!event) return;
+    if (!event) {
+      log.warn(`SIGNAL (event not found) | ${opp.action} ${opp.market} | ${opp.homeTeam} vs ${opp.awayTeam} | eventId=${opp.eventId}`);
+      return;
+    }
 
-    const tokenId = event._tokenIds[opp.market];
+    const tokenId = event._tokenIds?.[opp.market];
     if (!tokenId) {
-      log.info(`SIGNAL (no tokenId) | ${opp.action} ${opp.market} | ${opp.homeTeam} vs ${opp.awayTeam} | Edge:${opp.edge.toFixed(1)}pp [${opp.quality}]`);
+      log.warn(`SIGNAL (no tokenId) | ${opp.action} ${opp.market} | ${opp.homeTeam} vs ${opp.awayTeam} | keys=${Object.keys(event._tokenIds || {}).join(',')}`);
+      return;
+    }
+
+    // Reserve the event slot synchronously before async trade
+    this.tradedEvents.add(opp.eventId);
+
+    // Queue trade serially to prevent position limit race condition
+    this.tradeQueue = this.tradeQueue.then(() => this.executeTrade(opp, tokenId)).catch(() => {});
+  }
+
+  /** Execute a single trade (called serially from queue) */
+  private async executeTrade(opp: Opportunity, tokenId: string): Promise<void> {
+    // Re-check edge at execution time (opportunity is mutable, edge may have changed since queue)
+    if (opp.edge < 3) {
+      log.warn(`SKIP (edge dropped to ${opp.edge.toFixed(1)}pp) | ${opp.homeTeam} vs ${opp.awayTeam}`);
+      this.tradedEvents.delete(opp.eventId);
+      return;
+    }
+    if (opp.quality === 'suspect') {
+      this.tradedEvents.delete(opp.eventId);
+      return;
+    }
+
+    // Check position limit (bot tracks filled positions, we enforce here before submitting)
+    const state = this.bot.getState();
+    if (state.openPositions >= state.maxPositions) {
+      log.warn(`SKIP (max ${state.maxPositions} positions) | ${opp.homeTeam} vs ${opp.awayTeam}`);
+      this.tradedEvents.delete(opp.eventId);
       return;
     }
 
     const amount = this.bot['config'].minTradeSize;
     const isBuyYes = opp.action === 'BUY_YES';
-    // Price on CLOB is probability (0-1); polyProb is 0-100
-    const price = isBuyYes ? opp.polyProb / 100 : (100 - opp.polyProb) / 100;
-    const roundedPrice = Math.round(price * 100) / 100;
+    const outcome: 'YES' | 'NO' = isBuyYes ? 'YES' : 'NO';
     const mode = this.bot.isArmed ? 'LIVE' : 'DRY';
+    const eventName = `${opp.homeTeam} vs ${opp.awayTeam}`;
 
-    log.info(
-      `TRADE [${mode}] | ${opp.action} ${opp.market} | ${opp.homeTeam} vs ${opp.awayTeam} | ` +
-      `Edge:${opp.edge.toFixed(1)}pp | PM:${opp.polyProb.toFixed(1)}% 1xBet:${opp.xbetProb.toFixed(1)}% | Price:${roundedPrice} | $${amount}`
+    log.warn(
+      `TRADE [${mode}] | ${opp.action} ${opp.market} | ${eventName} | ` +
+      `Edge:${opp.edge.toFixed(1)}pp | PM:${opp.polyProb.toFixed(1)}% vs ${opp.xbetProb.toFixed(1)}% | $${amount}`
     );
 
-    await this.bot.trade({
-      tokenId,
-      side: 'BUY',
-      outcome: isBuyYes ? 'YES' : 'NO',
-      amount,
-      price: roundedPrice,
-      orderType: 'FOK',
-      tickSize: '0.01',
-      negRisk: false,
-      eventName: `${opp.homeTeam} vs ${opp.awayTeam}`,
-      signalId: opp.id,
-      marketKey: opp.market,
-    });
+    // Use buyAtMarket which reads orderbook for best ask price (required for FOK to fill)
+    const result = await this.bot.buyAtMarket(tokenId, outcome, amount, { eventName });
+
+    if (!result.success) {
+      log.warn(`Trade not filled: ${result.error} | ${eventName}`);
+      // Release event slot on failure so it can retry later
+      this.tradedEvents.delete(opp.eventId);
+    }
   }
 
   /** Quick buy by searching events */

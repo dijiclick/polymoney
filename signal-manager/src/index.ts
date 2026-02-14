@@ -89,22 +89,29 @@ async function main() {
     privateKey: polyKey,
     funderAddress: process.env.POLY_FUNDER_ADDRESS || '',
     signatureType: parseInt(process.env.POLY_SIGNATURE_TYPE || '0') as 0 | 1 | 2,
-    armed: false, // Always start disarmed
+    armed: process.env.POLY_ARMED === 'true',
     minTradeSize: 1.0,
-    maxTradeSize: 1.0,
+    maxTradeSize: parseFloat(process.env.POLY_MAX_TRADE || '5'),
   });
 
   const tradingController = new TradingController(tradingBot, engine);
+
+  // Enable auto-trade from env
+  if (process.env.POLY_AUTOTRADE === 'true') {
+    await tradingController.handleCommand('autotrade');
+  }
 
   // Wire auto-trade pipeline: new opportunities → controller.handleSignal
   setOpportunityCallback((opp) => tradingController.handleSignal(opp));
 
   // Initialize GoalTrader (auto buy on goal + smart exit)
   const goalTrader = new GoalTrader(tradingBot, {
-    enabled: false,  // Must be explicitly enabled via command
-    sizeLarge: 1.0,
+    enabled: process.env.POLY_GOALTRADER === 'true',
+    sizeLarge: 1.0,               // $1 flat for all goal types
     sizeMedium: 1.0,
     sizeSmall: 1.0,
+    preferFastestSource: false,   // Buy on first source — max speed
+    slowSourceDelayMs: 0,         // No delay
   });
   engine.registerSignal(goalTrader.signalHandler);
   goalTrader.start();
@@ -115,8 +122,11 @@ async function main() {
 
   if (polyKey) {
     const ok = await tradingBot.initialize();
-    if (ok) log.info('Trading bot initialized (DISARMED)');
-    else log.warn('Trading bot failed to initialize');
+    if (ok) {
+      log.warn(`🤖 Trading: Armed=${tradingBot.isArmed ? '🔴 LIVE' : '🟢 DRY'} | AutoTrade=${process.env.POLY_AUTOTRADE === 'true' ? 'ON' : 'OFF'} | GoalTrader=${goalTrader.isEnabled ? 'ON' : 'OFF'} | MaxTrade=$${process.env.POLY_MAX_TRADE || '5'}`);
+    } else {
+      log.warn('Trading bot failed to initialize');
+    }
 
     // Start auto-redeemer (checks every 1 min) — sells resolved positions via CLOB (gasless)
     redeemer = new AutoRedeemer(polyKey, process.env.POLY_FUNDER_ADDRESS || '', 60_000);
