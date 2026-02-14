@@ -162,7 +162,7 @@ export const reactionTimerSignal: SignalFunction = (event, changedKeys, source) 
       finalized: false,
     });
 
-    log.info(
+    log.warn(
       `⏱ SCORE [${source}] ${matchName} | ${event.sport || '?'} | ${prevScore.home}-${prevScore.away} → ${newScore.home}-${newScore.away} | Tracking ${trajectories.size} streams across ${Object.keys(snapshot).length} markets`
     );
 
@@ -223,7 +223,7 @@ export const reactionTimerSignal: SignalFunction = (event, changedKeys, source) 
         if (traj.points.length === 1) {
           const srcLabel = source === 'polymarket' ? 'PM' : '1xBet';
           const initProb = toProb(traj.initial);
-          log.debug(
+          log.warn(
             `⏱ ${srcLabel} FIRST [${(delta / 1000).toFixed(1)}s] ${pending.match} | ${mk} | ${initProb.toFixed(1)}% → ${newProb.toFixed(1)}% (Δ${(newProb - initProb).toFixed(1)}pp)`
           );
         }
@@ -298,12 +298,12 @@ function finalizePendingGoal(goalKey: string, pending: PendingGoal): void {
     return `${mkt}: ${t.initialProb.toFixed(1)}%→${t.stableProb.toFixed(1)}% (${t.totalProbChange > 0 ? '+' : ''}${t.totalProbChange.toFixed(1)}pp, peak:${t.peakProb.toFixed(0)}% low:${t.troughProb.toFixed(0)}%) @${(t.firstReactionMs / 1000).toFixed(1)}s [${t.priceUpdates}]`;
   };
 
-  log.info(`⏱ STABILIZED ${entry.match} | ${entry.scoreBefore} → ${entry.scoreAfter} | by ${entry.detectedBy} | ${trajEntries.length} trajectories`);
+  log.warn(`⏱ STABILIZED ${entry.match} | ${entry.scoreBefore} → ${entry.scoreAfter} | by ${entry.detectedBy} | ${trajEntries.length} trajectories`);
   if (pmTrajs.length > 0) {
-    log.info(`  PM: ${pmTrajs.map(fmtTraj).join(' | ')}`);
+    log.warn(`  PM: ${pmTrajs.map(fmtTraj).join(' | ')}`);
   }
   if (xbTrajs.length > 0) {
-    log.info(`  1xBet: ${xbTrajs.map(fmtTraj).join(' | ')}`);
+    log.warn(`  1xBet: ${xbTrajs.map(fmtTraj).join(' | ')}`);
   }
 }
 

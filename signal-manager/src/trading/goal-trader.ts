@@ -258,7 +258,7 @@ export class GoalTrader {
     // _prevScore is only set after the first score change is observed.
     // If undefined, this is the first score we've seen (bootstrap) — not a real goal.
     if (!event._prevScore) {
-      log.info(`First score seen (bootstrap) | ${match} | ${score.home}-${score.away} | sport=${sport} | skipping`);
+      log.warn(`First score seen (bootstrap) | ${match} | ${score.home}-${score.away} | sport=${sport} | skipping`);
       this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: '?', source, sport, goalType: null, action: 'SKIP', reason: 'Bootstrap (first score)' });
       return;
     }
@@ -380,7 +380,7 @@ export class GoalTrader {
     // Don't buy if we already have a position on this event
     for (const pos of this.positions.values()) {
       if (pos.eventId === event.id) {
-        log.info(`🏆 Already have position on ${match} — skipping`);
+        log.warn(`🏆 Already have position on ${match} — skipping`);
         this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType, action: 'SKIP', reason: 'Already have position' });
         return;
       }
@@ -436,7 +436,11 @@ export class GoalTrader {
     const result = await this.bot.buyAtMarket(tokenId, side, amount, { eventName: match });
 
     if (!result.success) {
-      log.error(`⚽ BUY FAILED: ${result.error} | ${match} ${marketKey}`);
+      log.error(
+        `⚽ GOAL SUMMARY | ${match} | ${event._prevScore?.home ?? '?'}-${event._prevScore?.away ?? '?'}→${score.home}-${score.away} | ` +
+        `Type: ${goalType} | Source: ${source} | Buy: ❌ ${result.error} | ` +
+        `Price: ${price.toFixed(3)} | Side: ${side} ${marketKey}`
+      );
       this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${(event._prevScore?.home ?? '?')}-${(event._prevScore?.away ?? '?')}`, source, sport, goalType, action: 'SKIP', reason: `Buy failed: ${result.error}` });
       return;
     }
@@ -481,7 +485,11 @@ export class GoalTrader {
       entry: { time: now, price, amount, shares },
     });
 
-    log.warn(`✅ BOUGHT ${side} ${marketKey} | ${match} | ${shares.toFixed(1)} shares @ ${price.toFixed(3)} | $${amount.toFixed(2)} | ${result.executionMs}ms`);
+    log.warn(
+      `⚽ GOAL SUMMARY | ${match} | ${event._prevScore?.home ?? '?'}-${event._prevScore?.away ?? '?'}→${score.home}-${score.away} | ` +
+      `Type: ${goalType} | Source: ${source} | Buy: ✅ ${result.executionMs}ms | ` +
+      `Price: ${price.toFixed(3)} | Side: ${side} ${marketKey} | $${amount.toFixed(2)} | ${shares.toFixed(1)} shares`
+    );
 
     // Log activity
     const isDry = result.orderId?.startsWith('DRY') || !this.bot.isArmed;

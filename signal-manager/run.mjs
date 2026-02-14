@@ -2,23 +2,22 @@
 /**
  * Polymarket — Unified Launcher
  *
- * Starts the Signal Manager (goal trader) and/or the Next.js Dashboard.
- * Auto-enables goal trading ($1 FOK, 1-min exit, soccer only).
- * All output is logged to data/sessions/session-YYYY-MM-DD_HH-MM-SS.log
+ * Interactive menu to start the Signal Manager in different modes:
+ *   1. Dashboard Only  — monitor goals + timing, no trading
+ *   2. Auto Buy/Sell   — goal trader active + dashboard
  *
- * Usage:
- *   node run.mjs              # Start both Signal Manager + Dashboard
- *   node run.mjs --dashboard  # Start Dashboard only (port 3000)
+ * Both modes log goal timing from all sources + buy/sell details to:
+ *   data/sessions/session-YYYY-MM-DD_HH-MM-SS.log
  */
 
 import { spawn } from 'node:child_process';
 import { readFileSync, createWriteStream, mkdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_DIR = resolve(__dirname, '..', 'dashboard');
-const dashboardOnly = process.argv.includes('--dashboard');
 
 // Load .env
 try {
@@ -77,17 +76,36 @@ function banner() {
   const lines = [
     '',
     '  ╔══════════════════════════════════════════════════╗',
-    '  ║     POLYMARKET — UNIFIED LAUNCHER                ║',
-    '  ║     Goal Trader + Dashboard                       ║',
+    '  ║     POLYMARKET GOAL TRADER                       ║',
     '  ╚══════════════════════════════════════════════════╝',
     '',
-    `  Wallet:  ${process.env.POLY_FUNDER_ADDRESS || 'NOT SET'}`,
-    `  Trading: ${process.env.POLY_PRIVATE_KEY ? 'key loaded' : 'MISSING'}`,
-    `  Supabase: ${process.env.NEXT_PUBLIC_SUPABASE_URL ? 'configured' : 'not set'}`,
-    `  Log:     ${LOG_FILE}`,
+    `  Wallet:   ${process.env.POLY_FUNDER_ADDRESS || 'NOT SET'}`,
+    `  Trading:  ${process.env.POLY_PRIVATE_KEY ? 'key loaded' : 'MISSING'}`,
+    `  Log:      ${LOG_FILE}`,
     '',
   ];
   for (const l of lines) log(l);
+}
+
+function showMenu() {
+  const lines = [
+    '  ┌────────────────────────────────────────────────┐',
+    '  │  1. Dashboard Only   (monitor goals, no trades) │',
+    '  │  2. Auto Buy/Sell    (goal trader + dashboard)  │',
+    '  └────────────────────────────────────────────────┘',
+    '',
+  ];
+  for (const l of lines) console.log(l);
+}
+
+function askChoice() {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    rl.question('  Select (1-2): ', (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
 }
 
 async function sendCommand(cmd) {
@@ -194,68 +212,16 @@ function startDashboard() {
   return child;
 }
 
-async function main() {
-  banner();
+// --- Start Signal Manager with env overrides ---
+function startSignalManager(envOverrides = {}) {
+  const env = { ...process.env, ...envOverrides };
 
-  // --- Dashboard-only mode ---
-  if (dashboardOnly) {
-    log('  Mode: DASHBOARD ONLY');
-    log('');
-
-    const dashChild = startDashboard();
-    if (!dashChild) {
-      log('  ERROR: Dashboard could not start');
-      process.exit(1);
-    }
-
-    let stopping = false;
-    const gracefulStop = () => {
-      if (stopping) return;
-      stopping = true;
-      log('\n  Shutting down dashboard...');
-      dashChild.kill('SIGINT');
-      setTimeout(() => dashChild.kill('SIGKILL'), 5000);
-    };
-    process.on('SIGINT', gracefulStop);
-    process.on('SIGTERM', gracefulStop);
-    dashChild.on('exit', (code) => {
-      log(`  Dashboard exited (code ${code})`);
-      logStream.end();
-      process.exit(code || 0);
-    });
-
-    const dashReady = await waitForServer(DASH_PORT, '/', 30000);
-    if (dashReady) {
-      log(`  Dashboard ready at http://localhost:${DASH_PORT}`);
-    } else {
-      log('  Dashboard still starting...');
-    }
-    log('');
-    log('  Press Ctrl+C to stop');
-    return;
-  }
-
-  // --- Full mode: Signal Manager + Dashboard ---
-  if (!process.env.POLY_PRIVATE_KEY || !process.env.POLY_FUNDER_ADDRESS) {
-    log('  ERROR: Missing POLY_PRIVATE_KEY or POLY_FUNDER_ADDRESS in .env');
-    log('  Run: node scripts/test-connection.mjs to set up');
-    process.exit(1);
-  }
-
-  log('  Mode: GOAL TRADING — $1 FOK, 1-min exit, soccer only');
-  log('');
-
-  // 1. Start dashboard (Next.js)
-  const dashChild = startDashboard();
-
-  // 2. Start signal manager
-  log('  Starting signal manager...');
   const smChild = spawn('node', [
     '--max-old-space-size=4096',
     '--max-semi-space-size=64',
     resolve(__dirname, 'dist', 'src', 'index.js'),
   ], {
-    env: process.env,
+    env,
     stdio: ['inherit', 'pipe', 'pipe'],
     cwd: __dirname,
   });
@@ -268,6 +234,53 @@ async function main() {
     process.exit(1);
   });
 
+  return smChild;
+}
+
+async function main() {
+  banner();
+
+  // --- Interactive menu (or --dashboard flag for backward compat) ---
+  let mode;
+  if (process.argv.includes('--dashboard')) {
+    mode = '1';
+  } else if (process.argv.includes('--trade')) {
+    mode = '2';
+  } else {
+    showMenu();
+    mode = await askChoice();
+  }
+
+  if (mode !== '1' && mode !== '2') {
+    log('  Invalid choice. Exiting.');
+    process.exit(0);
+  }
+
+  const isDashboardOnly = mode === '1';
+  const isTrading = mode === '2';
+
+  log('');
+  log(`  Mode: ${isDashboardOnly ? 'DASHBOARD ONLY (monitoring goals, no trades)' : 'AUTO BUY/SELL (goal trader active)'}`);
+  log('');
+
+  // Validate credentials for trading mode
+  if (isTrading && (!process.env.POLY_PRIVATE_KEY || !process.env.POLY_FUNDER_ADDRESS)) {
+    log('  ERROR: Missing POLY_PRIVATE_KEY or POLY_FUNDER_ADDRESS in .env');
+    log('  Run: node scripts/test-connection.mjs to set up');
+    process.exit(1);
+  }
+
+  // Start dashboard
+  const dashChild = startDashboard();
+
+  // Start signal manager with appropriate env overrides
+  const smEnv = isDashboardOnly
+    ? { POLY_GOALTRADER: 'false', POLY_ARMED: 'false' }
+    : { POLY_GOALTRADER: 'true', POLY_ARMED: 'true' };
+
+  log('  Starting signal manager...');
+  const smChild = startSignalManager(smEnv);
+
   smChild.on('exit', (code) => {
     log(`\n  Signal manager exited (code ${code})`);
     if (dashChild) dashChild.kill('SIGINT');
@@ -276,7 +289,7 @@ async function main() {
     process.exit(code || 0);
   });
 
-  // Graceful shutdown — kill both processes
+  // Graceful shutdown
   let stopping = false;
   const gracefulStop = () => {
     if (stopping) return;
@@ -319,26 +332,36 @@ async function main() {
   const stateTimer = startStateLogger();
   smChild.on('exit', () => clearInterval(stateTimer));
 
-  // Arm bot and enable GoalTrader
-  log('');
-  log('  Arming bot...');
-  const armResult = await sendCommand('arm');
-  log(`  > ${armResult}`);
+  // For trading mode: arm bot and enable GoalTrader
+  if (isTrading) {
+    log('');
+    log('  Arming bot...');
+    const armResult = await sendCommand('arm');
+    log(`  > ${armResult}`);
 
-  log('  Enabling GoalTrader...');
-  const gtResult = await sendCommand('goaltrader on');
-  log(`  > ${gtResult}`);
+    log('  Enabling GoalTrader...');
+    const gtResult = await sendCommand('goaltrader on');
+    log(`  > ${gtResult}`);
+  }
 
   log('');
   log('  ============================================');
-  log('  GOAL TRADING ACTIVE — SOCCER ONLY');
-  log('  - Buy $1 FOK on first goal detection');
-  log('  - Skip extending leads & odds >90%');
-  log('  - Auto-sell after 1 minute');
+  if (isTrading) {
+    log('  GOAL TRADING ACTIVE — SOCCER ONLY');
+    log('  - Buy $1 FOK on first goal detection');
+    log('  - Skip extending leads & odds >90%');
+    log('  - Auto-sell after 1 minute');
+  } else {
+    log('  MONITORING MODE — NO TRADING');
+    log('  - All goal detections logged with timing');
+    log('  - Source reaction times tracked');
+    log('  - No buy/sell orders placed');
+  }
   log('  ============================================');
   log('');
   log(`  Signal Manager: http://localhost:${SM_PORT}`);
   if (dashChild) log(`  Dashboard:      http://localhost:${DASH_PORT}`);
+  log(`  Session log:    ${LOG_FILE}`);
   log('');
   log('  Press Ctrl+C to stop');
 }
