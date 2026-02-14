@@ -13,7 +13,8 @@ echo    1. Main + Dashboard    (Python discovery + Dashboard)
 echo    2. New + Dashboard     (Node.js trade sync + Dashboard)
 echo    3. Dashboard Only
 echo    4. Run All             (Python + Node.js + Dashboard)
-echo    5. Signal Manager      (Sports data + Goal trader + Dashboard :3847)
+echo    5. Signal Manager      (Goal trader + Dashboard :3847)
+echo    7. Dashboard Only :3000 (Signal Manager dashboard)
 echo.
 echo    6. Exit
 echo.
@@ -27,6 +28,7 @@ if "%choice%"=="3" goto start_dashboard
 if "%choice%"=="4" goto start_all
 if "%choice%"=="5" goto start_signal_manager
 if "%choice%"=="6" exit /b 0
+if "%choice%"=="7" goto start_sm_dashboard_only
 goto menu
 
 :check_python
@@ -240,9 +242,8 @@ echo ============================================================
 echo    STARTING: Signal Manager
 echo ============================================================
 echo.
-echo    Sports data sources + Goal Trader + Dashboard
-echo    All sources filtered to Polymarket-only events
-echo    Fastest source auto-detection for FAK trading
+echo    Goal Trader: $1 FOK on soccer goals, 1-min exit
+echo    Sources: PM, 1xBet, Kambi, SofaScore, TheSports, Pinnacle
 echo.
 
 if not exist "signal-manager\node_modules" (
@@ -268,9 +269,44 @@ echo    SIGNAL MANAGER RUNNING
 echo ============================================================
 echo.
 echo    Dashboard:    http://localhost:3847
+echo    Goal Trader:  $1 FOK on soccer goals, sell after 1 min
 echo    Sources:      PM, 1xBet, Kambi, SofaScore, TheSports, Pinnacle
-echo    Goal Trader:  Fastest-source auto-detection active
-echo    FAK Mode:     Ready (arm via dashboard to enable live trading)
+echo.
+echo    Close the window with Ctrl+C to stop
+echo.
+echo ============================================================
+echo.
+pause
+goto menu
+
+:: ============================================================
+::  Option 7: Signal Manager Dashboard Only
+:: ============================================================
+:start_sm_dashboard_only
+
+cls
+echo.
+echo ============================================================
+echo    STARTING: Dashboard Only (Next.js on port 3000)
+echo ============================================================
+echo.
+
+if not exist "signal-manager\node_modules" (
+    echo [INFO] Installing signal manager dependencies...
+    cd signal-manager
+    call npm install
+    cd ..
+)
+
+echo [1/1] Starting Dashboard...
+start "SM Dashboard" cmd /k "cd /d %~dp0signal-manager && node run.mjs --dashboard"
+
+echo.
+echo ============================================================
+echo    DASHBOARD RUNNING
+echo ============================================================
+echo.
+echo    Dashboard:    http://localhost:3000
 echo.
 echo    Close the window with Ctrl+C to stop
 echo.

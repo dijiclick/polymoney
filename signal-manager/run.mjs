@@ -2,11 +2,13 @@
 /**
  * Polymarket — Unified Launcher
  *
- * Starts both the Signal Manager (trading engine) and the Next.js Dashboard.
- * Auto-enables trading (buy from fastest signal, sell after 30s).
+ * Starts the Signal Manager (goal trader) and/or the Next.js Dashboard.
+ * Auto-enables goal trading ($1 FOK, 1-min exit, soccer only).
  * All output is logged to data/sessions/session-YYYY-MM-DD_HH-MM-SS.log
  *
- * Usage: node run.mjs
+ * Usage:
+ *   node run.mjs              # Start both Signal Manager + Dashboard
+ *   node run.mjs --dashboard  # Start Dashboard only (port 3000)
  */
 
 import { spawn } from 'node:child_process';
@@ -16,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_DIR = resolve(__dirname, '..', 'dashboard');
+const dashboardOnly = process.argv.includes('--dashboard');
 
 // Load .env
 try {
@@ -75,7 +78,7 @@ function banner() {
     '',
     '  ╔══════════════════════════════════════════════════╗',
     '  ║     POLYMARKET — UNIFIED LAUNCHER                ║',
-    '  ║     Signal Manager + Dashboard                    ║',
+    '  ║     Goal Trader + Dashboard                       ║',
     '  ╚══════════════════════════════════════════════════╝',
     '',
     `  Wallet:  ${process.env.POLY_FUNDER_ADDRESS || 'NOT SET'}`,
@@ -194,13 +197,52 @@ function startDashboard() {
 async function main() {
   banner();
 
+  // --- Dashboard-only mode ---
+  if (dashboardOnly) {
+    log('  Mode: DASHBOARD ONLY');
+    log('');
+
+    const dashChild = startDashboard();
+    if (!dashChild) {
+      log('  ERROR: Dashboard could not start');
+      process.exit(1);
+    }
+
+    let stopping = false;
+    const gracefulStop = () => {
+      if (stopping) return;
+      stopping = true;
+      log('\n  Shutting down dashboard...');
+      dashChild.kill('SIGINT');
+      setTimeout(() => dashChild.kill('SIGKILL'), 5000);
+    };
+    process.on('SIGINT', gracefulStop);
+    process.on('SIGTERM', gracefulStop);
+    dashChild.on('exit', (code) => {
+      log(`  Dashboard exited (code ${code})`);
+      logStream.end();
+      process.exit(code || 0);
+    });
+
+    const dashReady = await waitForServer(DASH_PORT, '/', 30000);
+    if (dashReady) {
+      log(`  Dashboard ready at http://localhost:${DASH_PORT}`);
+    } else {
+      log('  Dashboard still starting...');
+    }
+    log('');
+    log('  Press Ctrl+C to stop');
+    return;
+  }
+
+  // --- Full mode: Signal Manager + Dashboard ---
   if (!process.env.POLY_PRIVATE_KEY || !process.env.POLY_FUNDER_ADDRESS) {
     log('  ERROR: Missing POLY_PRIVATE_KEY or POLY_FUNDER_ADDRESS in .env');
     log('  Run: node scripts/test-connection.mjs to set up');
     process.exit(1);
   }
 
-  log('  Mode: AUTO TRADING — buy fastest signal, sell after 30s');
+  log('  Mode: GOAL TRADING — $1 FOK, 1-min exit, soccer only');
   log('');
 
   // 1. Start dashboard (Next.js)
@@ -289,12 +331,10 @@ async function main() {
 
   log('');
   log('  ============================================');
-  log('  AUTO TRADING ACTIVE — ALL SPORTS');
-  log('  - Buy from fastest signal source');
-  log('  - Soccer/Hockey: every goal triggers trade');
-  log('  - Basketball/NFL: lead changes only');
-  log('  - Auto-buy ML outcomes on Polymarket');
-  log('  - Exit: TP / SL / stabilization / 30s max');
+  log('  GOAL TRADING ACTIVE — SOCCER ONLY');
+  log('  - Buy $1 FOK on first goal detection');
+  log('  - Skip extending leads & odds >90%');
+  log('  - Auto-sell after 1 minute');
   log('  ============================================');
   log('');
   log(`  Signal Manager: http://localhost:${SM_PORT}`);
