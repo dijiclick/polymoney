@@ -320,6 +320,11 @@ export class AutoRedeemer {
     return results;
   }
 
+  /** Trigger an immediate redeem check (called after sell cycle) */
+  async checkNow(): Promise<void> {
+    return this.checkAndRedeem();
+  }
+
   getState() {
     return {
       running: !!this.timer,

@@ -385,17 +385,22 @@ export class TradingBot extends EventEmitter {
       return { success: false, error: 'Bot not initialized', request: { tokenId, side: 'SELL', outcome, amount: shares * price, price, orderType: 'FOK', tickSize: '0.01', negRisk: false, eventName: opts.eventName }, timestamp: start, executionMs: 0 };
     }
 
-    // Get tick size and negRisk for this market
+    // Get tick size and negRisk (cached + parallel for speed)
     let tickSize: string = '0.01';
     let negRisk = false;
-    try {
-      const ts = await this.client.getTickSize(tokenId);
-      if (ts) tickSize = String(ts);
-    } catch { /* default 0.01 */ }
-    try {
-      const nr = await this.client.getNegRisk(tokenId);
+    const cached = this.marketInfoCache.get(tokenId);
+    if (cached) {
+      tickSize = cached.tickSize;
+      negRisk = cached.negRisk;
+    } else {
+      const [ts, nr] = await Promise.all([
+        this.client!.getTickSize(tokenId).catch(() => '0.01'),
+        this.client!.getNegRisk(tokenId).catch(() => false),
+      ]);
+      tickSize = String(ts) || '0.01';
       negRisk = !!nr;
-    } catch { /* default false */ }
+      this.marketInfoCache.set(tokenId, { tickSize, negRisk });
+    }
 
     // Read orderbook to find best bid
     let bestBid = price; // fallback to provided price

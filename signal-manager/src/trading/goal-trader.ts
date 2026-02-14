@@ -170,10 +170,17 @@ export class GoalTrader {
   private pendingGoals: Map<string, PendingGoal> = new Map();
   // Activity log for dashboard — every goal event, traded or not
   private goalLog: GoalActivity[] = [];
+  // Auto-redeemer reference for triggering immediate redeem after sell
+  private redeemer: { checkNow(): Promise<void> } | null = null;
 
   constructor(bot: TradingBot, config: Partial<GoalTraderConfig> = {}) {
     this.bot = bot;
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /** Connect auto-redeemer for immediate redemption after sells */
+  setRedeemer(redeemer: { checkNow(): Promise<void> }): void {
+    this.redeemer = redeemer;
   }
 
   /** Start the exit monitor loop */
@@ -568,7 +575,6 @@ export class GoalTrader {
 
   private async executeExit(pos: ManagedPosition, reason: string): Promise<void> {
     if (pos.settled) return;
-    pos.settled = true;
 
     const now = Date.now();
     const exitPrice = pos.lastPrice;
@@ -583,20 +589,53 @@ export class GoalTrader {
       `Updates: ${pos.priceUpdateCount}`
     );
 
-    // Execute sell
-    const result = await this.bot.sellPosition(pos.tokenId, pos.shares, exitPrice, { eventName: pos.match });
-    if (!result.success) {
-      log.error(`❌ SELL FAILED: ${result.error} | Retrying at wider price...`);
-      // Retry at a worse price (2pp worse)
-      const worsePrice = pos.side === 'YES'
-        ? Math.max(0.01, exitPrice - 0.02)
-        : Math.min(0.99, exitPrice + 0.02);
-      await this.bot.sellPosition(pos.tokenId, pos.shares, worsePrice, { eventName: pos.match });
+    // Fetch actual position size from Polymarket API (in case tracked shares differ)
+    let sellShares = pos.shares;
+    try {
+      const actualSize = await this.fetchActualPosition(pos.tokenId);
+      if (actualSize > 0) {
+        if (Math.abs(actualSize - pos.shares) > 0.01) {
+          log.warn(`📊 Actual shares: ${actualSize.toFixed(2)} (tracked: ${pos.shares.toFixed(2)}) — using actual`);
+        }
+        sellShares = actualSize;
+      }
+    } catch { /* use tracked shares */ }
+
+    // Aggressive sell retry: try multiple price levels
+    let sold = false;
+    const sellPrices = [
+      exitPrice,                                                   // 1st: at current price
+      pos.side === 'YES' ? exitPrice - 0.02 : exitPrice + 0.02,   // 2nd: 2pp worse
+      pos.side === 'YES' ? exitPrice - 0.05 : exitPrice + 0.05,   // 3rd: 5pp worse
+      pos.side === 'YES' ? 0.01 : 0.99,                           // 4th: dump at any price
+    ].map(p => Math.max(0.01, Math.min(0.99, p)));
+
+    for (let i = 0; i < sellPrices.length; i++) {
+      const result = await this.bot.sellPosition(pos.tokenId, sellShares, sellPrices[i], { eventName: pos.match });
+      if (result.success) {
+        log.warn(`✅ SOLD ${pos.match} | ${sellShares.toFixed(2)} shares @ best bid | ${result.executionMs}ms`);
+        sold = true;
+        break;
+      }
+      if (i < sellPrices.length - 1) {
+        log.warn(`❌ SELL FAILED (attempt ${i + 1}/${sellPrices.length}): ${result.error} | Retrying wider...`);
+      } else {
+        log.error(`❌ SELL FAILED ALL ${sellPrices.length} ATTEMPTS: ${result.error} | ${pos.match} — will retry next cycle`);
+      }
     }
 
+    if (!sold) {
+      // DON'T mark as settled — keep in positions so checkExits retries next cycle
+      // Extend the hard exit time so it retries in 30s
+      pos.hardExitTime = Date.now() + 30_000;
+      return;
+    }
+
+    // Only mark settled and remove from tracking on successful sell
+    pos.settled = true;
     pos.exitReason = reason;
     pos.exitPrice = exitPrice;
-    pos.exitTime = now;
+    pos.exitTime = Date.now();
     pos.pnl = pnl;
 
     // Log exit
@@ -609,15 +648,38 @@ export class GoalTrader {
       score: `${pos.score.home}-${pos.score.away}`,
       side: pos.side,
       entry: { time: pos.entryTime, price: pos.entryPrice, amount: pos.amount, shares: pos.shares },
-      exit: { time: now, price: exitPrice, reason },
+      exit: { time: Date.now(), price: exitPrice, reason },
       pnl,
-      durationMs: now - pos.entryTime,
+      durationMs: Date.now() - pos.entryTime,
     });
 
     // Move to history
     this.positions.delete(pos.tokenId);
     this.history.unshift(pos);
     if (this.history.length > 100) this.history.length = 100;
+
+    // Trigger redeemer if available (clears resolved positions immediately)
+    if (this.redeemer) {
+      setTimeout(() => this.redeemer!.checkNow().catch(() => {}), 5000);
+    }
+  }
+
+  /** Fetch actual position size from Polymarket data API */
+  private async fetchActualPosition(tokenId: string): Promise<number> {
+    try {
+      const funder = process.env.POLY_FUNDER_ADDRESS;
+      if (!funder) return 0;
+      const resp = await fetch(
+        `https://data-api.polymarket.com/positions?user=${funder}&asset=${tokenId}&sizeThreshold=0`,
+        { signal: AbortSignal.timeout(5000) }
+      );
+      if (!resp.ok) return 0;
+      const positions: any[] = await resp.json();
+      const match = positions.find((p: any) => p.asset === tokenId);
+      return match ? Number(match.size) || 0 : 0;
+    } catch {
+      return 0;
+    }
   }
 
   // --- Goal Classification ---

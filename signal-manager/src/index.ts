@@ -132,6 +132,8 @@ async function main() {
     redeemer = new AutoRedeemer(polyKey, process.env.POLY_FUNDER_ADDRESS || '', 60_000);
     redeemer.setTradingBot(tradingBot);
     redeemer.start();
+    // Wire redeemer to goal trader for immediate redeem after sells
+    goalTrader.setRedeemer(redeemer);
   } else {
     log.info('Trading bot: no POLY_PRIVATE_KEY set — trading disabled');
   }

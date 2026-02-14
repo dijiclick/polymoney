@@ -15,6 +15,7 @@ import { readFileSync, createWriteStream, mkdirSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
+import { exec } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_DIR = resolve(__dirname, '..', 'dashboard');
@@ -106,6 +107,13 @@ function askChoice() {
       resolve(answer.trim());
     });
   });
+}
+
+function openBrowser(url) {
+  const cmd = process.platform === 'win32' ? `start ${url}`
+    : process.platform === 'darwin' ? `open ${url}`
+    : `xdg-open ${url}`;
+  exec(cmd, () => {});
 }
 
 async function sendCommand(cmd) {
@@ -364,6 +372,9 @@ async function main() {
   log(`  Session log:    ${LOG_FILE}`);
   log('');
   log('  Press Ctrl+C to stop');
+
+  // Auto-open dashboard in browser
+  openBrowser(`http://localhost:${SM_PORT}`);
 }
 
 main().catch((err) => {
