@@ -269,9 +269,14 @@ export class TradingBot extends EventEmitter {
 
     try {
       const side = req.side === 'BUY' ? Side.BUY : Side.SELL;
-      const size = req.side === 'BUY'
+      let size = req.side === 'BUY'
         ? Math.floor(req.amount / req.price)  // shares from USDC amount
         : req.amount / req.price;              // for sells, amount already computed
+
+      // Enforce $1 minimum for marketable orders
+      if (size * req.price < 1 && req.price > 0) {
+        size = Math.ceil(1 / req.price);
+      }
 
       // Use createAndPostOrder for all order types (explicit price control)
       const orderType = req.orderType === 'GTD' ? OrderType.GTD
@@ -390,10 +395,17 @@ export class TradingBot extends EventEmitter {
       return { success: false, error: `invalid_price_${buyPrice}`, request: { tokenId, side: 'BUY', outcome, amount, price: buyPrice, orderType: 'FOK', tickSize: tickSize as any, negRisk, eventName: opts.eventName }, timestamp: start, executionMs: Date.now() - start };
     }
 
-    // Polymarket requires $1 minimum order value
+    // Polymarket minimum: $1 for marketable (FAK/FOK), 5 shares for GTC
     let shares = Math.floor(amount / buyPrice);
-    if (shares * buyPrice < 1) {
-      shares = Math.ceil(1 / buyPrice);
+    const isMarketable = (opts.orderType || 'FOK') !== 'GTC';
+    if (isMarketable) {
+      // FAK/FOK: minimum $1 order value
+      if (shares * buyPrice < 1) {
+        shares = Math.ceil(1 / buyPrice);
+      }
+    } else {
+      // GTC: minimum 5 shares
+      if (shares < 5) shares = 5;
     }
     if (shares < 1) {
       return { success: false, error: 'order_too_small', request: { tokenId, side: 'BUY', outcome, amount, price: buyPrice, orderType: 'FOK', tickSize: tickSize as any, negRisk, eventName: opts.eventName }, timestamp: start, executionMs: Date.now() - start };
@@ -471,9 +483,15 @@ export class TradingBot extends EventEmitter {
       return { success: false, error: `best_bid_too_low_${(bestBid * 100).toFixed(1)}c`, request: { tokenId, side: 'SELL', outcome, amount: shares * bestBid, price: bestBid, orderType: 'FOK', tickSize: tickSize as any, negRisk, eventName: opts.eventName }, timestamp: start, executionMs: Date.now() - start };
     }
 
-    const sellShares = Math.floor(shares * 100) / 100;
+    let sellShares = Math.floor(shares * 100) / 100;
     if (sellShares < 0.01) {
       return { success: false, error: 'shares_too_small', request: { tokenId, side: 'SELL', outcome, amount: sellShares * bestBid, price: bestBid, orderType: 'FOK', tickSize: tickSize as any, negRisk, eventName: opts.eventName }, timestamp: start, executionMs: Date.now() - start };
+    }
+
+    // Polymarket minimum: $1 for marketable (FAK/FOK) sells
+    if (sellShares * bestBid < 1 && bestBid > 0) {
+      // Bump shares to meet $1 minimum (will sell what we have — CLOB handles partial)
+      sellShares = Math.max(sellShares, Math.ceil(1 / bestBid));
     }
 
     return this.trade({
