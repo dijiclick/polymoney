@@ -21,6 +21,7 @@
     "mqtt": "^5.15.0",
     "msgpack-lite": "^0.1.26",
     "playwright": "^1.58.2",
+    "undici": "^7.22.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
