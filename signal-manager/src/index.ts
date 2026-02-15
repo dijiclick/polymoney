@@ -9,6 +9,7 @@ import { KambiAdapter } from './adapters/kambi/index.js';
 import { TheSportsAdapter } from './adapters/thesports/index.js';
 import { SofaScoreAdapter } from './adapters/sofascore/index.js';
 import { PinnacleAdapter } from './adapters/pinnacle/index.js';
+import { Bet365Adapter } from './adapters/bet365/index.js';
 import { PmSportsWsAdapter } from './adapters/pm-sports-ws/index.js';
 import { Dashboard } from './dashboard/server.js';
 import { DEFAULT_CONFIG } from '../config/default.js';
@@ -81,6 +82,9 @@ async function main() {
   }
   if (config.adapters.pinnacle.enabled) {
     engine.registerAdapter(new PinnacleAdapter(config.adapters.pinnacle));
+  }
+  if (config.adapters.bet365.enabled) {
+    engine.registerAdapter(new Bet365Adapter(config.adapters.bet365));
   }
   // PM Sports WS — always enabled (free, no config needed)
   engine.registerAdapter(new PmSportsWsAdapter());

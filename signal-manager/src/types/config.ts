@@ -50,6 +50,11 @@ export interface PinnacleAdapterConfig {
   sportIds: number[];
 }
 
+export interface Bet365AdapterConfig {
+  enabled: boolean;
+  cdpPort?: number;
+}
+
 export interface DashboardConfig {
   enabled: boolean;
   port: number;
@@ -71,6 +76,7 @@ export interface Config {
     thesports: TheSportsAdapterConfig;
     sofascore: SofaScoreAdapterConfig;
     pinnacle: PinnacleAdapterConfig;
+    bet365: Bet365AdapterConfig;
   };
   dashboard: DashboardConfig;
   matcher: MatcherConfig;

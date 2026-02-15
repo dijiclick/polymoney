@@ -68,6 +68,10 @@ export const DEFAULT_CONFIG: Config = {
       sportIds: [1, 2, 3, 4, 102, 103, 104],
       discoveryIntervalMs: 60_000,
     },
+    bet365: {
+      enabled: false,
+      cdpPort: 9222,
+    },
     sofascore: {
       enabled: true,
       wsUrl: 'wss://ws.sofascore.com:9222/',
