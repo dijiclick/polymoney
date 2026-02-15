@@ -6,8 +6,8 @@
  *   1. Dashboard Only  — monitor goals + timing, no trading
  *   2. Auto Buy/Sell   — goal trader active + dashboard
  *
- * Both modes log goal timing from all sources + buy/sell details to:
- *   data/sessions/session-YYYY-MM-DD_HH-MM-SS.log
+ * Console shows: source status, soccer goals with timing, trade executions.
+ * Full debug output saved to: data/sessions/session-YYYY-MM-DD_HH-MM-SS.log
  */
 
 import { spawn } from 'node:child_process';
@@ -109,6 +109,26 @@ function askChoice() {
   });
 }
 
+async function killPort(port) {
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') {
+      exec(`netstat -ano | findstr :${port}`, (err, stdout) => {
+        if (err || !stdout.trim()) return resolve();
+        const pids = new Set();
+        for (const line of stdout.trim().split('\n')) {
+          const match = line.trim().match(/LISTENING\s+(\d+)/);
+          if (match) pids.add(match[1]);
+        }
+        if (pids.size === 0) return resolve();
+        const kills = [...pids].map(p => `taskkill /PID ${p} /F`).join(' & ');
+        exec(kills, () => resolve());
+      });
+    } else {
+      exec(`lsof -ti:${port} | xargs kill -9 2>/dev/null`, () => resolve());
+    }
+  });
+}
+
 function openBrowser(url) {
   const cmd = process.platform === 'win32' ? `start ${url}`
     : process.platform === 'darwin' ? `open ${url}`
@@ -145,31 +165,39 @@ async function waitForServer(port, path = '/health', maxWaitMs = 30000) {
 function startStateLogger() {
   return setInterval(async () => {
     try {
-      const r = await fetch(`http://localhost:${SM_PORT}/api/goal-trader`);
-      if (!r.ok) return;
-      const state = await r.json();
-      if (!state.enabled) return;
+      // Fetch health + goal-trader state in parallel
+      const [healthRes, gtRes] = await Promise.all([
+        fetch(`http://localhost:${SM_PORT}/health`).catch(() => null),
+        fetch(`http://localhost:${SM_PORT}/api/goal-trader`).catch(() => null),
+      ]);
 
-      const summary = {
-        time: new Date().toISOString(),
-        openPositions: state.openPositions?.length || 0,
-        totalTrades: state.totalTrades,
-        totalPnl: state.totalPnl,
-      };
+      const health = healthRes?.ok ? await healthRes.json() : null;
+      const state = gtRes?.ok ? await gtRes.json() : null;
+      const now = new Date().toISOString();
 
+      // Console heartbeat — brief status so you know it's alive
+      const events = health?.events || '?';
+      const open = state?.openPositions?.length || 0;
+      const trades = state?.totalTrades ?? 0;
+      const pnl = state?.totalPnl != null ? `$${state.totalPnl.toFixed(2)}` : '—';
+      console.log(`  [${now.slice(11, 19)}] heartbeat | Events: ${events} | Trades: ${trades} | P&L: ${pnl} | Open: ${open}`);
+
+      if (!state?.enabled) return;
+
+      // Detailed state to session log file only
       if (state.openPositions?.length > 0) {
         const posLines = state.openPositions.map(p => {
           const hold = ((Date.now() - p.entryTime) / 1000).toFixed(0);
           return `    ${p.match} | ${p.side} ${p.marketKey} @ ${p.entryPrice.toFixed(3)} → ${p.lastPrice.toFixed(3)} | ${hold}s | ${p.goalType}`;
         });
-        logStream.write(`[${summary.time}] [STATE] Trades: ${summary.totalTrades} | P&L: $${summary.totalPnl.toFixed(3)} | Open: ${summary.openPositions}\n`);
+        logStream.write(`[${now}] [STATE] Trades: ${trades} | P&L: ${pnl} | Open: ${open}\n`);
         for (const l of posLines) logStream.write(l + '\n');
       }
 
       if (state.recentTrades?.length > 0) {
         const last = state.recentTrades[0];
         if (last.exitTime && Date.now() - last.exitTime < 65000) {
-          logStream.write(`[${summary.time}] [TRADE_CLOSED] ${last.match} | ${last.side} ${last.marketKey} | Entry: ${last.entryPrice.toFixed(3)} → Exit: ${last.exitPrice.toFixed(3)} | P&L: $${last.pnl?.toFixed(3)} | Reason: ${last.exitReason} | Hold: ${((last.exitTime - last.entryTime) / 1000).toFixed(0)}s\n`);
+          logStream.write(`[${now}] [TRADE_CLOSED] ${last.match} | ${last.side} ${last.marketKey} | Entry: ${last.entryPrice.toFixed(3)} → Exit: ${last.exitPrice.toFixed(3)} | P&L: $${last.pnl?.toFixed(3)} | Reason: ${last.exitReason} | Hold: ${((last.exitTime - last.entryTime) / 1000).toFixed(0)}s\n`);
         }
       }
     } catch { /* server not ready */ }
@@ -177,17 +205,23 @@ function startStateLogger() {
 }
 
 // --- Start Dashboard (Next.js) ---
-function startDashboard() {
+async function startDashboard() {
   if (!existsSync(DASHBOARD_DIR)) {
     log('  Dashboard directory not found — skipping');
     return null;
   }
 
-  const nextBuild = resolve(DASHBOARD_DIR, '.next');
-  if (!existsSync(nextBuild)) {
-    log('  Dashboard: no .next build found — run "npm run build" in dashboard/ first');
-    log('  Skipping dashboard...');
-    return null;
+  const buildId = resolve(DASHBOARD_DIR, '.next', 'BUILD_ID');
+  if (!existsSync(buildId)) {
+    log('  Dashboard: no production build found — building...');
+    const { execSync } = await import('node:child_process');
+    try {
+      execSync('npm run build', { cwd: DASHBOARD_DIR, stdio: 'inherit', timeout: 120_000 });
+      log('  Dashboard build complete');
+    } catch (err) {
+      log(`  Dashboard build failed — skipping`);
+      return null;
+    }
   }
 
   log(`  Starting dashboard on port ${DASH_PORT}...`);
@@ -204,7 +238,12 @@ function startDashboard() {
   });
   child.stderr.on('data', (data) => {
     const text = data.toString().trim();
-    if (text) logStream.write(`[DASH] ${text}\n`);
+    if (text) {
+      logStream.write(`[DASH] ${text}\n`);
+      if (text.includes('Error') || text.includes('error')) {
+        console.error(`  [DASH ERROR] ${text}`);
+      }
+    }
   });
 
   child.on('error', (err) => {
@@ -278,8 +317,12 @@ async function main() {
     process.exit(1);
   }
 
+  // Kill stale processes on our ports
+  log('  Cleaning up stale processes...');
+  await Promise.all([killPort(SM_PORT), killPort(DASH_PORT)]);
+
   // Start dashboard
-  const dashChild = startDashboard();
+  const dashChild = await startDashboard();
 
   // Start signal manager with appropriate env overrides
   const smEnv = isDashboardOnly
@@ -356,14 +399,16 @@ async function main() {
   log('  ============================================');
   if (isTrading) {
     log('  GOAL TRADING ACTIVE — SOCCER ONLY');
-    log('  - Buy $1 FOK on first goal detection');
-    log('  - Skip extending leads & odds >90%');
-    log('  - Auto-sell after 1 minute');
+    log('  Console shows:');
+    log('    ⚽ Soccer goals + source timing (20s)');
+    log('    💰 Buy executions (amount, price, delay)');
+    log('    ❌ Failed buys with reason');
+    log('    💰 Exits with P&L');
   } else {
     log('  MONITORING MODE — NO TRADING');
-    log('  - All goal detections logged with timing');
-    log('  - Source reaction times tracked');
-    log('  - No buy/sell orders placed');
+    log('  Console shows:');
+    log('    ⚽ Soccer goals + source timing (20s)');
+    log('    No buy/sell orders placed');
   }
   log('  ============================================');
   log('');
