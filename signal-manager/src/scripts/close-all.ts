@@ -27,7 +27,7 @@ dotenv.config({ path: resolve(process.cwd(), '.env') });
 const CLOB_HOST = 'https://clob.polymarket.com';
 const DATA_API = 'https://data-api.polymarket.com';
 const CHAIN_ID = 137;
-const POLYGON_RPC = 'https://polygon-rpc.com';
+const POLYGON_RPC = 'https://polygon-bor-rpc.publicnode.com';
 const CT_ADDRESS = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const CT_ABI = ['function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external'];

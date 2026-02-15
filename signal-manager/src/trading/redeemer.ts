@@ -14,7 +14,7 @@ import { createLogger } from '../util/logger.js';
 
 const log = createLogger('redeemer');
 
-const POLYGON_RPC = 'https://polygon-rpc.com';
+const POLYGON_RPC = 'https://polygon-bor-rpc.publicnode.com';
 const RELAYER_URL = 'https://relayer-v2.polymarket.com';
 const CT_ADDRESS = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
