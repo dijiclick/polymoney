@@ -50,8 +50,7 @@ export class OnexbetLiveFeed {
   private config: OnexbetAdapterConfig;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private onGameData: GameDataCallback | null = null;
-  private consecutiveFailures = 0;
-  private maxConsecutiveFailures = 10;
+  private pollErrorLogged = false;
   private prevOddsHash: Map<number, string> = new Map();
   private preMatchIds: Set<number> = new Set();
   private currentGameIds: number[] = [];
@@ -109,13 +108,16 @@ export class OnexbetLiveFeed {
     const results = await Promise.allSettled(
       ids.map(gameId => this.fetchAndEmit(gameId))
     );
+    let failures = 0;
     for (const r of results) {
-      if (r.status === 'rejected') {
-        this.consecutiveFailures++;
-        if (this.consecutiveFailures === 1) {
-          log.warn(`Poll failed: ${r.reason?.message || r.reason}`);
-        }
-      }
+      if (r.status === 'rejected') failures++;
+    }
+    if (failures > 0 && !this.pollErrorLogged) {
+      log.warn(`Poll: ${failures}/${ids.length} games failed`);
+      this.pollErrorLogged = true;
+    } else if (failures === 0 && this.pollErrorLogged) {
+      log.info(`Poll recovered — all ${ids.length} games OK`);
+      this.pollErrorLogged = false;
     }
     this.polling = false;
   }
@@ -134,7 +136,6 @@ export class OnexbetLiveFeed {
     if (this.onGameData) {
       this.onGameData(gameData);
     }
-    this.consecutiveFailures = 0;
   }
 
   private async fetchGameDetail(gameId: number): Promise<OnexbetGameData | null> {

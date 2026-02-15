@@ -18,11 +18,22 @@ function log(level: LogLevel, module: string, msg: string, data?: any): void {
   }
 }
 
+// Global once-keys shared across all loggers
+const seenOnce = new Set<string>();
+
 export function createLogger(module: string) {
   return {
     debug: (msg: string, data?: any) => log('debug', module, msg, data),
     info: (msg: string, data?: any) => log('info', module, msg, data),
     warn: (msg: string, data?: any) => log('warn', module, msg, data),
     error: (msg: string, data?: any) => log('error', module, msg, data),
+    /** Log at warn level only the first time this key is seen. */
+    warnOnce: (key: string, msg: string, data?: any) => {
+      if (seenOnce.has(key)) return;
+      seenOnce.add(key);
+      log('warn', module, msg, data);
+    },
+    /** Reset a warnOnce key so it can fire again (e.g. on recovery). */
+    clearOnce: (key: string) => { seenOnce.delete(key); },
   };
 }

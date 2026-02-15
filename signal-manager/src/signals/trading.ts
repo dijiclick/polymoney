@@ -290,7 +290,7 @@ export const tradingSignal: SignalFunction = (event, changedKeys, source) => {
       opportunities.set(oppKey, opp);
 
       if (quality !== 'suspect') {
-        log.warn(
+        log.debug(
           `📊 NEW ${action} | ${homeName} vs ${awayName} | ${key.replace(/_ft$/, '')} | ` +
           `PM:${polyProb.toFixed(1)}% vs ${bestSecondary.id}:${xbetProb.toFixed(1)}% | Edge:${absEdge.toFixed(1)}pp [${quality}]`
         );
@@ -366,7 +366,7 @@ export const scoreTradeSignal: SignalFunction = (event, changedKeys, source) => 
           edgeHistory: [0],
         });
 
-        log.warn(
+        log.debug(
           `🏆 SCORE SIGNAL | ${homeName} vs ${awayName} | ${score.home}-${score.away} | ` +
           `${key.replace(/_ft$/, '')} | ${event.sport || '?'} | PM stale by ${Math.round(polyAge / 1000)}s`
         );

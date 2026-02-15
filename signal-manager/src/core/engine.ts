@@ -52,7 +52,7 @@ export class Engine {
         recordScoreChange(update.sourceId, eventId, event.home.name || update.homeTeam, event.away.name || update.awayTeam, event.stats.score.home, event.stats.score.away);
         // Diagnostic: log score-only adapter score reports
         if (update.markets.length === 0) {
-          log.warn(`⚡ Score: ${update.sourceId} | ${event.home.name || update.homeTeam} vs ${event.away.name || update.awayTeam} | ${event.stats.score.home}-${event.stats.score.away}`);
+          log.debug(`⚡ Score: ${update.sourceId} | ${event.home.name || update.homeTeam} vs ${event.away.name || update.awayTeam} | ${event.stats.score.home}-${event.stats.score.away}`);
         }
       }
 

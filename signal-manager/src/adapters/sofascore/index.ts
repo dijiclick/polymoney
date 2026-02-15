@@ -118,7 +118,7 @@ export class SofaScoreAdapter implements IFilterableAdapter {
 
       if (line.startsWith('INFO ')) {
         // Respond with CONNECT using user=none, pass=none (discovered from browser)
-        log.warn('Got NATS INFO, sending CONNECT...');
+        log.debug('Got NATS INFO, sending CONNECT...');
         this.ws?.send('CONNECT {"protocol":1,"version":"3.1.0","lang":"nats.ws","verbose":false,"pedantic":false,"user":"none","pass":"none","headers":true,"no_responders":true}\r\n');
 
         // Always (re-)subscribe on INFO — NATS server sends INFO periodically
@@ -129,7 +129,7 @@ export class SofaScoreAdapter implements IFilterableAdapter {
           this.ws?.send(`SUB sport.${sport} ${subId}\r\n`);
           subId++;
         }
-        log.warn(`Subscribed to ${sports.length} sport topics`);
+        log.debug(`Subscribed to ${sports.length} sport topics`);
         continue;
       }
 
@@ -146,7 +146,7 @@ export class SofaScoreAdapter implements IFilterableAdapter {
       if (line.startsWith('MSG ') || line.startsWith('HMSG ')) {
         this.natsMessageCount++;
         if (this.natsMessageCount <= 3 || this.natsMessageCount % 500 === 0) {
-          log.warn(`NATS msg #${this.natsMessageCount}: ${line.substring(0, 80)} | payloads=${this.payloadCount}, matched=${this.matchedCount}`);
+          log.debug(`NATS msg #${this.natsMessageCount}: ${line.substring(0, 80)} | payloads=${this.payloadCount}, matched=${this.matchedCount}`);
         }
         const parts = line.split(' ');
         const numBytes = parseInt(parts[parts.length - 1]);
@@ -201,7 +201,7 @@ export class SofaScoreAdapter implements IFilterableAdapter {
       };
 
       if (this.matchedCount <= 5 || this.matchedCount % 100 === 0) {
-        log.warn(`✅ SofaScore match #${this.matchedCount}: ${homeTeam} vs ${awayTeam} | score=${hasScore ? `${homeScore}-${awayScore}` : 'none'} | ${sport}`);
+        log.debug(`✅ SofaScore match #${this.matchedCount}: ${homeTeam} vs ${awayTeam} | score=${hasScore ? `${homeScore}-${awayScore}` : 'none'} | ${sport}`);
       }
       this.callback(update);
     } catch {

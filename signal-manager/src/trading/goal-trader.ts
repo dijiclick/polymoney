@@ -265,7 +265,7 @@ export class GoalTrader {
     // _prevScore is only set after the first score change is observed.
     // If undefined, this is the first score we've seen (bootstrap) — not a real goal.
     if (!event._prevScore) {
-      log.warn(`First score seen (bootstrap) | ${match} | ${score.home}-${score.away} | sport=${sport} | skipping`);
+      log.debug(`First score seen (bootstrap) | ${match} | ${score.home}-${score.away} | sport=${sport} | skipping`);
       this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: '?', source, sport, goalType: null, action: 'SKIP', reason: 'Bootstrap (first score)' });
       return;
     }
@@ -319,7 +319,7 @@ export class GoalTrader {
           if (!this.processedGoals.has(goalKey)) {
             log.warn(`⏳ Fastest source (${fastest}) did not confirm in ${this.config.slowSourceDelayMs}ms — executing from ${source}`);
             this.processedGoals.add(goalKey);
-            this.executeGoalTrade(event, source, match, sport, score, prevScore, sportCategory, goalKey);
+            this.executeGoalTrade(event, source, match, sport, score, prevScore, sportCategory, goalKey, debounceNow);
           }
         }, this.config.slowSourceDelayMs);
         this.pendingGoals.set(goalKey, { event, source, timer });
@@ -336,20 +336,20 @@ export class GoalTrader {
     }
 
     this.processedGoals.add(goalKey);
-    this.executeGoalTrade(event, source, match, sport, score, prevScore, sportCategory, goalKey);
+    this.executeGoalTrade(event, source, match, sport, score, prevScore, sportCategory, goalKey, debounceNow);
   }
 
   /** Core trade execution — called immediately for fastest source, or after delay for slow sources */
   private executeGoalTrade(
     event: UnifiedEvent, source: string, match: string, sport: string,
     score: { home: number; away: number }, prevScore: { home: number; away: number },
-    sportCategory: SportCategory, goalKey: string,
+    sportCategory: SportCategory, goalKey: string, goalDetectedAt?: number,
   ): void {
     // Classify the goal
     const goalType = this.classifyGoal(score, prevScore);
 
     if (goalType === 'extending' && this.config.skipExtendingLead) {
-      log.warn(`🏆 SKIP extending lead ${score.home}-${score.away} | ${match}`);
+      log.debug(`🏆 SKIP extending lead ${score.home}-${score.away} | ${match}`);
       this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${prevScore.home}-${prevScore.away}`, source, sport, goalType, action: 'SKIP', reason: 'Extending lead (skip config)' });
       return;
     }
@@ -429,7 +429,7 @@ export class GoalTrader {
     );
 
     // Execute buy (FOK for immediate execution)
-    this.executeBuy(event, tokenId, marketKey, side, entryPrice, tradeSize, goalType, score, expectedMove, takeProfitPrice, stopLossPrice, match, sport, source);
+    this.executeBuy(event, tokenId, marketKey, side, entryPrice, tradeSize, goalType, score, expectedMove, takeProfitPrice, stopLossPrice, match, sport, source, goalDetectedAt);
   }
 
   private async executeBuy(
@@ -437,16 +437,17 @@ export class GoalTrader {
     side: 'YES' | 'NO', price: number, amount: number,
     goalType: GoalType, score: { home: number; away: number },
     expectedMovePp: number, takeProfitPrice: number, stopLossPrice: number,
-    match: string, sport: string, source: string,
+    match: string, sport: string, source: string, goalDetectedAt?: number,
   ): Promise<void> {
     // Use buyAtMarket for real orderbook best ask — reliable FOK fill
     const result = await this.bot.buyAtMarket(tokenId, side, amount, { eventName: match });
 
     if (!result.success) {
+      const alertDelay = goalDetectedAt ? `${((Date.now() - goalDetectedAt) / 1000).toFixed(1)}s` : '?';
       log.error(
-        `⚽ GOAL SUMMARY | ${match} | ${event._prevScore?.home ?? '?'}-${event._prevScore?.away ?? '?'}→${score.home}-${score.away} | ` +
-        `Type: ${goalType} | Source: ${source} | Buy: ❌ ${result.error} | ` +
-        `Price: ${price.toFixed(3)} | Side: ${side} ${marketKey}`
+        `❌ BUY FAILED | ${match} | ${event._prevScore?.home ?? '?'}-${event._prevScore?.away ?? '?'}→${score.home}-${score.away} | ` +
+        `${side} ${marketKey} | $${amount} @ ${price.toFixed(3)} | Source: ${source} | ` +
+        `Alert→Buy: ${alertDelay} | Reason: ${result.error}`
       );
       this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${(event._prevScore?.home ?? '?')}-${(event._prevScore?.away ?? '?')}`, source, sport, goalType, action: 'SKIP', reason: `Buy failed: ${result.error}` });
       return;
@@ -492,10 +493,12 @@ export class GoalTrader {
       entry: { time: now, price, amount, shares },
     });
 
+    const alertDelay = goalDetectedAt ? `${((now - goalDetectedAt) / 1000).toFixed(1)}s` : '?';
+    const orderId = result.orderId ? result.orderId.slice(0, 10) : 'n/a';
     log.warn(
-      `⚽ GOAL SUMMARY | ${match} | ${event._prevScore?.home ?? '?'}-${event._prevScore?.away ?? '?'}→${score.home}-${score.away} | ` +
-      `Type: ${goalType} | Source: ${source} | Buy: ✅ ${result.executionMs}ms | ` +
-      `Price: ${price.toFixed(3)} | Side: ${side} ${marketKey} | $${amount.toFixed(2)} | ${shares.toFixed(1)} shares`
+      `💰 BUY | ${match} | ${event._prevScore?.home ?? '?'}-${event._prevScore?.away ?? '?'}→${score.home}-${score.away} | ` +
+      `Type: ${goalType} | Source: ${source} | ✅ ${result.executionMs}ms | ` +
+      `Alert→Buy: ${alertDelay} | ${side} ${marketKey} @ ${price.toFixed(3)} | $${amount.toFixed(2)} | ${shares.toFixed(1)} shares | ${orderId}`
     );
 
     // Log activity

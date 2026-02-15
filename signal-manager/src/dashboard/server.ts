@@ -39,7 +39,6 @@ export function recordScoreChange(sourceId: string, eventId: string, homeTeam: s
   const key = `${eventId}_${home}-${away}`;
   const now = Date.now();
   if (!scoreFirstSeen.has(key)) {
-    log.warn(`📊 Score 1st: ${sourceId} | ${homeTeam} vs ${awayTeam} | ${home}-${away}`);
     scoreFirstSeen.set(key, { ts: now, source: sourceId });
     // Track win for this source
     sourceWins.set(sourceId, (sourceWins.get(sourceId) || 0) + 1);
@@ -55,7 +54,6 @@ export function recordScoreChange(sourceId: string, eventId: string, homeTeam: s
   } else {
     const first = scoreFirstSeen.get(key)!;
     const delay = now - first.ts;
-    log.warn(`📊 Score +${delay}ms: ${sourceId} (1st: ${first.source}) | ${homeTeam} vs ${awayTeam} | ${home}-${away}`);
     let entry = speedLog.find(e => e.ts === first.ts && e.score === `${home}-${away}`);
     if (!entry) {
       entry = { ts: first.ts, match: `${homeTeam} vs ${awayTeam}`, score: `${home}-${away}`, winner: first.source, times: [{ src: first.source, ms: 0 }] };

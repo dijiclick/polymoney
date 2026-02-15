@@ -16,6 +16,7 @@ import { setLogLevel, createLogger } from './util/logger.js';
 import { oddsDivergenceSignal, scoreChangeSignal, staleOddsSignal } from './signals/index.js';
 import { tradingSignal, scoreTradeSignal, setOpportunityCallback } from './signals/trading.js';
 import { reactionTimerSignal } from './signals/reaction-timer.js';
+import { goalLoggerSignal } from './signals/goal-logger.js';
 import { TradingBot } from './trading/bot.js';
 import { TradingController } from './trading/controller.js';
 import { GoalTrader } from './trading/goal-trader.js';
@@ -57,6 +58,7 @@ async function main() {
   engine.registerSignal(tradingSignal);
   engine.registerSignal(scoreTradeSignal);
   engine.registerSignal(reactionTimerSignal);
+  engine.registerSignal(goalLoggerSignal);
 
   // Register adapters
   if (config.adapters.polymarket.enabled) {
