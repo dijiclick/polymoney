@@ -34,15 +34,44 @@ export class Engine {
       // Track adapter latency
       recordAdapterUpdate(update.sourceId, Date.now() - update.timestamp);
       // Hot path: match → update → signal
-      const eventId = this.matcher.match(update);
-      const { event, changedKeys } = this.store.update(eventId, update);
+      const { eventId, canonicalLeague, swapped } = this.matcher.match(update);
+
+      // If source reports home/away in reverse order, normalize
+      if (swapped) {
+        const tmpTeam = update.homeTeam;
+        update.homeTeam = update.awayTeam;
+        update.awayTeam = tmpTeam;
+        if (update.stats?.score) {
+          const tmpScore = update.stats.score.home;
+          update.stats.score.home = update.stats.score.away;
+          update.stats.score.away = tmpScore;
+        }
+        // Swap directional market keys
+        update.markets = update.markets.map(m => ({
+          ...m,
+          key: m.key
+            .replace(/\bhome\b/g, '__HOME__')
+            .replace(/\baway\b/g, 'home')
+            .replace(/__HOME__/g, 'away'),
+        }));
+      }
+
+      const { event, changedKeys } = this.store.update(eventId, update, canonicalLeague);
+
+      // Merge league info
+      if (canonicalLeague) {
+        event.canonicalLeague = canonicalLeague;
+        const leagueAliases = this.matcher.getLeagueAliases(update.sport, canonicalLeague);
+        for (const src in leagueAliases) {
+          event.leagueAliases[src] = leagueAliases[src];
+        }
+      }
 
       // Set canonical team names — prefer Polymarket names as source of truth
       if (!event.home.name) {
         event.home.name = update.homeTeam;
         event.away.name = update.awayTeam;
       } else if (update.sourceId === 'polymarket') {
-        // Polymarket is authoritative — override display names
         event.home.name = update.homeTeam;
         event.away.name = update.awayTeam;
       }

@@ -9,7 +9,7 @@ const SWEEP_GRACE_MS = 5 * 60 * 1000; // Keep ended events for 5 min
 export class StateStore {
   private events: Map<string, UnifiedEvent> = new Map();
 
-  update(eventId: string, update: AdapterEventUpdate): { event: UnifiedEvent; changedKeys: string[] } {
+  update(eventId: string, update: AdapterEventUpdate, canonicalLeague?: string): { event: UnifiedEvent; changedKeys: string[] } {
     let event = this.events.get(eventId);
     const changedKeys: string[] = [];
 
@@ -92,6 +92,12 @@ export class StateStore {
       // Store source event IDs (e.g. 1xBet game ID)
       if (update.sourceEventId) {
         event._sourceEventIds[update.sourceId] = update.sourceEventId;
+        event.sourceEventIds[update.sourceId] = update.sourceEventId;
+      }
+
+      // Track per-source scores
+      if (update.stats?.score) {
+        event._sourceScores[update.sourceId] = { ...update.stats.score };
       }
     }
 
@@ -116,6 +122,8 @@ export class StateStore {
       id: eventId,
       sport: update.sport,
       league: update.league,
+      canonicalLeague: '',
+      leagueAliases: {},
       startTime: update.startTime,
       status: update.status || 'scheduled',
       home: {
@@ -131,6 +139,9 @@ export class StateStore {
       _tokenIds: tokenIds,
       polymarketSlug: update.sourceEventSlug,
       _sourceEventIds: update.sourceEventId ? { [update.sourceId]: update.sourceEventId } : {},
+      sourceEventIds: update.sourceEventId ? { [update.sourceId]: update.sourceEventId } : {},
+      incidents: [],
+      _sourceScores: update.stats?.score ? { [update.sourceId]: { ...update.stats.score } } : {},
       _lastUpdate: Date.now(),
     };
   }
