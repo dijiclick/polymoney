@@ -439,8 +439,8 @@ export class GoalTrader {
     expectedMovePp: number, takeProfitPrice: number, stopLossPrice: number,
     match: string, sport: string, source: string, goalDetectedAt?: number,
   ): Promise<void> {
-    // Use buyAtMarket for real orderbook best ask — reliable FOK fill
-    const result = await this.bot.buyAtMarket(tokenId, side, amount, { eventName: match });
+    // Use buyAtMarket with known PM price — skips orderbook fetch for speed
+    const result = await this.bot.buyAtMarket(tokenId, side, amount, { eventName: match, price: price });
 
     if (!result.success) {
       const alertDelay = goalDetectedAt ? `${((Date.now() - goalDetectedAt) / 1000).toFixed(1)}s` : '?';

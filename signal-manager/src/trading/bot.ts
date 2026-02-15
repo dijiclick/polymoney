@@ -120,6 +120,18 @@ export class TradingBot extends EventEmitter {
   private lastTradeTime: Map<string, number> = new Map();
   private totalPnL = 0;
   private marketInfoCache: Map<string, { tickSize: string; negRisk: boolean }> = new Map();
+
+  /** Pre-cache tickSize & negRisk for a token (call when PM tokens are discovered) */
+  async precacheMarketInfo(tokenId: string): Promise<void> {
+    if (this.marketInfoCache.has(tokenId) || !this.client) return;
+    try {
+      const [ts, nr] = await Promise.all([
+        this.client.getTickSize(tokenId).catch(() => '0.01'),
+        this.client.getNegRisk(tokenId).catch(() => false),
+      ]);
+      this.marketInfoCache.set(tokenId, { tickSize: String(ts) || '0.01', negRisk: !!nr });
+    } catch { /* ignore */ }
+  }
   // Racing credentials (stored after deriveApiKey)
   private apiKey = '';
   private apiSecret = '';
@@ -326,8 +338,8 @@ export class TradingBot extends EventEmitter {
   }
 
   /** Buy at market — reads orderbook for best ask (FOK) */
-  async buyAtMarket(tokenId: string, outcome: 'YES' | 'NO', amount: number, opts: { eventName?: string } = {}): Promise<TradeResult> {
-    return this.buyOutcome(tokenId, outcome, amount, 0, { ...opts, orderType: 'FOK' });
+  async buyAtMarket(tokenId: string, outcome: 'YES' | 'NO', amount: number, opts: { eventName?: string; price?: number } = {}): Promise<TradeResult> {
+    return this.buyOutcome(tokenId, outcome, amount, opts.price || 0, { ...opts, orderType: 'FOK' });
   }
 
   /** Internal: buy with orderbook best-ask detection and auto tickSize/negRisk */
@@ -443,15 +455,17 @@ export class TradingBot extends EventEmitter {
       this.marketInfoCache.set(tokenId, { tickSize, negRisk });
     }
 
-    // Read orderbook to find best bid
-    let bestBid = price; // fallback to provided price
-    try {
-      const bookRes = await this.client.getOrderBook(tokenId);
-      const bids = bookRes?.bids || [];
-      if (bids.length > 0) {
-        bestBid = Math.max(...bids.map((b: any) => Number(b.price)));
-      }
-    } catch { /* use provided price */ }
+    // Read orderbook to find best bid (skip if price already provided for speed)
+    let bestBid = price;
+    if (price <= 0.01) {
+      try {
+        const bookRes = await this.client.getOrderBook(tokenId);
+        const bids = bookRes?.bids || [];
+        if (bids.length > 0) {
+          bestBid = Math.max(...bids.map((b: any) => Number(b.price)));
+        }
+      } catch { /* use provided price */ }
+    }
 
     if (bestBid <= 0.01) {
       return { success: false, error: `best_bid_too_low_${(bestBid * 100).toFixed(1)}c`, request: { tokenId, side: 'SELL', outcome, amount: shares * bestBid, price: bestBid, orderType: 'FOK', tickSize: tickSize as any, negRisk, eventName: opts.eventName }, timestamp: start, executionMs: Date.now() - start };
