@@ -71,6 +71,7 @@ export const DEFAULT_CONFIG: Config = {
     bet365: {
       enabled: false,
       cdpPort: 9222,
+      headless: true,
     },
     sofascore: {
       enabled: true,

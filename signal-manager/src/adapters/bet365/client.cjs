@@ -372,8 +372,11 @@ class Bet365Client extends EventEmitter {
       `--user-data-dir=${userDataDir}`,
       '--no-first-run',
       '--no-default-browser-check',
-      CONFIG.url,
     ];
+    if (this._headless) {
+      args.push('--headless=new');
+    }
+    args.push(CONFIG.url);
 
     this.emit('info', `Launching Chrome: ${chromePath}`);
     this._chromeProcess = spawn(chromePath, args, {

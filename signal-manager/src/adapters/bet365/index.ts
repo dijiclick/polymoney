@@ -83,6 +83,7 @@ export class Bet365Adapter implements IAdapter {
     this.client = new Bet365Client({
       cdpUrl: `http://localhost:${cdpPort}`,
       cdpPort,
+      headless: this.config.headless ?? false,
     });
 
     this.client.on('connected', () => {

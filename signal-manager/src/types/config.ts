@@ -53,6 +53,7 @@ export interface PinnacleAdapterConfig {
 export interface Bet365AdapterConfig {
   enabled: boolean;
   cdpPort?: number;
+  headless?: boolean;
 }
 
 export interface DashboardConfig {
