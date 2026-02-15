@@ -173,6 +173,8 @@ export class TradingBot extends EventEmitter {
       this.walletAddress = signer.address;
       this.hmacKeyBuffer = Buffer.from(this.apiSecret, 'base64');
 
+      this.log('INFO', `API creds: key=${this.apiKey.slice(0,8)}… secret=${this.apiSecret.length}chars passphrase=${this.apiPassphrase.length}chars addr=${this.walletAddress}`);
+
       // Warm up undici pool
       getPool().catch(() => {});
 
@@ -189,6 +191,14 @@ export class TradingBot extends EventEmitter {
       this.initialized = true;
       this.log('INFO', `Trading bot initialized. Funder: ${this.config.funderAddress}`);
       this.log('INFO', `Armed: ${this.config.armed ? '🔴 YES — LIVE TRADING' : '🟢 NO — DRY RUN'}`);
+
+      // Validate creds by fetching open orders
+      try {
+        const orders = await this.client.getOpenOrders();
+        this.log('INFO', `Creds validated — ${Array.isArray(orders) ? orders.length : 0} open orders`);
+      } catch (e: any) {
+        this.log('ERROR', `Creds validation FAILED: ${e.message}`);
+      }
       return true;
     } catch (err: any) {
       this.log('ERROR', `Failed to initialize: ${err.message}`);
@@ -595,7 +605,9 @@ export class TradingBot extends EventEmitter {
     const message = `${timestamp}POST/order${body}`;
     const signature = createHmac('sha256', this.hmacKeyBuffer!)
       .update(message)
-      .digest('base64');
+      .digest('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_');
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -640,7 +652,7 @@ export class TradingBot extends EventEmitter {
                 this.log('INFO', `  Race #${i+1}: ${ms}ms (duplicate — other won)`);
               } else {
                 errors.push(err);
-                this.log('INFO', `  Race #${i+1}: ${ms}ms (${err.slice(0,40)})`);
+                this.log('WARN', `  Race #${i+1}: ${ms}ms HTTP${statusCode} — ${JSON.stringify(data).slice(0,200)}`);
               }
             }
           })
