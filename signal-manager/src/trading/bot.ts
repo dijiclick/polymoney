@@ -8,7 +8,29 @@
 
 import { ClobClient, Side, OrderType } from '@polymarket/clob-client';
 import { Wallet } from '@ethersproject/wallet';
+import { createHmac } from 'crypto';
 import { EventEmitter } from 'events';
+
+const CLOB_HOST = 'https://clob.polymarket.com';
+const RACE_COUNT = 3;
+
+// Undici pool for persistent connections — lazy init
+let _pool: any = null;
+async function getPool(): Promise<any> {
+  if (_pool) return _pool;
+  try {
+    const { Pool } = await import('undici');
+    _pool = new Pool(CLOB_HOST, {
+      connections: 10,
+      pipelining: 1,
+      keepAliveTimeout: 30_000,
+      keepAliveMaxTimeout: 60_000,
+    });
+    return _pool;
+  } catch {
+    return null;
+  }
+}
 
 export interface TradingConfig {
   /** Polymarket CLOB host */
@@ -98,6 +120,12 @@ export class TradingBot extends EventEmitter {
   private lastTradeTime: Map<string, number> = new Map();
   private totalPnL = 0;
   private marketInfoCache: Map<string, { tickSize: string; negRisk: boolean }> = new Map();
+  // Racing credentials (stored after deriveApiKey)
+  private apiKey = '';
+  private apiSecret = '';
+  private apiPassphrase = '';
+  private walletAddress = '';
+  private hmacKeyBuffer: Buffer | null = null;
 
   constructor(config: Partial<TradingConfig> = {}) {
     super();
@@ -124,7 +152,17 @@ export class TradingBot extends EventEmitter {
         this.config.funderAddress
       );
       const creds = await tempClient.createOrDeriveApiKey();
-      
+
+      // Store creds for racing POST
+      this.apiKey = (creds as any).apiKey || (creds as any).key || '';
+      this.apiSecret = (creds as any).secret || '';
+      this.apiPassphrase = (creds as any).passphrase || '';
+      this.walletAddress = this.config.funderAddress;
+      this.hmacKeyBuffer = Buffer.from(this.apiSecret, 'base64');
+
+      // Warm up undici pool
+      getPool().catch(() => {});
+
       // Reinitialize with full auth
       this.client = new ClobClient(
         this.config.host,
@@ -228,7 +266,8 @@ export class TradingBot extends EventEmitter {
         : req.orderType === 'GTC' ? OrderType.GTC
         : 'FOK' as any;
 
-      const resp = await this.client.createAndPostOrder(
+      // Step 1: Sign the order via SDK (handles CTF exchange signature)
+      const signedOrder = await this.client.createOrder(
         {
           tokenID: req.tokenId,
           price: req.price,
@@ -236,9 +275,11 @@ export class TradingBot extends EventEmitter {
           size,
         },
         { tickSize: req.tickSize, negRisk: req.negRisk },
-        orderType
       );
-      result.success = resp?.success ?? !!resp?.orderID;
+
+      // Step 2: Submit via racing POST (3 parallel, first wins)
+      const resp = await this.racePostOrder(signedOrder, orderType === 'FOK' ? 'FAK' : String(orderType));
+      result.success = !!resp?.orderID && !resp?.errorMsg;
       result.orderId = resp?.orderID;
 
       // Track position
@@ -491,6 +532,96 @@ export class TradingBot extends EventEmitter {
       minTradeSize: this.config.minTradeSize,
       maxTradeSize: this.config.maxTradeSize,
     };
+  }
+
+  /** Race N parallel POST /order requests — first successful response wins */
+  private async racePostOrder(signedOrder: any, orderType: string): Promise<{ orderID?: string; errorMsg?: string }> {
+    const payload = {
+      deferExec: false,
+      order: {
+        salt: parseInt(signedOrder.salt, 10),
+        maker: signedOrder.maker,
+        signer: signedOrder.signer,
+        taker: signedOrder.taker,
+        tokenId: signedOrder.tokenId,
+        makerAmount: signedOrder.makerAmount,
+        takerAmount: signedOrder.takerAmount,
+        side: signedOrder.side === 0 ? 'BUY' : 'SELL',
+        expiration: signedOrder.expiration,
+        nonce: signedOrder.nonce,
+        feeRateBps: signedOrder.feeRateBps,
+        signatureType: signedOrder.signatureType,
+        signature: signedOrder.signature,
+      },
+      owner: this.apiKey,
+      orderType,
+      postOnly: false,
+    };
+    const body = JSON.stringify(payload);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const message = `${timestamp}POST/order${body}`;
+    const signature = createHmac('sha256', this.hmacKeyBuffer!)
+      .update(message)
+      .digest('base64');
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'POLY_ADDRESS': this.walletAddress,
+      'POLY_SIGNATURE': signature,
+      'POLY_TIMESTAMP': `${timestamp}`,
+      'POLY_API_KEY': this.apiKey,
+      'POLY_PASSPHRASE': this.apiPassphrase,
+    };
+
+    const pool = await getPool();
+
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+      let completed = 0;
+      const errors: string[] = [];
+
+      for (let i = 0; i < RACE_COUNT; i++) {
+        const t0 = performance.now();
+
+        const req = pool
+          ? pool.request({ method: 'POST', path: '/order', headers, body })
+              .then(async ({ statusCode, body: rb }: any) => ({ statusCode, text: await rb.text() }))
+          : fetch(`${CLOB_HOST}/order`, { method: 'POST', headers, body })
+              .then(async (r) => ({ statusCode: r.status, text: await r.text() }));
+
+        req
+          .then(({ statusCode, text }: { statusCode: number; text: string }) => {
+            const ms = (performance.now() - t0).toFixed(0);
+            let data: any;
+            try { data = JSON.parse(text); } catch { data = { error: text }; }
+
+            if (statusCode >= 200 && statusCode < 300 && data?.orderID && !data?.errorMsg) {
+              if (!resolved) {
+                resolved = true;
+                this.log('INFO', `⚡ Race #${i+1} won: ${ms}ms [${data.orderID.slice(0,8)}]`);
+                resolve(data);
+              }
+            } else {
+              const err = data?.error || data?.errorMsg || `HTTP ${statusCode}`;
+              if (err.includes('Duplicat') || err.includes('duplicat')) {
+                this.log('INFO', `  Race #${i+1}: ${ms}ms (duplicate — other won)`);
+              } else {
+                errors.push(err);
+                this.log('INFO', `  Race #${i+1}: ${ms}ms (${err.slice(0,40)})`);
+              }
+            }
+          })
+          .catch((e: any) => {
+            errors.push(e.message || String(e));
+          })
+          .finally(() => {
+            completed++;
+            if (completed === RACE_COUNT && !resolved) {
+              reject(new Error(`All ${RACE_COUNT} racing requests failed: ${errors.join('; ')}`));
+            }
+          });
+      }
+    });
   }
 
   private log(level: string, msg: string) {
