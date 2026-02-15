@@ -415,6 +415,11 @@ export class Dashboard {
           score: e.stats.score || null,
           elapsed: e.stats.elapsed || null,
           period: e.stats.period || null,
+          canonicalLeague: e.canonicalLeague || '',
+          leagueAliases: e.leagueAliases || {},
+          incidents: e.incidents || [],
+          sourceScores: e._sourceScores || {},
+          sourceEventIds: e.sourceEventIds || {},
           markets: Object.fromEntries(
             Object.entries(e.markets).map(([key, sources]) => [
               key,
