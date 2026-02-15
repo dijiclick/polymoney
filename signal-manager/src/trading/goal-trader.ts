@@ -443,11 +443,11 @@ export class GoalTrader {
     const result = await this.bot.buyAtMarket(tokenId, side, amount, { eventName: match, price: price });
 
     if (!result.success) {
-      const alertDelay = goalDetectedAt ? `${((Date.now() - goalDetectedAt) / 1000).toFixed(1)}s` : '?';
+      const alertDelayMs = goalDetectedAt ? Date.now() - goalDetectedAt : 0;
       log.error(
         `❌ BUY FAILED | ${match} | ${event._prevScore?.home ?? '?'}-${event._prevScore?.away ?? '?'}→${score.home}-${score.away} | ` +
         `${side} ${marketKey} | $${amount} @ ${price.toFixed(3)} | Source: ${source} | ` +
-        `Alert→Buy: ${alertDelay} | Reason: ${result.error}`
+        `Detect→Fail: ${alertDelayMs}ms | ExecMs: ${result.executionMs}ms | Reason: ${result.error}`
       );
       this.logActivity({ ts: Date.now(), match, score: `${score.home}-${score.away}`, prevScore: `${(event._prevScore?.home ?? '?')}-${(event._prevScore?.away ?? '?')}`, source, sport, goalType, action: 'SKIP', reason: `Buy failed: ${result.error}` });
       return;
@@ -493,12 +493,14 @@ export class GoalTrader {
       entry: { time: now, price, amount, shares },
     });
 
-    const alertDelay = goalDetectedAt ? `${((now - goalDetectedAt) / 1000).toFixed(1)}s` : '?';
+    const alertDelayMs = goalDetectedAt ? now - goalDetectedAt : 0;
+    const totalMs = alertDelayMs + (result.executionMs || 0);
     const orderId = result.orderId ? result.orderId.slice(0, 10) : 'n/a';
     log.warn(
       `💰 BUY | ${match} | ${event._prevScore?.home ?? '?'}-${event._prevScore?.away ?? '?'}→${score.home}-${score.away} | ` +
-      `Type: ${goalType} | Source: ${source} | ✅ ${result.executionMs}ms | ` +
-      `Alert→Buy: ${alertDelay} | ${side} ${marketKey} @ ${price.toFixed(3)} | $${amount.toFixed(2)} | ${shares.toFixed(1)} shares | ${orderId}`
+      `Type: ${goalType} | Source: ${source} | ` +
+      `⏱️ Detect→Signal: ${alertDelayMs}ms | Order: ${result.executionMs}ms | TOTAL: ${totalMs}ms | ` +
+      `${side} ${marketKey} @ ${price.toFixed(3)} | $${amount.toFixed(2)} | ${shares.toFixed(1)} shares | Fee: 0bps | ${orderId}`
     );
 
     // Log activity

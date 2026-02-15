@@ -169,7 +169,8 @@ export class TradingBot extends EventEmitter {
       this.apiKey = (creds as any).apiKey || (creds as any).key || '';
       this.apiSecret = (creds as any).secret || '';
       this.apiPassphrase = (creds as any).passphrase || '';
-      this.walletAddress = this.config.funderAddress;
+      // POLY_ADDRESS must match the address the API key was derived for (signer, not funder)
+      this.walletAddress = signer.address;
       this.hmacKeyBuffer = Buffer.from(this.apiSecret, 'base64');
 
       // Warm up undici pool
