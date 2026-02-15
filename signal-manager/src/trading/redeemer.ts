@@ -18,7 +18,15 @@ const POLYGON_RPC = 'https://polygon-bor-rpc.publicnode.com';
 const RELAYER_URL = 'https://relayer-v2.polymarket.com';
 const CT_ADDRESS = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
-const CT_ABI = ['function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external'];
+const NEGRISK_ADAPTER = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
+const WRAPPED_COL = '0x3A3BD7bb9528E159577F7C2e685CC81A765002E2';
+const CT_ABI = [
+  'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external',
+  'function balanceOf(address owner, uint256 id) view returns (uint256)',
+  'function getCollectionId(bytes32 parentCollectionId, bytes32 conditionId, uint256 indexSet) view returns (bytes32)',
+  'function getPositionId(address collateralToken, bytes32 collectionId) view returns (uint256)',
+];
+const NEGRISK_ABI = ['function redeemPositions(bytes32 conditionId, uint256[] amounts) external'];
 const PROXY_ABI = ['function exec(address to, uint256 value, bytes data) external returns (bool, bytes memory)'];
 const ZERO_BYTES32 = '0x' + '0'.repeat(64);
 
@@ -150,14 +158,16 @@ export class AutoRedeemer {
       return;
     }
 
+    const isNegRisk = pos.negativeRisk === true;
+
     // Method 1: On-chain redemption via relay (gasless — preferred)
     if (conditionId && this.relayClient) {
-      log.warn(`💰 REDEEMING via relay | ${title} | ${size.toFixed(2)} shares | P&L: $${pnl.toFixed(2)}`);
+      log.warn(`💰 REDEEMING via relay | ${title} | ${size.toFixed(2)} shares | negRisk:${isNegRisk} | P&L: $${pnl.toFixed(2)}`);
       try {
-        const result = await this.redeemByConditionId(conditionId);
+        const result = await this.redeemByConditionId(conditionId, isNegRisk);
         if (result.success) {
-          log.warn(`✅ REDEEMED (relay) | ${title} | tx: ${result.txHash}`);
-          this.redeemHistory.unshift({ time: Date.now(), title, amount: size * curPrice, pnl, method: 'relay' });
+          log.warn(`✅ REDEEMED (${result.method}) | ${title} | tx: ${result.txHash}`);
+          this.redeemHistory.unshift({ time: Date.now(), title, amount: size * curPrice, pnl, method: result.method || 'relay' });
           if (this.redeemHistory.length > 50) this.redeemHistory.length = 50;
           return;
         }
@@ -170,10 +180,10 @@ export class AutoRedeemer {
     if (conditionId && this.connectedWallet) {
       log.warn(`💰 REDEEMING via on-chain proxy | ${title} | ${size.toFixed(2)} shares`);
       try {
-        const result = await this.redeemByConditionId(conditionId);
+        const result = await this.redeemByConditionId(conditionId, isNegRisk);
         if (result.success) {
-          log.warn(`✅ REDEEMED (onchain) | ${title} | tx: ${result.txHash}`);
-          this.redeemHistory.unshift({ time: Date.now(), title, amount: size * curPrice, pnl, method: 'onchain' });
+          log.warn(`✅ REDEEMED (${result.method}) | ${title} | tx: ${result.txHash}`);
+          this.redeemHistory.unshift({ time: Date.now(), title, amount: size * curPrice, pnl, method: result.method || 'onchain' });
           if (this.redeemHistory.length > 50) this.redeemHistory.length = 50;
           return;
         }
@@ -225,24 +235,60 @@ export class AutoRedeemer {
 
   /**
    * Redeem a position by conditionId via on-chain transaction.
+   * For NegRisk positions, uses NegRiskAdapter which handles WrappedCollateral unwrapping.
+   * For regular positions, calls ConditionalTokens.redeemPositions directly.
    * Tries gasless relay first, falls back to on-chain proxy.
    */
-  private async redeemByConditionId(conditionId: string): Promise<{ success: boolean; txHash?: string; method?: string; error?: string }> {
-    const ct = new Contract(CT_ADDRESS, CT_ABI);
-    const calldata = ct.interface.encodeFunctionData('redeemPositions', [
-      USDC_ADDRESS, ZERO_BYTES32, conditionId, [1, 2]
-    ]);
+  private async redeemByConditionId(conditionId: string, isNegRisk = false): Promise<{ success: boolean; txHash?: string; method?: string; error?: string }> {
+    let targetAddress: string;
+    let calldata: string;
+
+    if (isNegRisk) {
+      // NegRisk: get actual token balances, then call NegRiskAdapter.redeemPositions
+      const provider = this.connectedWallet?.provider || new JsonRpcProvider(POLYGON_RPC);
+      const ct = new Contract(CT_ADDRESS, CT_ABI, provider);
+
+      const [collYes, collNo] = await Promise.all([
+        ct.getCollectionId(ZERO_BYTES32, conditionId, 1),
+        ct.getCollectionId(ZERO_BYTES32, conditionId, 2),
+      ]);
+      const [posIdYes, posIdNo] = await Promise.all([
+        ct.getPositionId(WRAPPED_COL, collYes),
+        ct.getPositionId(WRAPPED_COL, collNo),
+      ]);
+      const [balYes, balNo] = await Promise.all([
+        ct.balanceOf(this.funderAddress, posIdYes),
+        ct.balanceOf(this.funderAddress, posIdNo),
+      ]);
+
+      if (balYes.toNumber() === 0 && balNo.toNumber() === 0) {
+        return { success: false, error: 'no_tokens_to_redeem' };
+      }
+
+      const adapter = new Contract(NEGRISK_ADAPTER, NEGRISK_ABI);
+      calldata = adapter.interface.encodeFunctionData('redeemPositions', [
+        conditionId, [balYes.toNumber(), balNo.toNumber()]
+      ]);
+      targetAddress = NEGRISK_ADAPTER;
+    } else {
+      // Regular: call CT.redeemPositions directly
+      const ct = new Contract(CT_ADDRESS, CT_ABI);
+      calldata = ct.interface.encodeFunctionData('redeemPositions', [
+        USDC_ADDRESS, ZERO_BYTES32, conditionId, [1, 2]
+      ]);
+      targetAddress = CT_ADDRESS;
+    }
 
     // Try gasless relay first
     if (this.relayClient) {
       try {
         const response = await this.relayClient.execute(
-          [{ to: CT_ADDRESS, data: calldata, value: '0' }],
-          'redeem'
+          [{ to: targetAddress, data: calldata, value: '0' }],
+          isNegRisk ? 'redeem-negrisk' : 'redeem'
         );
         const result = await response.wait();
         if (result) {
-          return { success: true, txHash: result.transactionHash, method: 'relay' };
+          return { success: true, txHash: result.transactionHash, method: isNegRisk ? 'relay-negrisk' : 'relay' };
         }
       } catch {
         // Fall through to on-chain
@@ -253,7 +299,7 @@ export class AutoRedeemer {
     if (this.connectedWallet) {
       try {
         const proxy = new Contract(this.funderAddress, PROXY_ABI, this.connectedWallet);
-        const tx = await proxy.exec(CT_ADDRESS, 0, calldata);
+        const tx = await proxy.exec(targetAddress, 0, calldata);
         const receipt = await tx.wait();
         return { success: true, txHash: receipt.transactionHash, method: 'onchain' };
       } catch (err: any) {
@@ -301,7 +347,8 @@ export class AutoRedeemer {
       };
 
       try {
-        const result = await this.redeemByConditionId(pos.conditionId);
+        const isNegRisk = pos.negativeRisk === true;
+        const result = await this.redeemByConditionId(pos.conditionId, isNegRisk);
         if (result.success) {
           results.redeemed++;
           Object.assign(detail, { status: 'redeemed', txHash: result.txHash, method: result.method });

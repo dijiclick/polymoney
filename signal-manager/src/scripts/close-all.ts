@@ -30,7 +30,15 @@ const CHAIN_ID = 137;
 const POLYGON_RPC = 'https://polygon-bor-rpc.publicnode.com';
 const CT_ADDRESS = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
-const CT_ABI = ['function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external'];
+const NEGRISK_ADAPTER = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
+const WRAPPED_COL = '0x3A3BD7bb9528E159577F7C2e685CC81A765002E2';
+const CT_ABI = [
+  'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external',
+  'function balanceOf(address owner, uint256 id) view returns (uint256)',
+  'function getCollectionId(bytes32 parentCollectionId, bytes32 conditionId, uint256 indexSet) view returns (bytes32)',
+  'function getPositionId(address collateralToken, bytes32 collectionId) view returns (uint256)',
+];
+const NEGRISK_ABI = ['function redeemPositions(bytes32 conditionId, uint256[] amounts) external'];
 const PROXY_ABI = ['function exec(address to, uint256 value, bytes data) external returns (bool, bytes memory)'];
 const ZERO_BYTES32 = '0x' + '0'.repeat(64);
 
@@ -47,6 +55,7 @@ interface Position {
   endDate: string;
   proxyWallet?: string;
   conditionId?: string;
+  negativeRisk?: boolean;
 }
 
 function log(msg: string) {
@@ -86,6 +95,7 @@ async function fetchPositions(address: string): Promise<Position[]> {
     endDate: p.endDate || '',
     proxyWallet: p.proxyWallet,
     conditionId: p.conditionId,
+    negativeRisk: p.negativeRisk === true,
   }));
 }
 
@@ -128,23 +138,54 @@ async function redeemByConditionId(
   conditionId: string,
   funderAddress: string,
   connectedWallet: any,
-  relayClient: any
+  relayClient: any,
+  isNegRisk = false,
 ): Promise<{ success: boolean; txHash?: string; method?: string; error?: string }> {
-  const ct = new Contract(CT_ADDRESS, CT_ABI);
-  const calldata = ct.interface.encodeFunctionData('redeemPositions', [
-    USDC_ADDRESS, ZERO_BYTES32, conditionId, [1, 2]
-  ]);
+  let targetAddress: string;
+  let calldata: string;
+
+  if (isNegRisk) {
+    // NegRisk: get actual token balances, call NegRiskAdapter.redeemPositions
+    const provider = connectedWallet?.provider || new JsonRpcProvider(POLYGON_RPC);
+    const ct = new Contract(CT_ADDRESS, CT_ABI, provider);
+    const [collYes, collNo] = await Promise.all([
+      ct.getCollectionId(ZERO_BYTES32, conditionId, 1),
+      ct.getCollectionId(ZERO_BYTES32, conditionId, 2),
+    ]);
+    const [posIdYes, posIdNo] = await Promise.all([
+      ct.getPositionId(WRAPPED_COL, collYes),
+      ct.getPositionId(WRAPPED_COL, collNo),
+    ]);
+    const [balYes, balNo] = await Promise.all([
+      ct.balanceOf(funderAddress, posIdYes),
+      ct.balanceOf(funderAddress, posIdNo),
+    ]);
+    if (balYes.toNumber() === 0 && balNo.toNumber() === 0) {
+      return { success: false, error: 'no_tokens_to_redeem' };
+    }
+    const adapter = new Contract(NEGRISK_ADAPTER, NEGRISK_ABI);
+    calldata = adapter.interface.encodeFunctionData('redeemPositions', [
+      conditionId, [balYes.toNumber(), balNo.toNumber()]
+    ]);
+    targetAddress = NEGRISK_ADAPTER;
+  } else {
+    const ct = new Contract(CT_ADDRESS, CT_ABI);
+    calldata = ct.interface.encodeFunctionData('redeemPositions', [
+      USDC_ADDRESS, ZERO_BYTES32, conditionId, [1, 2]
+    ]);
+    targetAddress = CT_ADDRESS;
+  }
 
   // Method 1: Gasless relay
   if (relayClient) {
     try {
       const response = await relayClient.execute(
-        [{ to: CT_ADDRESS, data: calldata, value: '0' }],
-        'redeem'
+        [{ to: targetAddress, data: calldata, value: '0' }],
+        isNegRisk ? 'redeem-negrisk' : 'redeem'
       );
       const result = await response.wait();
       if (result) {
-        return { success: true, txHash: result.transactionHash, method: 'relay' };
+        return { success: true, txHash: result.transactionHash, method: isNegRisk ? 'relay-negrisk' : 'relay' };
       }
     } catch {
       // Fall through
@@ -155,7 +196,7 @@ async function redeemByConditionId(
   if (connectedWallet) {
     try {
       const proxy = new Contract(funderAddress, PROXY_ABI, connectedWallet);
-      const tx = await proxy.exec(CT_ADDRESS, 0, calldata);
+      const tx = await proxy.exec(targetAddress, 0, calldata);
       const receipt = await tx.wait();
       return { success: true, txHash: receipt.transactionHash, method: 'onchain' };
     } catch (err: any) {
@@ -312,7 +353,7 @@ async function main() {
       log(`\nRedeeming: ${pos.title} (conditionId: ${conditionId?.slice(0, 10)}...)...`);
 
       try {
-        const result = await redeemByConditionId(conditionId, funderAddress, connectedWallet, relayClient);
+        const result = await redeemByConditionId(conditionId, funderAddress, connectedWallet, relayClient, pos.negativeRisk === true);
         if (result.success) {
           log(`  ✅ REDEEMED (${result.method}) | tx: ${result.txHash}`);
         } else {
