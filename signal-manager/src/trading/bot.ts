@@ -289,6 +289,21 @@ export class TradingBot extends EventEmitter {
         size = Math.ceil(1 / req.price);
       }
 
+      // Ensure makerAmount (size * price) has max 2 decimal places — Polymarket CLOB rejects >2dp
+      // For prices with 3dp (tick_size=0.001), e.g. 21*0.049=1.029 → bump to next clean amount
+      {
+        const cost = size * req.price;
+        const rounded = Math.round(cost * 100) / 100;
+        if (Math.abs(cost - rounded) > 1e-8) {
+          // Find next size where cost is clean to 2dp
+          for (let s = size + 1; s <= size + 50; s++) {
+            const c = s * req.price;
+            const r = Math.round(c * 100) / 100;
+            if (Math.abs(c - r) < 1e-8) { size = s; break; }
+          }
+        }
+      }
+
       // Use createAndPostOrder for all order types (explicit price control)
       const orderType = req.orderType === 'GTD' ? OrderType.GTD
         : req.orderType === 'GTC' ? OrderType.GTC

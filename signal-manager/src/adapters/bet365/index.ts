@@ -6,6 +6,7 @@ import type { Bet365AdapterConfig } from '../../types/config.js';
 import type { AdapterEventUpdate } from '../../types/adapter-update.js';
 import type { EventStatus } from '../../types/unified-event.js';
 import { createLogger } from '../../util/logger.js';
+import { mapBet365Odds } from './market-map.js';
 
 const log = createLogger('bet365-adapter');
 
@@ -104,8 +105,8 @@ export class Bet365Adapter implements IAdapter {
       log.info(msg);
     });
 
-    this.client.on('snapshot', ({ events, total }: any) => {
-      log.info(`Bet365 snapshot: ${events} events (total: ${total})`);
+    this.client.on('snapshot', ({ events, total, withOdds }: any) => {
+      log.info(`Bet365 snapshot: ${events} events (total: ${total}, with odds: ${withOdds || 0})`);
     });
 
     this.client.on('update', (data: any) => {
@@ -155,7 +156,7 @@ export class Bet365Adapter implements IAdapter {
           ? Bet365Client.matchMinute(match) + "'"
           : '',
       },
-      markets: [],
+      markets: match.odds ? mapBet365Odds(match.odds) : [],
       timestamp: Date.now(),
     };
   }

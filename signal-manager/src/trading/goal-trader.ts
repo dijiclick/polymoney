@@ -232,6 +232,9 @@ export class GoalTrader {
     const match = this.matchName(event);
     const sport = event.sport || '';
 
+    // Only soccer in activity log (matches trading scope)
+    if (sport !== 'soccer') return;
+
     if (!this.config.enabled) {
       if (event.stats.score && event._prevScore) {
         const sc = event.stats.score, ps = event._prevScore;
@@ -239,9 +242,6 @@ export class GoalTrader {
       }
       return;
     }
-
-    // Only auto-trade goals in soccer matches
-    if (sport !== 'soccer') return;
     if (!event.stats.score) {
       return;
     }

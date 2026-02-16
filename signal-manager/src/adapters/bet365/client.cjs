@@ -61,7 +61,7 @@ const os = require('os');
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const CONFIG = {
-  url: 'https://www.bet365.com/#/IP/',
+  url: 'https://www.bet365.com/#/IP/B1/',  // B1 = Soccer in-play (subscribes to OVInPlay with market data)
   cdpUrl: 'http://localhost:9222',
   inPlayTopic: 'InPlay_1_9',
   ovInPlayTopic: 'OVInPlay_1_9',
@@ -701,6 +701,8 @@ class Bet365Client extends EventEmitter {
 
     let currentSport = null;
     let currentComp = null;
+    let currentFI = null;
+    let currentMA = null;
     let eventCount = 0;
 
     for (const node of nodes) {
@@ -709,6 +711,8 @@ class Bet365Client extends EventEmitter {
           id: node.fields.IT || node.fields.ID,
           name: node.fields.NA,
         };
+        currentFI = null;
+        currentMA = null;
         continue;
       }
 
@@ -717,12 +721,16 @@ class Bet365Client extends EventEmitter {
           id: node.fields.IT || node.fields.ID,
           name: node.fields.NA,
         };
+        currentFI = null;
+        currentMA = null;
         continue;
       }
 
       if (node.nodeType === 'EV') {
         const fi = extractFI(node.fields);
         if (!fi) continue;
+        currentFI = fi;
+        currentMA = null;
 
         // Apply sport filter
         if (this._sportFilter && currentSport?.name !== this._sportFilter) continue;
@@ -731,12 +739,46 @@ class Bet365Client extends EventEmitter {
         const event = this._createEvent(node.fields, currentSport, currentComp);
         this._events.set(fi, event);
         eventCount++;
+        continue;
+      }
+
+      // Market node (child of EV)
+      if (node.nodeType === 'MA' && currentFI) {
+        const event = this._events.get(currentFI);
+        if (!event) continue;
+        const maId = node.fields.ID || node.fields.IT || '';
+        currentMA = maId;
+        event.odds[maId] = {
+          name: node.fields.NA || '',
+          suspended: node.fields.SU === '1',
+          selections: {},
+        };
+        continue;
+      }
+
+      // Participant/Selection node (child of MA)
+      if (node.nodeType === 'PA' && currentFI && currentMA) {
+        const event = this._events.get(currentFI);
+        if (!event || !event.odds[currentMA]) continue;
+        const paId = node.fields.ID || node.fields.IT || '';
+        const odds = node.fields.OD ? parseFloat(node.fields.OD) : null;
+        event.odds[currentMA].selections[paId] = {
+          name: node.fields.NA || '',
+          odds: odds,
+          handicap: node.fields.HD || null,
+        };
+        continue;
       }
     }
 
     if (eventCount > 0) {
+      // Count events with market data for diagnostics
+      let withOdds = 0;
+      for (const ev of this._events.values()) {
+        if (Object.keys(ev.odds).length > 0) withOdds++;
+      }
       this._snapshotReceived = true;
-      this.emit('snapshot', { topic, events: eventCount, total: this._events.size });
+      this.emit('snapshot', { topic, events: eventCount, total: this._events.size, withOdds });
 
       if (this._startResolve) {
         this._startResolve();
@@ -753,6 +795,10 @@ class Bet365Client extends EventEmitter {
 
     let currentSport = null;
     let currentComp = null;
+    let currentFI = null;
+    let currentMA = null;
+    const emittedEvents = new Set();
+    const oddsChangedEvents = new Set();
 
     for (const node of nodes) {
       if (node.nodeType === 'CL') {
@@ -760,6 +806,8 @@ class Bet365Client extends EventEmitter {
           id: node.fields.IT || node.fields.ID,
           name: node.fields.NA,
         };
+        currentFI = null;
+        currentMA = null;
         continue;
       }
 
@@ -768,12 +816,16 @@ class Bet365Client extends EventEmitter {
           id: node.fields.IT || node.fields.ID,
           name: node.fields.NA,
         };
+        currentFI = null;
+        currentMA = null;
         continue;
       }
 
       if (node.nodeType === 'EV' || node.nodeType === null) {
         const fi = extractFI(node.fields) || this._fixtureIdFromTopic(topic);
         if (!fi) continue;
+        currentFI = fi;
+        currentMA = null;
 
         const existing = this._events.get(fi);
         if (!existing) {
@@ -784,6 +836,7 @@ class Bet365Client extends EventEmitter {
           const event = this._createEvent(node.fields, currentSport, currentComp);
           this._events.set(fi, event);
           this.emit('update', { fixtureId: fi, match: event, receiveTs: Date.now() });
+          emittedEvents.add(fi);
           continue;
         }
 
@@ -792,9 +845,62 @@ class Bet365Client extends EventEmitter {
         this._applyDelta(existing, node.fields, currentSport, currentComp);
         this._detectChanges(snap, existing, receiveTs);
         this.emit('update', { fixtureId: fi, match: existing, receiveTs });
+        emittedEvents.add(fi);
+        continue;
       }
 
-      // Handle DELETE
+      // Market node delta
+      if (node.nodeType === 'MA') {
+        if (!currentFI) currentFI = this._fixtureIdFromTopic(topic);
+        if (!currentFI) continue;
+        const event = this._events.get(currentFI);
+        if (!event) continue;
+        const maId = node.fields.ID || node.fields.IT || '';
+        currentMA = maId;
+
+        if (node.dataType === DATA.DELETE) {
+          delete event.odds[maId];
+        } else if (!event.odds[maId]) {
+          event.odds[maId] = {
+            name: node.fields.NA || '',
+            suspended: node.fields.SU === '1',
+            selections: {},
+          };
+        } else {
+          if (node.fields.NA !== undefined) event.odds[maId].name = node.fields.NA;
+          if (node.fields.SU !== undefined) event.odds[maId].suspended = node.fields.SU === '1';
+        }
+        oddsChangedEvents.add(currentFI);
+        continue;
+      }
+
+      // Participant/Selection delta
+      if (node.nodeType === 'PA') {
+        if (!currentFI) currentFI = this._fixtureIdFromTopic(topic);
+        if (!currentFI || !currentMA) continue;
+        const event = this._events.get(currentFI);
+        if (!event || !event.odds[currentMA]) continue;
+        const paId = node.fields.ID || node.fields.IT || '';
+
+        if (node.dataType === DATA.DELETE) {
+          delete event.odds[currentMA].selections[paId];
+        } else if (!event.odds[currentMA].selections[paId]) {
+          event.odds[currentMA].selections[paId] = {
+            name: node.fields.NA || '',
+            odds: node.fields.OD ? parseFloat(node.fields.OD) : null,
+            handicap: node.fields.HD || null,
+          };
+        } else {
+          const sel = event.odds[currentMA].selections[paId];
+          if (node.fields.NA !== undefined) sel.name = node.fields.NA;
+          if (node.fields.OD !== undefined) sel.odds = parseFloat(node.fields.OD);
+          if (node.fields.HD !== undefined) sel.handicap = node.fields.HD;
+        }
+        oddsChangedEvents.add(currentFI);
+        continue;
+      }
+
+      // Handle DELETE for EV nodes
       if (node.dataType === DATA.DELETE && node.nodeType === 'EV') {
         const fi = extractFI(node.fields);
         if (fi && this._events.has(fi)) {
@@ -802,6 +908,15 @@ class Bet365Client extends EventEmitter {
           this._events.delete(fi);
           this.emit('eventRemoved', { fixtureId: fi, match: removed });
         }
+      }
+    }
+
+    // Emit updates for events with odds changes not already emitted via EV processing
+    for (const fi of oddsChangedEvents) {
+      if (emittedEvents.has(fi)) continue;
+      const event = this._events.get(fi);
+      if (event) {
+        this.emit('update', { fixtureId: fi, match: event, receiveTs: Date.now() });
       }
     }
   }
@@ -841,6 +956,7 @@ class Bet365Client extends EventEmitter {
       suspended: fields.SU === '1',
       videoAvailable: fields.VI === '1',
       comment: fields.UC || null,
+      odds: {},  // { [maId]: { name, suspended, selections: { [paId]: { name, odds, handicap } } } }
       lastUpdate: Date.now(),
       raw: { ...fields },
     };

@@ -6,9 +6,10 @@
 import type { IFilterableAdapter, AdapterStatus, UpdateCallback } from '../adapter.interface.js';
 import type { SofaScoreAdapterConfig } from '../../types/config.js';
 import type { TargetEvent } from '../../types/target-event.js';
-import type { AdapterEventUpdate } from '../../types/adapter-update.js';
+import type { AdapterEventUpdate, AdapterMarketUpdate } from '../../types/adapter-update.js';
 import { TargetEventFilter } from '../../matching/target-filter.js';
 import { createLogger } from '../../util/logger.js';
+import { encodeThreshold } from '../../types/market-keys.js';
 import WebSocket from 'ws';
 
 const log = createLogger('sofascore');
@@ -244,8 +245,132 @@ export class SofaScoreAdapter implements IFilterableAdapter {
         }
       }
       log.info(`SofaScore discovery: ${this.matchMeta.size} matches cached`);
+
+      // Fetch odds for matched events via REST API
+      if (this.config.includeOdds) {
+        await this.fetchOdds();
+      }
     } catch (err: any) {
       log.error(`SofaScore discovery failed: ${err.message}`);
     }
   }
+
+  private async fetchOdds(): Promise<void> {
+    const matchedIds = [...this.matchMeta.entries()]
+      .filter(([_, meta]) => meta.homeTeam && meta.awayTeam && this.targetFilter.check(meta.homeTeam, meta.awayTeam).matched)
+      .map(([id]) => id)
+      .slice(0, 20);
+
+    let fetched = 0;
+    for (const eventId of matchedIds) {
+      try {
+        const resp = await fetch(
+          `https://api.sofascore.com/api/v1/event/${eventId}/odds/1/all`,
+          { headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(5000) }
+        );
+        if (!resp.ok) continue;
+        const data = await resp.json() as any;
+        const markets = this.mapSofaOdds(data);
+        if (markets.length > 0 && this.callback) {
+          const meta = this.matchMeta.get(eventId)!;
+          this.callback({
+            sourceId: this.sourceId,
+            sourceEventId: `sofascore_${eventId}`,
+            sport: meta.sport,
+            league: meta.league,
+            startTime: meta.startTime,
+            homeTeam: meta.homeTeam,
+            awayTeam: meta.awayTeam,
+            markets,
+            timestamp: Date.now(),
+          });
+          fetched++;
+        }
+        // Small delay between requests to avoid rate limiting
+        await new Promise(r => setTimeout(r, 300));
+      } catch {
+        // Skip failed event silently
+      }
+    }
+    if (fetched > 0) log.info(`SofaScore odds: fetched ${fetched}/${matchedIds.length} matched events`);
+  }
+
+  private mapSofaOdds(data: any): AdapterMarketUpdate[] {
+    const result: AdapterMarketUpdate[] = [];
+    const markets = data?.markets || [];
+
+    for (const mkt of markets) {
+      const mn = (mkt.marketName || '').toLowerCase().trim();
+      const choices = mkt.choices || [];
+
+      // Full Time Result / 1X2
+      if (mn === 'full time' || mn === 'match winner' || mn === '1x2' || mn === 'full time result') {
+        for (const c of choices) {
+          const odds = parseFractional(c.fractionalValue);
+          if (!odds) continue;
+          if (c.name === '1') result.push({ key: 'ml_home_ft', value: odds });
+          else if (c.name === 'X' || c.name === 'x') result.push({ key: 'draw_ft', value: odds });
+          else if (c.name === '2') result.push({ key: 'ml_away_ft', value: odds });
+        }
+        continue;
+      }
+
+      // Double Chance
+      if (mn === 'double chance') {
+        for (const c of choices) {
+          const odds = parseFractional(c.fractionalValue);
+          if (!odds) continue;
+          if (c.name === '1X') result.push({ key: 'dc_1x_ft', value: odds });
+          else if (c.name === '12') result.push({ key: 'dc_12_ft', value: odds });
+          else if (c.name === 'X2') result.push({ key: 'dc_x2_ft', value: odds });
+        }
+        continue;
+      }
+
+      // Both Teams To Score
+      if (mn === 'both teams to score') {
+        for (const c of choices) {
+          const odds = parseFractional(c.fractionalValue);
+          if (!odds) continue;
+          const cn = c.name.toLowerCase();
+          if (cn === 'yes') result.push({ key: 'btts_yes_ft', value: odds });
+          else if (cn === 'no') result.push({ key: 'btts_no_ft', value: odds });
+        }
+        continue;
+      }
+
+      // Over/Under
+      const ouMatch = mn.match(/over\s*\/?\s*under\s*([\d.]+)/i) || mn.match(/total(?:\s*goals?)?\s*([\d.]+)/i);
+      if (ouMatch) {
+        const line = parseFloat(ouMatch[1]);
+        if (isNaN(line)) continue;
+        const thresh = encodeThreshold(line);
+        for (const c of choices) {
+          const odds = parseFractional(c.fractionalValue);
+          if (!odds) continue;
+          const cn = c.name.toLowerCase();
+          if (cn.includes('over')) result.push({ key: `o_${thresh}_ft`, value: odds });
+          else if (cn.includes('under')) result.push({ key: `u_${thresh}_ft`, value: odds });
+        }
+        continue;
+      }
+    }
+
+    return result;
+  }
+}
+
+/** Parse fractional odds "a/b" → decimal odds (1 + a/b), or parse decimal directly */
+function parseFractional(frac: string | undefined): number | null {
+  if (!frac) return null;
+  const parts = frac.split('/');
+  if (parts.length === 2) {
+    const num = parseFloat(parts[0]);
+    const den = parseFloat(parts[1]);
+    if (isNaN(num) || isNaN(den) || den === 0) return null;
+    return 1 + num / den;
+  }
+  // Maybe decimal already
+  const d = parseFloat(frac);
+  return isNaN(d) ? null : d;
 }

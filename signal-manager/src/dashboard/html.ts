@@ -69,6 +69,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .src-tag.pinn{background:rgba(245,158,11,.1);color:#f59e0b}
 .src-tag.thesports{background:rgba(139,92,246,.1);color:#8b5cf6}
 .src-tag.sofascore{background:rgba(139,92,246,.1);color:#8b5cf6}
+.src-tag.bet365{background:rgba(16,185,129,.1);color:#10b981}
 .lnk{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:3px;text-decoration:none;font-size:10px;transition:background .15s}
 .lnk-pm{background:rgba(59,130,246,.08);color:var(--blue)}
 .lnk-pm:hover{background:rgba(59,130,246,.2)}
@@ -83,7 +84,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .odds-tbl th:first-child{text-align:left}
 .odds-tbl td{padding:3px 4px;text-align:center;border-bottom:1px solid rgba(255,255,255,.02)}
 .odds-tbl td:first-child{text-align:left;color:var(--text-dim);font-weight:500;font-family:-apple-system,sans-serif}
-.c-pm{color:var(--blue)}.c-xb{color:var(--amber)}.c-kb{color:var(--green)}.c-pn{color:var(--text-dim)}.c-ts{color:#ec4899}.c-sf{color:#8b5cf6}
+.c-pm{color:var(--blue)}.c-xb{color:var(--amber)}.c-kb{color:var(--green)}.c-pn{color:var(--text-dim)}.c-sf{color:#8b5cf6}.c-b3{color:#10b981}
 .edge-hot{color:var(--green);font-weight:700;background:rgba(16,185,129,.06);border-radius:2px}
 .edge-pos{color:var(--green)}.edge-neg{color:var(--red)}
 
@@ -183,7 +184,7 @@ var SL={epl:'EPL',sea:'Serie A',lal:'La Liga',bun:'Bundesliga',fl1:'Ligue 1',ucl
 function sg(s){return SG[s]||SG[(s||'').split('_')[0]]||s||'Other';}
 function gi(g){return GI[g]||'\\uD83C\\uDFC6';}
 function sl(s){return SL[s]||s;}
-function srcN(s){return s==='polymarket'||s==='pm-sports-ws'?'PM':s==='onexbet'?'1xBet':s==='kambi'?'Kambi':s==='sofascore'?'Sofa':s==='thesports'?'TSprt':s==='pinnacle'?'Pinn':s==='flashscore'?'Flash':s;}
+function srcN(s){return s==='polymarket'?'PM':s==='pm-sports-ws'?'PM\\u00B7S':s==='onexbet'?'1xBet':s==='kambi'?'Kambi':s==='sofascore'?'Sofa':s==='thesports'?'TSprt':s==='pinnacle'?'Pinn':s==='flashscore'?'Flash':s==='bet365'?'B365':s;}
 
 /* ─── WebSocket ─── */
 function connect(){
@@ -281,7 +282,7 @@ function renderEv(ev,isLive){
     else cd='starting';
   }
   var mkeys=Object.keys(ev.markets).filter(function(k){return !k.startsWith('__')&&ev.markets[k].polymarket;});
-  var srcMap={polymarket:{l:'PM',c:'pm'},onexbet:{l:'1xBet',c:'xbet'},kambi:{l:'Kambi',c:'kambi'},pinnacle:{l:'Pinn',c:'pinn'},thesports:{l:'TSprt',c:'thesports'},sofascore:{l:'Sofa',c:'sofascore'}};
+  var srcMap={polymarket:{l:'PM',c:'pm'},onexbet:{l:'1xBet',c:'xbet'},kambi:{l:'Kambi',c:'kambi'},pinnacle:{l:'Pinn',c:'pinn'},thesports:{l:'TSprt',c:'thesports'},sofascore:{l:'Sofa',c:'sofascore'},bet365:{l:'B365',c:'bet365'}};
   var badges='';
   if(ev.sources){for(var s=0;s<ev.sources.length;s++){var m=srcMap[ev.sources[s]];if(m)badges+='<span class="src-tag '+m.c+'">'+m.l+'</span> ';}}
   var pmLink=ev.pmSlug?'<a href="https://polymarket.com/event/'+ev.pmSlug+'" target="_blank" rel="noopener" class="lnk lnk-pm" onclick="event.stopPropagation()">\\u2197</a>':'';
@@ -301,12 +302,12 @@ function renderOdds(ev,mkeys){
     function o(k){if(k.startsWith('ml_home'))return 0;if(k.startsWith('ml_away'))return 1;if(k.startsWith('draw'))return 2;return 3;}
     var d=o(a)-o(b);if(d!==0)return d;return a<b?-1:a>b?1:0;
   });
-  var h='<table class="odds-tbl"><thead><tr><th>Market</th><th class="c-pm">PM</th><th class="c-xb">1xBet</th><th class="c-kb">Kambi</th><th class="c-pn">Pinn</th><th class="c-ts">TSprt</th><th class="c-sf">Sofa</th><th>Edge</th></tr></thead><tbody>';
+  var h='<table class="odds-tbl"><thead><tr><th>Market</th><th class="c-pm">PM</th><th class="c-xb">1xBet</th><th class="c-kb">Kambi</th><th class="c-pn">Pinn</th><th class="c-sf">Sofa</th><th class="c-b3">B365</th><th>Edge</th></tr></thead><tbody>';
   for(var i=0;i<Math.min(sorted.length,15);i++){
     var k=sorted[i],srcs=ev.markets[k];
-    var pm=srcs.polymarket,xb=srcs.onexbet,kb=srcs.kambi,pn=srcs.pinnacle,ts=srcs.thesports,sf=srcs.sofascore;
-    var pmP=pm?(1/pm.value*100):null,xbP=xb?(1/xb.value*100):null,kbP=kb?(1/kb.value*100):null,pnP=pn?(1/pn.value*100):null,tsP=ts?(1/ts.value*100):null,sfP=sf?(1/sf.value*100):null;
-    var allSec=[xbP,kbP,pnP,tsP,sfP].filter(function(v){return v!==null;});
+    var pm=srcs.polymarket,xb=srcs.onexbet,kb=srcs.kambi,pn=srcs.pinnacle,sf=srcs.sofascore,b3=srcs.bet365;
+    var pmP=pm?(1/pm.value*100):null,xbP=xb?(1/xb.value*100):null,kbP=kb?(1/kb.value*100):null,pnP=pn?(1/pn.value*100):null,sfP=sf?(1/sf.value*100):null,b3P=b3?(1/b3.value*100):null;
+    var allSec=[xbP,kbP,pnP,sfP,b3P].filter(function(v){return v!==null;});
     var secBest=allSec.length>0?Math.max.apply(null,allSec):null;
     var edge=(pmP!==null&&secBest!==null)?secBest-pmP:null;
     var edgeAbs=edge!==null?Math.abs(edge):0;
@@ -316,8 +317,8 @@ function renderOdds(ev,mkeys){
       +'<td class="c-xb">'+(xbP!==null?xbP.toFixed(1)+'%':'\\u2014')+'</td>'
       +'<td class="c-kb">'+(kbP!==null?kbP.toFixed(1)+'%':'\\u2014')+'</td>'
       +'<td class="c-pn">'+(pnP!==null?pnP.toFixed(1)+'%':'\\u2014')+'</td>'
-      +'<td class="c-ts">'+(tsP!==null?tsP.toFixed(1)+'%':'\\u2014')+'</td>'
       +'<td class="c-sf">'+(sfP!==null?sfP.toFixed(1)+'%':'\\u2014')+'</td>'
+      +'<td class="c-b3">'+(b3P!==null?b3P.toFixed(1)+'%':'\\u2014')+'</td>'
       +'<td class="'+eCls+'">'+(edge!==null?(edge>0?'+':'')+edge.toFixed(1)+'%':'\\u2014')+'</td></tr>';
   }
   h+='</tbody></table>';
@@ -329,7 +330,7 @@ function renderLogs(){
   var el=document.getElementById('p-logs');
   var sl=state.speedLog||[];
   if(sl.length===0){el.innerHTML='<div class="empty">No source races yet — waiting for score changes across multiple sources</div>';return;}
-  var srcList=['kambi','onexbet','pinnacle','pm-sports-ws','sofascore','thesports'];
+  var srcList=['kambi','onexbet','pinnacle','pm-sports-ws','sofascore','thesports','bet365'];
   var h='<table class="log-tbl"><thead><tr><th>Match</th><th>Score</th>';
   for(var si=0;si<srcList.length;si++)h+='<th>'+srcN(srcList[si])+'</th>';
   h+='</tr></thead><tbody>';
