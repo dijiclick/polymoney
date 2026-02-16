@@ -138,6 +138,9 @@ export class TradingController {
     // Auto-trade only soccer events
     if (opp.sport !== 'soccer') return;
 
+    // Only auto-trade moneyline markets (not over/under, handicap, etc.)
+    if (!opp.market.startsWith('ml_') && opp.market !== 'draw_ft') return;
+
     // One trade per event — avoid buying both sides or multiple markets
     if (this.tradedEvents.has(opp.eventId)) return;
 
