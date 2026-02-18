@@ -25,7 +25,7 @@ export function startEventSyncer(state: State): void {
 
 async function syncEvents(state: State): Promise<void> {
   // Fetch newest events (sorted by id desc, latest first)
-  const url = `${config.GAMMA_BASE}/events?exclude_tag_id=${config.CRYPTO_TAG_ID}&order=id&ascending=false&limit=100`;
+  const url = `${config.GAMMA_BASE}/events?exclude_tag_id=${config.CRYPTO_TAG_ID}&order=id&ascending=false&limit=100&active=true&closed=false`;
 
   const res = await fetch(url);
   if (!res.ok) {

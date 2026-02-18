@@ -65,7 +65,7 @@ export async function backfill(state: State): Promise<void> {
 
   while (true) {
     page++;
-    const url = `${config.GAMMA_BASE}/events?exclude_tag_id=${config.CRYPTO_TAG_ID}&limit=${config.GAMMA_PAGE_SIZE}&offset=${offset}&active=true`;
+    const url = `${config.GAMMA_BASE}/events?exclude_tag_id=${config.CRYPTO_TAG_ID}&limit=${config.GAMMA_PAGE_SIZE}&offset=${offset}&active=true&closed=false`;
 
     let events: GammaEvent[];
     try {
@@ -112,6 +112,13 @@ export async function backfill(state: State): Promise<void> {
       totalEvents++;
 
       for (const mkt of event.markets || []) {
+        // Skip fully resolved markets (UMA-settled, payout done)
+        let statuses = mkt.umaResolutionStatuses || [];
+        if (typeof statuses === 'string') {
+          try { statuses = JSON.parse(statuses); } catch { statuses = []; }
+        }
+        if (Array.isArray(statuses) && statuses.some((s: any) => s === 'settled' || s?.status === 'settled')) continue;
+
         const qNorm = normalize(mkt.question);
         const marketRow: UmaMarketRow = {
           event_id: eventDbId,
