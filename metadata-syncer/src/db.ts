@@ -67,7 +67,7 @@ export interface MarketRow {
 export async function upsertEvent(row: EventRow): Promise<number | null> {
   const db = getDb();
   const { data, error } = await db
-    .from('uma_events')
+    .from('alphafinder_events')
     .upsert(
       { ...row, updated_at: new Date().toISOString() },
       { onConflict: 'polymarket_event_id' }
@@ -85,7 +85,7 @@ export async function upsertEvent(row: EventRow): Promise<number | null> {
 export async function upsertMarket(row: MarketRow): Promise<number | null> {
   const db = getDb();
   const { data, error } = await db
-    .from('uma_markets')
+    .from('alphafinder_markets')
     .upsert(
       { ...row, updated_at: new Date().toISOString() },
       { onConflict: 'polymarket_market_id' }
@@ -102,7 +102,7 @@ export async function upsertMarket(row: MarketRow): Promise<number | null> {
 
 export async function verifyConnection(): Promise<number> {
   const db = getDb();
-  const { count, error } = await db.from('uma_events').select('*', { count: 'exact', head: true });
+  const { count, error } = await db.from('alphafinder_events').select('*', { count: 'exact', head: true });
   if (error) throw new Error(`Supabase connection failed: ${error.message}`);
   return count ?? 0;
 }
@@ -110,8 +110,8 @@ export async function verifyConnection(): Promise<number> {
 export async function getCounts(): Promise<{ events: number; markets: number }> {
   const db = getDb();
   const [e, m] = await Promise.all([
-    db.from('uma_events').select('*', { count: 'exact', head: true }),
-    db.from('uma_markets').select('*', { count: 'exact', head: true }),
+    db.from('alphafinder_events').select('*', { count: 'exact', head: true }),
+    db.from('alphafinder_markets').select('*', { count: 'exact', head: true }),
   ]);
   return { events: e.count ?? 0, markets: m.count ?? 0 };
 }
