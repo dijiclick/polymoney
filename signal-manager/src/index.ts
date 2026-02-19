@@ -16,11 +16,8 @@ import { DEFAULT_CONFIG } from '../config/default.js';
 import { setLogLevel, createLogger } from './util/logger.js';
 import { oddsDivergenceSignal, scoreChangeSignal, staleOddsSignal } from './signals/index.js';
 import { tradingSignal, scoreTradeSignal, setOpportunityCallback } from './signals/trading.js';
-import { reactionTimerSignal } from './signals/reaction-timer.js';
-import { goalLoggerSignal } from './signals/goal-logger.js';
 import { TradingBot } from './trading/bot.js';
 import { TradingController } from './trading/controller.js';
-import { GoalTrader } from './trading/goal-trader.js';
 import { AutoRedeemer } from './trading/redeemer.js';
 
 // Load .env file (no dotenv dependency needed)
@@ -58,9 +55,6 @@ async function main() {
   engine.registerSignal(staleOddsSignal);
   engine.registerSignal(tradingSignal);
   engine.registerSignal(scoreTradeSignal);
-  engine.registerSignal(reactionTimerSignal);
-  engine.registerSignal(goalLoggerSignal);
-
   // Register adapters
   if (config.adapters.polymarket.enabled) {
     engine.registerAdapter(new PolymarketAdapter(config.adapters.polymarket));
@@ -110,26 +104,13 @@ async function main() {
   // Wire auto-trade pipeline: new opportunities → controller.handleSignal
   setOpportunityCallback((opp) => tradingController.handleSignal(opp));
 
-  // Initialize GoalTrader (auto buy on goal + smart exit)
-  const goalTrader = new GoalTrader(tradingBot, {
-    enabled: process.env.POLY_GOALTRADER === 'true',
-    sizeLarge: 1.0,               // $1 flat for all goal types
-    sizeMedium: 1.0,
-    sizeSmall: 1.0,
-    preferFastestSource: false,   // Buy on first source — max speed
-    slowSourceDelayMs: 0,         // No delay
-  });
-  engine.registerSignal(goalTrader.signalHandler);
-  goalTrader.start();
-  tradingController.setGoalTrader(goalTrader);
-
   // Auto-redeemer for resolved positions
   let redeemer: AutoRedeemer | null = null;
 
   if (polyKey) {
     const ok = await tradingBot.initialize();
     if (ok) {
-      log.warn(`🤖 Trading: Armed=${tradingBot.isArmed ? '🔴 LIVE' : '🟢 DRY'} | AutoTrade=${process.env.POLY_AUTOTRADE === 'true' ? 'ON' : 'OFF'} | GoalTrader=${goalTrader.isEnabled ? 'ON' : 'OFF'} | MaxTrade=$${process.env.POLY_MAX_TRADE || '5'}`);
+      log.warn(`🤖 Trading: Armed=${tradingBot.isArmed ? '🔴 LIVE' : '🟢 DRY'} | AutoTrade=${process.env.POLY_AUTOTRADE === 'true' ? 'ON' : 'OFF'} | MaxTrade=$${process.env.POLY_MAX_TRADE || '5'}`);
     } else {
       log.warn('Trading bot failed to initialize');
     }
@@ -138,8 +119,6 @@ async function main() {
     redeemer = new AutoRedeemer(polyKey, process.env.POLY_FUNDER_ADDRESS || '', 60_000);
     redeemer.setTradingBot(tradingBot);
     redeemer.start();
-    // Wire redeemer to goal trader for immediate redeem after sells
-    goalTrader.setRedeemer(redeemer);
   } else {
     log.info('Trading bot: no POLY_PRIVATE_KEY set — trading disabled');
   }
